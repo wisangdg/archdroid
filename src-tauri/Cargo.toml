@@ -1,5 +1,5 @@
 [package]
-name = "cachydroid"
+name = "droiddeck"
 version = "0.1.0"
 description = "Android emulator manager (Waydroid) for Linux"
 authors = ["Wisang Drillian Geni <gwisang45@gmail.com>"]
@@ -9,7 +9,7 @@ rust-version = "1.77.2"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [lib]
-name = "cachydroid_lib"
+name = "droiddeck_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

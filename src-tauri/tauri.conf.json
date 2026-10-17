@@ -1,9 +1,9 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "CachyDroid",
-  "mainBinaryName": "cachydroid",
+  "productName": "DroidDeck",
+  "mainBinaryName": "droiddeck",
   "version": "0.1.0",
-  "identifier": "com.cachydroid.desktop",
+  "identifier": "io.github.droiddeck",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
@@ -13,9 +13,11 @@
   "app": {
     "windows": [
       {
-        "title": "CachyDroid",
-        "width": 800,
-        "height": 600,
+        "title": "DroidDeck",
+        "width": 1100,
+        "height": 720,
+        "minWidth": 860,
+        "minHeight": 580,
         "resizable": true,
         "fullscreen": false
       }
@@ -29,7 +31,7 @@
     "targets": "all",
     "category": "Utility",
     "shortDescription": "Android emulator manager for Linux",
-    "longDescription": "CachyDroid is an LDPlayer-style desktop front-end for Waydroid. It initializes the Android system image, starts and stops the engine, installs APKs, injects GApps and ARM translation (libhoudini), manages system properties, opens the shared folder and provides smart key mapping - all from a single window.",
+    "longDescription": "DroidDeck is an LDPlayer-style desktop front-end for Waydroid. It initializes the Android system image, starts and stops the engine, installs APKs, injects GApps and ARM translation (libhoudini), manages system properties, opens the shared folder and provides smart key mapping - all from a single window.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

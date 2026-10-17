@@ -24,7 +24,7 @@ pub struct CommandResult {
 }
 
 /// Sub directory of the user cache dir used for "this already happened" markers.
-const CACHE_SUBDIR: &str = "cachydroid";
+const CACHE_SUBDIR: &str = "droiddeck";
 
 /// First line echoed by an elevated shell. Lets us tell "the script ran as root"
 /// apart from "elevation itself failed" without parsing pkexec messages, which
@@ -71,7 +71,7 @@ fn sh_quote(value: &str) -> String {
 ///
 /// Elevated scripts run with a restrictive umask, so markers are created as
 /// `root:root 600` by default, which the unprivileged app could not read back.
-/// `cachydroid_marker` hands them to the desktop user instead.
+/// `droiddeck_marker` hands them to the desktop user instead.
 fn elevate_env(script: &str) -> String {
     let home = dirs::home_dir().unwrap_or_default();
     let path = std::env::var("PATH").unwrap_or_else(|_| "/usr/local/bin:/usr/bin:/bin".to_string());
@@ -79,14 +79,14 @@ fn elevate_env(script: &str) -> String {
     format!(
         r#"export HOME={home}
 export PATH={path}
-export CACHYDROID_CACHE={cache}
-mkdir -p "$CACHYDROID_CACHE"
-chmod 755 "$CACHYDROID_CACHE" 2>/dev/null || true
-chown "${{PKEXEC_UID:-${{SUDO_UID:-0}}}}" "$CACHYDROID_CACHE" 2>/dev/null || true
-cachydroid_marker() {{
-    echo installed > "$CACHYDROID_CACHE/$1"
-    chmod 644 "$CACHYDROID_CACHE/$1" 2>/dev/null || true
-    chown "${{PKEXEC_UID:-${{SUDO_UID:-0}}}}" "$CACHYDROID_CACHE/$1" 2>/dev/null || true
+export DROIDDECK_CACHE={cache}
+mkdir -p "$DROIDDECK_CACHE"
+chmod 755 "$DROIDDECK_CACHE" 2>/dev/null || true
+chown "${{PKEXEC_UID:-${{SUDO_UID:-0}}}}" "$DROIDDECK_CACHE" 2>/dev/null || true
+droiddeck_marker() {{
+    echo installed > "$DROIDDECK_CACHE/$1"
+    chmod 644 "$DROIDDECK_CACHE/$1" 2>/dev/null || true
+    chown "${{PKEXEC_UID:-${{SUDO_UID:-0}}}}" "$DROIDDECK_CACHE/$1" 2>/dev/null || true
 }}
 echo "{sentinel} (uid=$(id -u))"
 {script}
@@ -143,7 +143,7 @@ fn waydroid_status() -> CommandResult {
 
 #[tauri::command]
 fn waydroid_start() -> CommandResult {
-    // Utilize ananicy-cpp or high priority in CachyOS if possible, for now just standard start
+    // Start the Waydroid session; an optional scheduler hint (e.g. ananicy-cpp) can be added later
     let output = Command::new("waydroid")
         .arg("session")
         .arg("start")
@@ -380,12 +380,12 @@ fn waydroid_init(app: AppHandle) -> CommandResult {
     let script = r#"
 set -e
 if ! command -v waydroid > /dev/null; then
-    echo "==> Installing Waydroid from the CachyOS repositories..."
+    echo "==> Installing Waydroid from the system repositories..."
     pacman -S --noconfirm waydroid
 fi
 echo "==> Initializing Waydroid (this will download ~1GB of data)..."
 if waydroid init; then
-    rm -f "$CACHYDROID_CACHE/gapps_installed" "$CACHYDROID_CACHE/houdini_installed"
+    rm -f "$DROIDDECK_CACHE/gapps_installed" "$DROIDDECK_CACHE/houdini_installed"
     echo ""
     echo "[SUCCESS] Waydroid initialized successfully!"
 else
@@ -420,7 +420,7 @@ fn check_gapps_status() -> CommandResult {
             }
 
             // The image no longer carries GApps (e.g. it was re-initialized or wiped
-            // outside CachyDroid), so forget the marker instead of trusting it forever.
+            // outside DroidDeck), so forget the marker instead of trusting it forever.
             if marker.exists() {
                 let _ = std::fs::remove_file(&marker);
             }
@@ -527,8 +527,8 @@ fn waydroid_wipe(app: AppHandle) -> CommandResult {
     rm -rf /var/lib/waydroid
     rm -rf "$HOME/.local/share/waydroid"
     rm -rf "$HOME"/.local/share/applications/waydroid.*
-    rm -f "$CACHYDROID_CACHE/gapps_installed" "$CACHYDROID_CACHE/houdini_installed"
-    echo "[SYSTEM] Wipe complete! Please restart CachyDroid."
+    rm -f "$DROIDDECK_CACHE/gapps_installed" "$DROIDDECK_CACHE/houdini_installed"
+    echo "[SYSTEM] Wipe complete! Please restart DroidDeck."
     "#.to_string();
 
     stream_privileged_script(app, script);
@@ -557,7 +557,7 @@ if ! PYTHONUNBUFFERED=1 venv/bin/python3 main.py install gapps; then
     echo "[ERROR] Failed to install GApps."
     exit 1
 fi
-cachydroid_marker gapps_installed
+droiddeck_marker gapps_installed
 echo "[SUCCESS] GApps installation complete! Please Start Waydroid."
 "#.to_string();
 
@@ -593,7 +593,7 @@ if ! PYTHONUNBUFFERED=1 venv/bin/python3 main.py install libhoudini; then
     echo "[ERROR] ARM Translation installation failed!"
     exit 1
 fi
-cachydroid_marker houdini_installed
+droiddeck_marker houdini_installed
 echo "[SUCCESS] ARM Translation installation complete!"
     "#.to_string();
 
@@ -613,7 +613,7 @@ if [ ! -d "phantom" ]; then
 else
     cd phantom
     echo "[SYSTEM] Updating Phantom Keymapper..."
-    # The repository may have been cloned by the desktop user before CachyDroid
+    # The repository may have been cloned by the desktop user before DroidDeck
     # started running this script as root.
     git -c safe.directory="$PWD" pull
 fi
@@ -743,14 +743,14 @@ fn run_and_stream(app: &AppHandle, mut command: Command) -> StreamResult {
 /// into the user's home directory instead of `/root`.
 ///
 /// Elevation is tried through polkit first, because a polkit password dialog is
-/// drawn by a desktop agent and therefore also works when CachyDroid was started
+/// drawn by a desktop agent and therefore also works when DroidDeck was started
 /// from an app launcher. `sudo` remains the fallback because it can still prompt
 /// when the app was started from a terminal. Force either one with
-/// `CACHYDROID_ELEVATE=pkexec|sudo`.
+/// `DROIDDECK_ELEVATE=pkexec|sudo`.
 fn stream_privileged_script(app: AppHandle, script: String) {
     thread::spawn(move || {
         let body = elevate_env(&script);
-        let forced = std::env::var("CACHYDROID_ELEVATE").unwrap_or_default();
+        let forced = std::env::var("DROIDDECK_ELEVATE").unwrap_or_default();
 
         if forced != "sudo" {
             if let Some(command) = elevated_command("pkexec", &body) {
@@ -780,7 +780,7 @@ fn stream_privileged_script(app: AppHandle, script: String) {
         let attempt = run_and_stream(&app, command);
 
         if !attempt.success && !attempt.started {
-            let _ = app.emit("cmd-output", "[SYSTEM] Root access failed. Install a polkit authentication agent (for example hyprpolkitagent or polkit-gnome), or start CachyDroid from a terminal so sudo can ask for the password.".to_string());
+            let _ = app.emit("cmd-output", "[SYSTEM] Root access failed. Install a polkit authentication agent (for example hyprpolkitagent or polkit-gnome), or start DroidDeck from a terminal so sudo can ask for the password.".to_string());
         }
 
         let _ = app.emit("cmd-finished", attempt.success);
@@ -808,10 +808,10 @@ mod tests {
     fn elevated_script_keeps_user_environment_and_announces_itself() {
         let body = elevate_env("echo body");
         assert!(body.contains("export HOME='"));
-        assert!(body.contains("export CACHYDROID_CACHE='"));
+        assert!(body.contains("export DROIDDECK_CACHE='"));
         assert!(body.contains(CACHE_SUBDIR));
         assert!(body.contains(ELEVATED_SENTINEL));
-        assert!(body.contains("cachydroid_marker()"));
+        assert!(body.contains("droiddeck_marker()"));
         assert!(body.trim_end().ends_with("echo body"));
     }
 
@@ -821,11 +821,11 @@ mod tests {
     fn markers_stay_readable_for_the_app_under_a_restrictive_umask() {
         use std::os::unix::fs::PermissionsExt;
 
-        let cache_root = std::env::temp_dir().join(format!("cachydroid-test-{}", std::process::id()));
+        let cache_root = std::env::temp_dir().join(format!("droiddeck-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&cache_root);
 
         std::env::set_var("XDG_CACHE_HOME", &cache_root);
-        let script = elevate_env("cachydroid_marker gapps_installed\n");
+        let script = elevate_env("droiddeck_marker gapps_installed\n");
         std::env::remove_var("XDG_CACHE_HOME");
 
         let output = Command::new("bash")
@@ -862,12 +862,12 @@ mod tests {
     #[test]
     fn resolve_program_only_returns_existing_files() {
         assert!(resolve_program("bash").is_some());
-        assert!(resolve_program("cachydroid-no-such-binary-12345").is_none());
+        assert!(resolve_program("droiddeck-no-such-binary-12345").is_none());
     }
 
     #[test]
     fn elevated_command_skips_missing_helpers() {
-        assert!(elevated_command("cachydroid-no-such-binary-12345", "true").is_none());
+        assert!(elevated_command("droiddeck-no-such-binary-12345", "true").is_none());
         let command = elevated_command("bash", "true").expect("bash should be resolvable");
         assert!(command.get_args().any(|arg| arg == "-c"));
     }

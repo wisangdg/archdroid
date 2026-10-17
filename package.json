@@ -1,8 +1,8 @@
 {
-  "name": "cachydroid",
+  "name": "droiddeck",
   "private": true,
   "version": "0.1.0",
-  "description": "CachyDroid - an LDPlayer-style Android emulator manager for Linux, powered by Waydroid",
+  "description": "DroidDeck - an LDPlayer-style Android emulator manager for Linux, powered by Waydroid",
   "type": "module",
   "scripts": {
     "dev": "vite",
