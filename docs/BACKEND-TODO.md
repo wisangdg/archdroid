@@ -34,37 +34,47 @@ Sumber fitur: hasil RE LDPlayer 9 (`~/Downloads/ldplayer-re/ANALYSIS-LDPlayer-CL
 
 ## 1. Fondasi (P0 — kerjakan duluan, membuka semua tahap berikut)
 
-- [ ] **P0 S — `src/waydroid.rs`: satu modul pembungkus CLI Waydroid**
+- [x] **P0 S — `src/waydroid.rs`: satu modul pembungkus CLI Waydroid**
   Semua panggilan (`status`, `session start|stop`, `container restart`, `app install|uninstall|launch|list`, `prop get|set`, `shell`, `init`, `show-full-ui`) lewat sini. Satu tempat untuk bangun argv + timeout.
-  *DoD:* `grep -c 'Command::new("waydroid")' src/lib.rs` == 0.
+  *DoD:* `grep -c 'Command::new("waydroid")' src/lib.rs` == 0. → **selesai**: 0 kemunculan. Yang sudah dibungkus: `status`, `session start|stop`, `app install|remove|launch|list`, `prop get|set`, `shell`, `--version`. Aksi lain (`container`, `show-full-ui`, `intent`, `logcat`) menyusul di §2.
 
-- [ ] **P0 S — Model error bertipe**
+- [x] **P0 S — Model error bertipe**
   Ganti `CommandResult{status:String}` dengan `type Result<T> = std::result::Result<T, AppError>`; `AppError` = `NotFound | NotInitialized | ElevationDenied | Timeout | Exit{code,String} | Io`.
-  *DoD:* serialisasi tetap `{status,data,message}` agar UI tidak pecah; unit test untuk tiap varian → pesan.
+  *DoD:* serialisasi tetap `{status,data,message}` agar UI tidak pecah; unit test untuk tiap varian → pesan. → **selesai**: `src/error.rs`; `AppError::code()` stabil; `From<AppError> for CommandResult`; `CommandResult` dapat field `code` opsional. 9 test di `error.rs`.
 
-- [ ] **P0 S — Preflight `waydroid`**
+- [x] **P0 S — Preflight `waydroid`**
   `fn waydroid_version() -> Result<String>` + deteksi "belum `waydroid init`".
-  *DoD:* test: PATH dikosongkan → `Err(NotFound)`; pesan error menyebut langkah perbaikan.
+  *DoD:* test: PATH dikosongkan → `Err(NotFound)`; pesan error menyebut langkah perbaikan. → **selesai**: `Waydroid::detect()` (PATH → `NotFound`) dan `Waydroid::run` memetakan pesan "not initialized" ke `NotInitialized` **meski exit code 0**; command `waydroid_version` didaftarkan.
 
-- [ ] **P0 M — Operasi panjang jadi non-blocking + bisa dibatalkan**
+- [ ] **P0 M — Operasi panjang jadi non-blocking + bisa dibatalkan**  ← **berikutnya**
   Bungkus dengan `tauri::async_runtime::spawn_blocking` + simpan `Child` di `State` supaya bisa `kill`.
   *DoD:* dua operasi panjang bersamaan tidak membekukan UI; tombol Cancel benar-benar menghentikan proses.
+  *(Timeout per kelas command sudah ada: 30s cepat / 120s normal / 1800s sama seperti default waydroid.)*
 
-- [ ] **P0 S — Audit injeksi shell**
+- [x] **P0 S — Audit injeksi shell**
   Telusuri semua script: pakai `sh_quote` untuk nilai dinamis.
-  *DoD:* test dengan payload `x'; rm -rf /tmp/x; echo '` → tidak tereksekusi.
+  *DoD:* test dengan payload `x'; rm -rf /tmp/x; echo '` → tidak tereksekusi. → **selesai untuk jalur waydroid**: argv dibangun sebagai elemen terpisah dan tidak pernah lewat shell (test `a_package_name_never_becomes_a_second_command`). Script root tetap memakai `sh_quote` seperti sebelumnya.
 
 - [ ] **P1 M — Aktifkan logging terstruktur**
   `tauri-plugin-log` sudah jadi dependency tapi belum di-`init()`. Catat setiap command + durasi.
   *DoD:* ada file log berisi jejak command.
 
-- [ ] **P1 S — Tambah unit test argv builder**
+- [x] **P1 S — Tambah unit test argv builder**
   Setiap helper murni (bangun argumen `waydroid app install`, parser `waydroid status`, dst) punya test.
-  *DoD:* `cargo test` naik dari 7 → ≥15 test, tanpa butuh root.
+  *DoD:* `cargo test` naik dari 7 → ≥15 test, tanpa butuh root. → **selesai**: **27** test, semuanya tanpa root (`/bin/echo`, `/bin/sh`, `/bin/sleep` dipakai sebagai stub).
 
 - [ ] **P2 S — Package manager multi-distro**
   Tiga script installer masih hardcode `pacman` (`waydroid_init`, `install_gapps`, `install_houdini`). Tambah pemilih `pacman|apt-get|dnf`.
   *DoD:* fungsi `install_pkg()` di script; test bahwa pemilihan benar berdasar `command -v`.
+
+### Temuan baru saat mengerjakan §1 (diverifikasi dari sumber waydroid 1.6.3)
+
+- **`waydroid shell` butuh root** (`actionNeedRoot` di `tools/__main__.py`), begitu juga `container …`. Artinya probe hidup untuk GApps/houdini (`shell pm list packages`, `shell getprop …`) **selalu gagal saat app jalan tanpa root** dan jawabannya sekarang bergantung pada marker. `probe()` sengaja menelan kegagalan itu. Perlu keputusan: jalankan probe lewat jalur privileged, atau pakai `adb` (`waydroid adb connect` + `adb shell`) yang tidak butuh root.
+- **`container start|stop|restart` butuh root** → `reboot()` (§2) tidak bisa lewat jalur biasa, harus lewat `stream_privileged_script`/`pkexec`.
+- **Aksi yang belum dibungkus**: `show-full-ui` (bukan `show full ui`), `app intent <ACTION> <URI>` (= padanan `--directlink`), `logcat`, `adb connect|disconnect`, `container freeze|unfreeze`.
+- **`/var/lib/waydroid/waydroid.cfg`** menyimpan bagian `[properties]` (override prop) plus `lcd_density`, `suspend_action`, `auto_adb`, `mount_overlays`, `vendor_type`, `arch`, `images_path` → bahan §3 (`profile_apply`, `globalsetting`).
+- **`CommandResult` sekarang punya field `code`** (`not_found`, `not_initialized`, `elevation_denied`, `timeout`, `exit`, `io`) sehingga frontend tidak perlu lagi mencocokkan teks pesan. Field lama tidak berubah.
+- Perubahan perilaku yang disengaja: `waydroid_stop` kini melaporkan **error** kalau `waydroid session stop` keluar non-nol (dulu selalu "success" asal proses berhasil di-spawn).
 
 ---
 
@@ -74,10 +84,10 @@ Sumber fitur: hasil RE LDPlayer 9 (`~/Downloads/ldplayer-re/ANALYSIS-LDPlayer-CL
 |---|---|---|---|
 | `list3` | `list_instances()` → `Vec<InstanceInfo>` | agregasi status+profil | **P0 S** |
 | `isrunning` | `is_running() -> bool` | parse `waydroid status` | **P0 S** |
-| `reboot` | `reboot()` | `waydroid container restart` | **P0 S** |
+| `reboot` | `reboot()` | `waydroid container restart` (**butuh root**) | **P0 S** |
 | `quitall` | *(pakai `waydroid_stop`)* | `waydroid session stop` | **P0 S** |
 | `killapp` | `kill_app(pkg)` | `am force-stop` | **P0 S** |
-| `adb --command` | `adb_cmd(cmd)` | `waydroid shell` | **P0 S** |
+| `adb --command` | `adb_cmd(cmd)` | `waydroid shell` (**butuh root**) atau `adb shell` | **P0 S** |
 | `getprop` (tanpa key) | `getprop_all()` | dump seluruh prop | **P0 S** |
 | `launch --wait` | `wait_for_boot(timeout_ms)` | poll `sys.boot_completed=1` | **P1 S** |
 | `setuplanguage` | `set_locale(tag)` | `prop set persist.sys.locale` | **P1 S** |

@@ -1,12 +1,16 @@
+use base64::{engine::general_purpose, Engine as _};
+use serde::{Deserialize, Serialize};
+use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
-use serde::{Serialize, Deserialize};
-use base64::{engine::general_purpose, Engine as _};
-use dirs;
-use std::io::{BufReader, Read};
 use std::thread;
 use tauri::{AppHandle, Emitter};
+
+mod error;
+mod waydroid;
+
+use error::AppError;
 
 #[derive(Serialize, Deserialize)]
 pub struct AppInfo {
@@ -21,6 +25,65 @@ pub struct CommandResult {
     pub status: String,
     pub data: Option<String>,
     pub message: Option<String>,
+    /// Stable machine readable reason, see `error::code`. `None` on success, so
+    /// the UI can branch on it instead of matching prose.
+    pub code: Option<String>,
+}
+
+impl CommandResult {
+    /// A command that finished and has nothing interesting to say.
+    fn success() -> Self {
+        Self {
+            status: "success".to_string(),
+            data: None,
+            message: None,
+            code: None,
+        }
+    }
+
+    /// A command whose stdout is the answer.
+    fn with_data(data: String) -> Self {
+        Self {
+            status: "success".to_string(),
+            data: Some(data),
+            message: None,
+            code: None,
+        }
+    }
+
+    /// A command that succeeded and wants to say so in words.
+    fn with_message(message: &str) -> Self {
+        Self {
+            status: "success".to_string(),
+            data: None,
+            message: Some(message.to_string()),
+            code: None,
+        }
+    }
+
+    /// The problem detection commands answer with their own status vocabulary
+    /// (`installed`, `partial`, `not_installed`), so they set it explicitly.
+    fn report(status: &str, message: &str) -> Self {
+        Self {
+            status: status.to_string(),
+            data: None,
+            message: Some(message.to_string()),
+            code: None,
+        }
+    }
+}
+
+/// Keep the wire contract the UI already relies on - a `status` plus a human
+/// readable `message` - and add the machine readable `code` next to it.
+impl From<AppError> for CommandResult {
+    fn from(error: AppError) -> Self {
+        Self {
+            status: "error".to_string(),
+            data: None,
+            message: Some(error.to_string()),
+            code: Some(error.code().to_string()),
+        }
+    }
 }
 
 /// Sub directory of the user cache dir used for "this already happened" markers.
@@ -35,7 +98,7 @@ const ELEVATED_SENTINEL: &str = "[SYSTEM] Elevated shell started";
 const MAX_CAPTURED_OUTPUT: usize = 4096;
 
 /// Resolve a program name against the current PATH without spawning a shell.
-fn resolve_program(program: &str) -> Option<PathBuf> {
+pub(crate) fn resolve_program(program: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
     std::env::split_paths(&path)
         .map(|dir| dir.join(program))
@@ -110,88 +173,48 @@ fn elevated_command(helper: &str, body: &str) -> Option<Command> {
 
 #[tauri::command]
 fn waydroid_status() -> CommandResult {
-    let output = Command::new("waydroid")
-        .arg("status")
-        .output();
-
-    match output {
-        Ok(out) => {
-            let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-            let stderr = String::from_utf8_lossy(&out.stderr).to_string();
-
-            if out.status.success() {
-                CommandResult {
-                    status: "success".to_string(),
-                    data: Some(stdout),
-                    message: None,
-                }
-            } else {
-                CommandResult {
-                    status: "error".to_string(),
-                    data: None,
-                    message: Some(stderr),
-                }
-            }
-        },
-        Err(e) => CommandResult {
-            status: "error".to_string(),
-            data: None,
-            message: Some(e.to_string()),
-        }
+    match waydroid::Waydroid::detect().and_then(|waydroid| waydroid.status()) {
+        Ok(text) => CommandResult::with_data(text),
+        Err(error) => error.into(),
     }
+}
+
+/// Cheap preflight: is waydroid on PATH at all, and which version does it report.
+#[tauri::command]
+fn waydroid_version() -> CommandResult {
+    match waydroid::Waydroid::detect().and_then(|waydroid| waydroid.version()) {
+        Ok(version) => CommandResult::with_data(version),
+        Err(error) => error.into(),
+    }
+}
+
+/// Best effort probe used by the status checks: `None` when waydroid is missing,
+/// not initialised, or the command failed, so the caller can fall back to a
+/// marker instead of reporting an error.
+///
+/// Waydroid only allows `shell` as root, so in an unprivileged session the live
+/// probes below do not answer and the markers are what is left.
+fn probe(run: impl FnOnce(&waydroid::Waydroid) -> error::Result<String>) -> Option<String> {
+    let waydroid = waydroid::Waydroid::detect().ok()?;
+    run(&waydroid).ok()
 }
 
 #[tauri::command]
 fn waydroid_start() -> CommandResult {
     // Start the Waydroid session; an optional scheduler hint (e.g. ananicy-cpp) can be added later
-    let output = Command::new("waydroid")
-        .arg("session")
-        .arg("start")
-        .output();
-
-    match output {
-        Ok(out) => {
-            let stderr = String::from_utf8_lossy(&out.stderr).to_string();
-            if out.status.success() {
-                CommandResult {
-                    status: "success".to_string(),
-                    data: None,
-                    message: None,
-                }
-            } else {
-                CommandResult {
-                    status: "error".to_string(),
-                    data: None,
-                    message: Some(stderr),
-                }
-            }
-        },
-        Err(e) => CommandResult {
-            status: "error".to_string(),
-            data: None,
-            message: Some(e.to_string()),
-        }
+    match waydroid::Waydroid::detect().and_then(|waydroid| waydroid.session_start()) {
+        Ok(_) => CommandResult::success(),
+        Err(error) => error.into(),
     }
 }
 
 #[tauri::command]
 fn waydroid_stop() -> CommandResult {
-    let output = Command::new("waydroid")
-        .arg("session")
-        .arg("stop")
-        .output();
-
-    match output {
-        Ok(_) => CommandResult {
-            status: "success".to_string(),
-            data: None,
-            message: None,
-        },
-        Err(e) => CommandResult {
-            status: "error".to_string(),
-            data: None,
-            message: Some(e.to_string()),
-        }
+    // A failed exit is a failure again: this used to report success for any
+    // spawn, so a refused stop looked like a stopped session.
+    match waydroid::Waydroid::detect().and_then(|waydroid| waydroid.session_stop()) {
+        Ok(_) => CommandResult::success(),
+        Err(error) => error.into(),
     }
 }
 
@@ -208,15 +231,17 @@ fn get_waydroid_apps() -> Vec<AppInfo> {
 
                     // Simple parse of desktop file
                     let content = std::fs::read_to_string(entry.path()).unwrap_or_default();
-                    let name = content.lines()
+                    let name = content
+                        .lines()
                         .find(|l| l.starts_with("Name="))
                         .map(|l| l.replace("Name=", ""))
                         .unwrap_or(package.clone());
-                        
-                    let icon_path = content.lines()
+
+                    let icon_path = content
+                        .lines()
                         .find(|l| l.starts_with("Icon="))
                         .map(|l| l.replace("Icon=", ""));
-                    
+
                     let mut icon_b64 = None;
                     if let Some(path) = icon_path {
                         if let Ok(bytes) = std::fs::read(&path) {
@@ -240,103 +265,41 @@ fn get_waydroid_apps() -> Vec<AppInfo> {
 
 #[tauri::command]
 fn waydroid_install_apk(path: String) -> CommandResult {
-    let output = Command::new("waydroid")
-        .arg("app")
-        .arg("install")
-        .arg(&path)
-        .output();
-
-    match output {
-        Ok(out) => {
-            if out.status.success() {
-                CommandResult { status: "success".to_string(), data: None, message: None }
-            } else {
-                CommandResult { status: "error".to_string(), data: None, message: Some(String::from_utf8_lossy(&out.stderr).to_string()) }
-            }
-        },
-        Err(e) => CommandResult { status: "error".to_string(), data: None, message: Some(e.to_string()) }
+    match waydroid::Waydroid::detect().and_then(|waydroid| waydroid.app_install(&path)) {
+        Ok(_) => CommandResult::success(),
+        Err(error) => error.into(),
     }
 }
 
 #[tauri::command]
 fn waydroid_uninstall_app(package: String) -> CommandResult {
-    let output = Command::new("waydroid")
-        .arg("app")
-        .arg("remove")
-        .arg(&package)
-        .output();
-
-    match output {
-        Ok(out) => {
-            if out.status.success() {
-                CommandResult { status: "success".to_string(), data: None, message: None }
-            } else {
-                CommandResult { status: "error".to_string(), data: None, message: Some(String::from_utf8_lossy(&out.stderr).to_string()) }
-            }
-        },
-        Err(e) => CommandResult { status: "error".to_string(), data: None, message: Some(e.to_string()) }
+    match waydroid::Waydroid::detect().and_then(|waydroid| waydroid.app_remove(&package)) {
+        Ok(_) => CommandResult::success(),
+        Err(error) => error.into(),
     }
 }
 
 #[tauri::command]
 fn waydroid_launch_app(package: String) -> CommandResult {
-    let output = Command::new("waydroid")
-        .arg("app")
-        .arg("launch")
-        .arg(&package)
-        .output();
-
-    match output {
-        Ok(out) => {
-            if out.status.success() {
-                CommandResult { status: "success".to_string(), data: None, message: None }
-            } else {
-                CommandResult { status: "error".to_string(), data: None, message: Some(String::from_utf8_lossy(&out.stderr).to_string()) }
-            }
-        },
-        Err(e) => CommandResult { status: "error".to_string(), data: None, message: Some(e.to_string()) }
+    match waydroid::Waydroid::detect().and_then(|waydroid| waydroid.app_launch(&package)) {
+        Ok(_) => CommandResult::success(),
+        Err(error) => error.into(),
     }
 }
 
 #[tauri::command]
 fn waydroid_prop_set(key: String, value: String) -> CommandResult {
-    let output = Command::new("waydroid")
-        .arg("prop")
-        .arg("set")
-        .arg(&key)
-        .arg(&value)
-        .output();
-
-    match output {
-        Ok(out) => {
-            if out.status.success() {
-                CommandResult { status: "success".to_string(), data: None, message: None }
-            } else {
-                CommandResult { status: "error".to_string(), data: None, message: Some(String::from_utf8_lossy(&out.stderr).to_string()) }
-            }
-        },
-        Err(e) => CommandResult { status: "error".to_string(), data: None, message: Some(e.to_string()) }
+    match waydroid::Waydroid::detect().and_then(|waydroid| waydroid.prop_set(&key, &value)) {
+        Ok(_) => CommandResult::success(),
+        Err(error) => error.into(),
     }
 }
 
 #[tauri::command]
 fn waydroid_prop_get(key: String) -> CommandResult {
-    let output = Command::new("waydroid")
-        .arg("prop")
-        .arg("get")
-        .arg(&key)
-        .output();
-
-    match output {
-        Ok(out) => {
-            if out.status.success() {
-                let val = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                CommandResult { status: "success".to_string(), data: Some(val), message: None }
-            } else {
-                CommandResult { status: "error".to_string(), data: None, message: Some(String::from_utf8_lossy(&out.stderr).to_string()) }
-            }
-        },
-        Err(e) => CommandResult { status: "error".to_string(), data: None, message: Some(e.to_string()) }
+    match waydroid::Waydroid::detect().and_then(|waydroid| waydroid.prop_get(&key)) {
+        Ok(value) => CommandResult::with_data(value),
+        Err(error) => error.into(),
     }
 }
 
@@ -348,10 +311,11 @@ if [ -f /var/lib/waydroid/waydroid.log ]; then
 else
     echo "No logs found at /var/lib/waydroid/waydroid.log"
 fi
-"#.to_string();
+"#
+    .to_string();
 
     stream_privileged_script(app, script);
-    CommandResult { status: "success".to_string(), data: None, message: None }
+    CommandResult::success()
 }
 
 #[tauri::command]
@@ -365,13 +329,14 @@ fn open_shared_folder() -> CommandResult {
     // Create folder if it doesn't exist
     let _ = std::fs::create_dir_all(&path);
 
-    let output = Command::new("xdg-open")
-        .arg(&path)
-        .output();
-
-    match output {
-        Ok(_) => CommandResult { status: "success".to_string(), data: None, message: None },
-        Err(e) => CommandResult { status: "error".to_string(), data: None, message: Some(e.to_string()) }
+    match Command::new("xdg-open").arg(&path).output() {
+        Ok(_) => CommandResult::success(),
+        Err(error) => AppError::from_spawn(
+            "xdg-open",
+            "Install xdg-utils so a file manager can be asked to open the folder.",
+            error,
+        )
+        .into(),
     }
 }
 
@@ -392,9 +357,10 @@ else
     echo "[ERROR] waydroid init failed. Check your network connection and try again."
     exit 1
 fi
-"#.to_string();
+"#
+    .to_string();
     stream_privileged_script(app, script);
-    CommandResult { status: "success".to_string(), data: None, message: None }
+    CommandResult::success()
 }
 
 #[tauri::command]
@@ -403,71 +369,52 @@ fn check_gapps_status() -> CommandResult {
 
     // Method 1: ask the running container. This is the only authoritative source,
     // so it also tells us when a previously written marker has gone stale.
-    if let Ok(out) = Command::new("waydroid").arg("shell").arg("pm").arg("list").arg("packages").output() {
-        if out.status.success() {
-            let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-            let has_play_store = stdout.lines().any(|l| l.contains("com.android.vending"));
-            let has_play_services = stdout.lines().any(|l| l.contains("com.google.android.gms"));
-            let has_play_framework = stdout.lines().any(|l| l.contains("com.google.android.gsf"));
+    if let Some(stdout) = probe(|waydroid| waydroid.shell(&["pm", "list", "packages"])) {
+        let has_play_store = stdout.lines().any(|l| l.contains("com.android.vending"));
+        let has_play_services = stdout.lines().any(|l| l.contains("com.google.android.gms"));
+        let has_play_framework = stdout.lines().any(|l| l.contains("com.google.android.gsf"));
 
-            if has_play_store && has_play_services {
-                write_marker(&marker);
-                return CommandResult {
-                    status: "installed".to_string(),
-                    data: None,
-                    message: Some("Google Play Store and Play Services are installed.".to_string()),
-                };
-            }
-
-            // The image no longer carries GApps (e.g. it was re-initialized or wiped
-            // outside DroidDeck), so forget the marker instead of trusting it forever.
-            if marker.exists() {
-                let _ = std::fs::remove_file(&marker);
-            }
-
-            if has_play_store || has_play_services || has_play_framework {
-                return CommandResult {
-                    status: "partial".to_string(),
-                    data: None,
-                    message: Some("GApps partially installed. Consider reinstalling.".to_string()),
-                };
-            }
-
-            return CommandResult {
-                status: "not_installed".to_string(),
-                data: None,
-                message: Some("GApps is not installed.".to_string()),
-            };
+        if has_play_store && has_play_services {
+            write_marker(&marker);
+            return CommandResult::report(
+                "installed",
+                "Google Play Store and Play Services are installed.",
+            );
         }
+
+        // The image no longer carries GApps (e.g. it was re-initialized or wiped
+        // outside DroidDeck), so forget the marker instead of trusting it forever.
+        if marker.exists() {
+            let _ = std::fs::remove_file(&marker);
+        }
+
+        if has_play_store || has_play_services || has_play_framework {
+            return CommandResult::report(
+                "partial",
+                "GApps partially installed. Consider reinstalling.",
+            );
+        }
+
+        return CommandResult::report("not_installed", "GApps is not installed.");
     }
 
     // Method 2: the container is offline, trust the marker written by a successful install
     if marker.exists() {
-        return CommandResult {
-            status: "installed".to_string(),
-            data: None,
-            message: Some("GApps installed (verified marker). Start Waydroid for a live check.".to_string()),
-        };
+        return CommandResult::report(
+            "installed",
+            "GApps installed (verified marker). Start Waydroid for a live check.",
+        );
     }
 
     // Method 3: Fallback to waydroid app list (works offline but only shows launchable apps)
-    if let Ok(out) = Command::new("waydroid").arg("app").arg("list").output() {
-        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+    if let Some(stdout) = probe(|waydroid| waydroid.app_list()) {
         if stdout.contains("com.android.vending") {
-            return CommandResult {
-                status: "installed".to_string(),
-                data: None,
-                message: Some("Play Store detected via app list.".to_string()),
-            };
+            return CommandResult::report("installed", "Play Store detected via app list.");
         }
     }
 
     // No evidence of GApps
-    CommandResult {
-        status: "not_installed".to_string(),
-        data: None,
-        message: Some("GApps is not installed.".to_string()),
-    }
+    CommandResult::report("not_installed", "GApps is not installed.")
 }
 
 #[tauri::command]
@@ -475,46 +422,27 @@ fn check_houdini_status() -> CommandResult {
     let marker = marker_file("houdini_installed");
 
     // The container reports the ARM translation layer in its ABI list when it is loaded.
-    if let Ok(out) = Command::new("waydroid")
-        .arg("shell")
-        .arg("getprop")
-        .arg("ro.product.cpu.abilist")
-        .output()
+    if let Some(abilist) = probe(|waydroid| waydroid.shell(&["getprop", "ro.product.cpu.abilist"]))
     {
-        if out.status.success() {
-            let abilist = String::from_utf8_lossy(&out.stdout).to_lowercase();
-            if abilist.contains("arm") {
-                write_marker(&marker);
-                return CommandResult {
-                    status: "installed".to_string(),
-                    data: None,
-                    message: Some("ARM translation (libhoudini) is active.".to_string()),
-                };
-            }
-            if marker.exists() {
-                let _ = std::fs::remove_file(&marker);
-            }
-            return CommandResult {
-                status: "not_installed".to_string(),
-                data: None,
-                message: Some("ARM translation is not active.".to_string()),
-            };
+        let abilist = abilist.to_lowercase();
+        if abilist.contains("arm") {
+            write_marker(&marker);
+            return CommandResult::report("installed", "ARM translation (libhoudini) is active.");
         }
+        if marker.exists() {
+            let _ = std::fs::remove_file(&marker);
+        }
+        return CommandResult::report("not_installed", "ARM translation is not active.");
     }
 
     if marker.exists() {
-        return CommandResult {
-            status: "installed".to_string(),
-            data: None,
-            message: Some("ARM translation (libhoudini) installed (verified marker).".to_string()),
-        };
+        return CommandResult::report(
+            "installed",
+            "ARM translation (libhoudini) installed (verified marker).",
+        );
     }
 
-    CommandResult {
-        status: "not_installed".to_string(),
-        data: None,
-        message: Some("ARM Translation is not installed.".to_string()),
-    }
+    CommandResult::report("not_installed", "ARM Translation is not installed.")
 }
 
 #[tauri::command]
@@ -529,10 +457,11 @@ fn waydroid_wipe(app: AppHandle) -> CommandResult {
     rm -rf "$HOME"/.local/share/applications/waydroid.*
     rm -f "$DROIDDECK_CACHE/gapps_installed" "$DROIDDECK_CACHE/houdini_installed"
     echo "[SYSTEM] Wipe complete! Please restart DroidDeck."
-    "#.to_string();
+    "#
+    .to_string();
 
     stream_privileged_script(app, script);
-    CommandResult { status: "success".to_string(), data: None, message: None }
+    CommandResult::success()
 }
 
 #[tauri::command]
@@ -559,10 +488,11 @@ if ! PYTHONUNBUFFERED=1 venv/bin/python3 main.py install gapps; then
 fi
 droiddeck_marker gapps_installed
 echo "[SUCCESS] GApps installation complete! Please Start Waydroid."
-"#.to_string();
+"#
+    .to_string();
 
     stream_privileged_script(app, script);
-    CommandResult { status: "success".to_string(), data: None, message: None }
+    CommandResult::success()
 }
 
 #[tauri::command]
@@ -595,10 +525,11 @@ if ! PYTHONUNBUFFERED=1 venv/bin/python3 main.py install libhoudini; then
 fi
 droiddeck_marker houdini_installed
 echo "[SUCCESS] ARM Translation installation complete!"
-    "#.to_string();
+    "#
+    .to_string();
 
     stream_privileged_script(app, script);
-    CommandResult { status: "success".to_string(), data: None, message: None }
+    CommandResult::success()
 }
 
 #[tauri::command]
@@ -625,29 +556,30 @@ else
     echo "[ERROR] Phantom installation failed!"
     exit 1
 fi
-    "#.to_string();
+    "#
+    .to_string();
 
     stream_privileged_script(app, script);
-    CommandResult { status: "success".to_string(), data: None, message: None }
+    CommandResult::success()
 }
 
 #[tauri::command]
 fn run_phantom() -> CommandResult {
     let script = "phantom";
-    let terminal_cmd = format!(r#"
+    let terminal_cmd = format!(
+        r#"
 if command -v konsole > /dev/null; then konsole -e bash -c '{}';
 elif command -v alacritty > /dev/null; then alacritty -e bash -c '{}';
 elif command -v gnome-terminal > /dev/null; then gnome-terminal -- bash -c '{}';
 elif command -v xterm > /dev/null; then xterm -e bash -c '{}';
 else notify-send "No terminal emulator found"; fi
-    "#, script, script, script, script);
+    "#,
+        script, script, script, script
+    );
 
-    let _output = Command::new("bash")
-        .arg("-c")
-        .arg(&terminal_cmd)
-        .output();
+    let _output = Command::new("bash").arg("-c").arg(&terminal_cmd).output();
 
-    CommandResult { status: "success".to_string(), data: None, message: Some("Launched Phantom Keymapper.".to_string()) }
+    CommandResult::with_message("Launched Phantom Keymapper.")
 }
 
 struct StreamResult {
@@ -705,8 +637,15 @@ fn run_and_stream(app: &AppHandle, mut command: Command) -> StreamResult {
     let mut child = match command.spawn() {
         Ok(child) => child,
         Err(e) => {
-            let _ = app.emit("cmd-output", format!("[ERROR] Could not start command: {}", e));
-            return StreamResult { success: false, code: None, started: false };
+            let _ = app.emit(
+                "cmd-output",
+                format!("[ERROR] Could not start command: {}", e),
+            );
+            return StreamResult {
+                success: false,
+                code: None,
+                started: false,
+            };
         }
     };
 
@@ -728,10 +667,21 @@ fn run_and_stream(app: &AppHandle, mut command: Command) -> StreamResult {
         .unwrap_or(false);
 
     match status {
-        Ok(status) => StreamResult { success: status.success(), code: status.code(), started },
+        Ok(status) => StreamResult {
+            success: status.success(),
+            code: status.code(),
+            started,
+        },
         Err(e) => {
-            let _ = app.emit("cmd-output", format!("[ERROR] Lost track of the running command: {}", e));
-            StreamResult { success: false, code: None, started }
+            let _ = app.emit(
+                "cmd-output",
+                format!("[ERROR] Lost track of the running command: {}", e),
+            );
+            StreamResult {
+                success: false,
+                code: None,
+                started,
+            }
         }
     }
 }
@@ -754,7 +704,10 @@ fn stream_privileged_script(app: AppHandle, script: String) {
 
         if forced != "sudo" {
             if let Some(command) = elevated_command("pkexec", &body) {
-                let _ = app.emit("cmd-output", "[SYSTEM] Requesting root access via polkit...".to_string());
+                let _ = app.emit(
+                    "cmd-output",
+                    "[SYSTEM] Requesting root access via polkit...".to_string(),
+                );
                 let attempt = run_and_stream(&app, command);
 
                 // Exit code 126 means the user dismissed the polkit dialog, so do
@@ -766,17 +719,26 @@ fn stream_privileged_script(app: AppHandle, script: String) {
                     return;
                 }
 
-                let _ = app.emit("cmd-output", "[SYSTEM] polkit could not elevate here, falling back to sudo...".to_string());
+                let _ = app.emit(
+                    "cmd-output",
+                    "[SYSTEM] polkit could not elevate here, falling back to sudo...".to_string(),
+                );
             }
         }
 
         let Some(command) = elevated_command("sudo", &body) else {
-            let _ = app.emit("cmd-output", "[ERROR] Neither pkexec nor sudo is available, cannot gain root access.".to_string());
+            let error = AppError::elevation_denied(
+                "Neither pkexec nor sudo is available, so root access cannot be requested.",
+            );
+            let _ = app.emit("cmd-output", format!("[ERROR] {error}"));
             let _ = app.emit("cmd-finished", false);
             return;
         };
 
-        let _ = app.emit("cmd-output", "[SYSTEM] Requesting root access via sudo...".to_string());
+        let _ = app.emit(
+            "cmd-output",
+            "[SYSTEM] Requesting root access via sudo...".to_string(),
+        );
         let attempt = run_and_stream(&app, command);
 
         if !attempt.success && !attempt.started {
@@ -785,6 +747,36 @@ fn stream_privileged_script(app: AppHandle, script: String) {
 
         let _ = app.emit("cmd-finished", attempt.success);
     });
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .invoke_handler(tauri::generate_handler![
+            waydroid_status,
+            waydroid_version,
+            waydroid_start,
+            waydroid_stop,
+            waydroid_init,
+            waydroid_wipe,
+            get_waydroid_apps,
+            waydroid_install_apk,
+            waydroid_uninstall_app,
+            waydroid_launch_app,
+            waydroid_prop_set,
+            waydroid_prop_get,
+            waydroid_log,
+            open_shared_folder,
+            check_gapps_status,
+            check_houdini_status,
+            install_gapps,
+            install_houdini,
+            install_phantom,
+            run_phantom
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
 }
 
 #[cfg(test)]
@@ -821,7 +813,8 @@ mod tests {
     fn markers_stay_readable_for_the_app_under_a_restrictive_umask() {
         use std::os::unix::fs::PermissionsExt;
 
-        let cache_root = std::env::temp_dir().join(format!("droiddeck-test-{}", std::process::id()));
+        let cache_root =
+            std::env::temp_dir().join(format!("droiddeck-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&cache_root);
 
         std::env::set_var("XDG_CACHE_HOME", &cache_root);
@@ -833,14 +826,22 @@ mod tests {
             .arg(format!("umask 077\n{}", script))
             .output()
             .expect("failed to run bash");
-        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
 
         let marker = cache_root.join(CACHE_SUBDIR).join("gapps_installed");
-        let contents = std::fs::read_to_string(&marker).expect("the app must be able to read its own marker");
+        let contents =
+            std::fs::read_to_string(&marker).expect("the app must be able to read its own marker");
         assert_eq!(contents.trim(), "installed");
 
         let mode = std::fs::metadata(&marker).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode, 0o644, "marker should not keep the root-only umask permissions");
+        assert_eq!(
+            mode, 0o644,
+            "marker should not keep the root-only umask permissions"
+        );
 
         let _ = std::fs::remove_dir_all(&cache_root);
     }
@@ -871,33 +872,24 @@ mod tests {
         let command = elevated_command("bash", "true").expect("bash should be resolvable");
         assert!(command.get_args().any(|arg| arg == "-c"));
     }
-}
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run() {
-    tauri::Builder::default()
-        .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![
-            waydroid_status,
-            waydroid_start,
-            waydroid_stop,
-            waydroid_init,
-            waydroid_wipe,
-            get_waydroid_apps,
-            waydroid_install_apk,
-            waydroid_uninstall_app,
-            waydroid_launch_app,
-            waydroid_prop_set,
-            waydroid_prop_get,
-            waydroid_log,
-            open_shared_folder,
-            check_gapps_status,
-            check_houdini_status,
-            install_gapps,
-            install_houdini,
-            install_phantom,
-            run_phantom
-        ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+    /// The UI reads `status`, `data` and `message`; `code` is the addition that
+    /// lets it stop matching prose.
+    #[test]
+    fn a_typed_error_becomes_the_wire_contract_the_ui_reads() {
+        let result: CommandResult =
+            AppError::not_initialized("Waydroid is not initialized, run \"waydroid init\"").into();
+        assert_eq!(result.status, "error");
+        assert_eq!(result.code.as_deref(), Some(error::code::NOT_INITIALIZED));
+        assert!(result.data.is_none());
+        assert!(result.message.unwrap().contains("waydroid init"));
+    }
+
+    #[test]
+    fn success_reports_no_error_code() {
+        let result = CommandResult::with_data("Session:\tRUNNING".to_string());
+        assert_eq!(result.status, "success");
+        assert_eq!(result.code, None);
+        assert_eq!(result.data.as_deref(), Some("Session:\tRUNNING"));
+    }
 }
