@@ -22,7 +22,8 @@
 
 use std::io::Read;
 use std::path::PathBuf;
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -44,6 +45,27 @@ pub const NOT_INITIALIZED_MARKER: &str = "Waydroid is not initialized";
 /// Raised by waydroid releases up to 1.3 when waydroid.cfg was missing. Waydroid
 /// 1.6.3 no longer produces it, but the UI still greps for it.
 pub const NOT_INITIALIZED_LEGACY_MARKER: &str = "Cannot locate waydroid config";
+
+/// How long `session start` may take to either fail (fast exit) or prove it is
+/// up (still running) before we report success and hand it to a reaper thread.
+pub const SESSION_START_GRACE_SECS: u64 = 5;
+
+// ponytail: satu flag global untuk semua operasi panjang — UI menjalankan satu
+// operasi panjang pada satu waktu (guard isOperating). Registry Child per-task
+// hanya kalau operasi paralel nanti benar-benar dibutuhkan.
+static CANCEL: AtomicBool = AtomicBool::new(false);
+
+/// Ask the running long operation (`app install|remove`) to stop; its child is
+/// killed within one poll tick (~20ms).
+pub fn request_cancel() {
+    CANCEL.store(true, Ordering::SeqCst);
+}
+
+/// Every cancellable run clears the flag first, so a stale request from a
+/// previous operation cannot kill a new one.
+fn cancel_requested() -> bool {
+    CANCEL.load(Ordering::SeqCst)
+}
 
 /// Does this output mean "the image was never initialised"?
 pub fn looks_uninitialized(text: &str) -> bool {
@@ -136,6 +158,16 @@ impl Waydroid {
     /// Both pipes are drained on reader threads so a chatty command cannot
     /// deadlock on a full pipe while we wait for it to exit.
     pub fn run(&self, args: &[String], timeout_secs: u64) -> Result<String> {
+        self.run_inner(args, timeout_secs, false)
+    }
+
+    /// Same as [`run`], but a [`request_cancel`] call kills the child.
+    pub fn run_cancellable(&self, args: &[String], timeout_secs: u64) -> Result<String> {
+        CANCEL.store(false, Ordering::SeqCst);
+        self.run_inner(args, timeout_secs, true)
+    }
+
+    fn run_inner(&self, args: &[String], timeout_secs: u64, cancellable: bool) -> Result<String> {
         let program = self.program.to_string_lossy().to_string();
         let mut command = Command::new(&self.program);
         command
@@ -158,15 +190,20 @@ impl Waydroid {
             match child.try_wait() {
                 Ok(Some(status)) => break status,
                 Ok(None) => {
-                    if Instant::now() >= deadline {
+                    if (cancellable && cancel_requested()) || Instant::now() >= deadline {
+                        let cancelled = cancellable && cancel_requested();
                         let _ = child.kill();
                         let _ = child.wait();
                         let _ = stdout_reader.join();
                         let _ = stderr_reader.join();
-                        return Err(AppError::Timeout {
-                            program,
-                            seconds: timeout_secs,
-                        });
+                        return if cancelled {
+                            Err(AppError::CancelRequested { program })
+                        } else {
+                            Err(AppError::Timeout {
+                                program,
+                                seconds: timeout_secs,
+                            })
+                        };
                     }
                     thread::sleep(Duration::from_millis(20));
                 }
@@ -181,28 +218,7 @@ impl Waydroid {
         let stdout = stdout_reader.join().unwrap_or_default();
         let stderr = stderr_reader.join().unwrap_or_default();
 
-        // Waydroid reports "not initialized" on stdout and still exits 0, so this
-        // check has to happen before the exit code is consulted.
-        if looks_uninitialized(&stderr) {
-            return Err(AppError::not_initialized(stderr.trim()));
-        }
-        if looks_uninitialized(&stdout) {
-            return Err(AppError::not_initialized(stdout.trim()));
-        }
-
-        if status.success() {
-            return Ok(stdout);
-        }
-
-        Err(AppError::Exit {
-            program,
-            code: status.code(),
-            output: if stderr.trim().is_empty() {
-                stdout.trim_end().to_string()
-            } else {
-                stderr.trim_end().to_string()
-            },
-        })
+        interpret(&program, status, stdout, stderr)
     }
 
     pub fn version(&self) -> Result<String> {
@@ -215,8 +231,70 @@ impl Waydroid {
         self.run(&argv_status(), TIMEOUT_QUICK)
     }
 
-    pub fn session_start(&self) -> Result<String> {
-        self.run(&argv_session_start(), TIMEOUT_NORMAL)
+    /// `waydroid session start` is the session manager itself: a foreground
+    /// daemon (`tools/actions/session_manager.py` ends in `looper.run()`), so it
+    /// never exits while the session is up. Detached handling therefore differs
+    /// from every other command: wait a short grace period — exited at once
+    /// means it failed (or the session was already running, which also exits 0),
+    /// still alive means the session started. A background thread reaps the
+    /// child afterwards so it never becomes a zombie.
+    pub fn session_start(&self, grace_secs: u64) -> Result<()> {
+        let program = self.program.to_string_lossy().to_string();
+        let mut command = Command::new(&self.program);
+        command
+            .args(argv_session_start())
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        let mut child: Child = command
+            .spawn()
+            .map_err(|error| AppError::from_spawn(&program, HINT, error))?;
+        let stdout = child.stdout.take().expect("stdout was piped");
+        let stderr = child.stderr.take().expect("stderr was piped");
+        let mut stdout_reader = Some(thread::spawn(move || read_lossy(stdout)));
+        let mut stderr_reader = Some(thread::spawn(move || read_lossy(stderr)));
+
+        let deadline = Instant::now() + Duration::from_secs(grace_secs);
+        let mut still_running = false;
+        let outcome = loop {
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    let out = stdout_reader
+                        .take()
+                        .and_then(|handle| handle.join().ok())
+                        .unwrap_or_default();
+                    let err = stderr_reader
+                        .take()
+                        .and_then(|handle| handle.join().ok())
+                        .unwrap_or_default();
+                    break interpret(&program, status, out, err).map(|_| ());
+                }
+                Ok(None) => {
+                    if Instant::now() >= deadline {
+                        still_running = true;
+                        break Ok(());
+                    }
+                    thread::sleep(Duration::from_millis(20));
+                }
+                Err(error) => break Err(AppError::Io(error)),
+            }
+        };
+
+        // Still alive after the grace period: the daemon is the session, leave
+        // it running and hand it to a reaper (drain pipes, then wait()).
+        if still_running {
+            thread::spawn(move || {
+                if let Some(handle) = stdout_reader.take() {
+                    let _ = handle.join();
+                }
+                if let Some(handle) = stderr_reader.take() {
+                    let _ = handle.join();
+                }
+                let _ = child.wait();
+            });
+        }
+        outcome
     }
 
     pub fn session_stop(&self) -> Result<String> {
@@ -228,11 +306,11 @@ impl Waydroid {
     }
 
     pub fn app_install(&self, path: &str) -> Result<String> {
-        self.run(&argv_app_install(path), TIMEOUT_LONG)
+        self.run_cancellable(&argv_app_install(path), TIMEOUT_LONG)
     }
 
     pub fn app_remove(&self, package: &str) -> Result<String> {
-        self.run(&argv_app_remove(package), TIMEOUT_LONG)
+        self.run_cancellable(&argv_app_remove(package), TIMEOUT_LONG)
     }
 
     pub fn app_launch(&self, package: &str) -> Result<String> {
@@ -252,6 +330,32 @@ impl Waydroid {
     pub fn shell(&self, command: &[&str]) -> Result<String> {
         self.run(&argv_shell(command), TIMEOUT_NORMAL)
     }
+}
+
+/// Decide what a finished child means. Zero exit is not success on its own:
+/// waydroid prints "not initialized" and still exits 0 before `waydroid init`
+/// has run, so the output is consulted before the exit code.
+fn interpret(program: &str, status: ExitStatus, stdout: String, stderr: String) -> Result<String> {
+    if looks_uninitialized(&stderr) {
+        return Err(AppError::not_initialized(stderr.trim()));
+    }
+    if looks_uninitialized(&stdout) {
+        return Err(AppError::not_initialized(stdout.trim()));
+    }
+
+    if status.success() {
+        return Ok(stdout);
+    }
+
+    Err(AppError::Exit {
+        program: program.to_string(),
+        code: status.code(),
+        output: if stderr.trim().is_empty() {
+            stdout.trim_end().to_string()
+        } else {
+            stderr.trim_end().to_string()
+        },
+    })
 }
 
 fn read_lossy(mut reader: impl Read) -> String {
@@ -366,5 +470,73 @@ mod tests {
             started.elapsed() < Duration::from_secs(10),
             "the deadline was not enforced"
         );
+    }
+
+    /// The Cancel button contract: a pending cancel request kills the child
+    /// within a poll tick instead of letting it run to its deadline.
+    #[test]
+    fn a_cancel_request_kills_a_running_child() {
+        let tool = Waydroid::with_program("/bin/sleep");
+        let killer = thread::spawn(|| {
+            thread::sleep(Duration::from_millis(200));
+            request_cancel();
+        });
+        let started = Instant::now();
+        let error = tool
+            .run_cancellable(&["30".to_string()], TIMEOUT_LONG)
+            .unwrap_err();
+        killer.join().unwrap();
+        assert_eq!(error.code(), code::CANCELLED, "{error}");
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "cancel did not stop the child promptly"
+        );
+    }
+
+    /// A stale cancel request must not kill the next operation.
+    #[test]
+    fn a_cancellable_run_ignores_a_stale_cancel_request() {
+        request_cancel();
+        let tool = Waydroid::with_program("/bin/echo");
+        let output = tool.run_cancellable(&["ok".to_string()], TIMEOUT_QUICK);
+        assert_eq!(output.unwrap().trim(), "ok");
+    }
+
+    /// `session start` stays alive: that is the daemon working, not a hang.
+    #[test]
+    fn a_session_that_outlives_the_grace_period_has_started() {
+        // A stand-in daemon: ignores its arguments and outlives the grace period.
+        // Unique name: an older run's daemon may still hold the previous file.
+        let script = std::env::temp_dir().join(format!(
+            "droiddeck-session-test-{}-{}.sh",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|since| since.subsec_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::write(&script, "#!/bin/sh\nexec sleep 30\n").unwrap();
+        let _ =
+            std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755));
+
+        let tool = Waydroid::with_program(&script);
+        let result = tool.session_start(1);
+
+        let _ = std::fs::remove_file(&script); // the daemon `exec`ed, so the file is free
+        result.unwrap();
+    }
+
+    #[test]
+    fn a_session_that_exits_cleanly_during_grace_is_success() {
+        let tool = Waydroid::with_program("/bin/echo");
+        tool.session_start(5).unwrap();
+    }
+
+    #[test]
+    fn a_session_that_fails_during_grace_reports_its_error() {
+        // `/bin/false` exits 1 at once, like a session start that failed.
+        let tool = Waydroid::with_program("/bin/false");
+        let error = tool.session_start(5).unwrap_err();
+        assert_eq!(error.code(), code::EXIT, "{error}");
     }
 }

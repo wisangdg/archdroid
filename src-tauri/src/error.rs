@@ -16,6 +16,7 @@ pub mod code {
     pub const NOT_INITIALIZED: &str = "not_initialized";
     pub const ELEVATION_DENIED: &str = "elevation_denied";
     pub const TIMEOUT: &str = "timeout";
+    pub const CANCELLED: &str = "cancelled";
     pub const EXIT: &str = "exit";
     pub const IO: &str = "io";
 }
@@ -30,6 +31,8 @@ pub enum AppError {
     ElevationDenied { detail: String },
     /// The child was killed because it outlived its deadline.
     Timeout { program: String, seconds: u64 },
+    /// The child was killed because the user pressed cancel.
+    CancelRequested { program: String },
     /// The child ran to completion and exited non-zero.
     Exit {
         program: String,
@@ -77,6 +80,7 @@ impl AppError {
             Self::NotInitialized { .. } => code::NOT_INITIALIZED,
             Self::ElevationDenied { .. } => code::ELEVATION_DENIED,
             Self::Timeout { .. } => code::TIMEOUT,
+            Self::CancelRequested { .. } => code::CANCELLED,
             Self::Exit { .. } => code::EXIT,
             Self::Io(_) => code::IO,
         }
@@ -107,6 +111,7 @@ impl fmt::Display for AppError {
                 f,
                 "\"{program}\" did not finish within {seconds}s and was terminated"
             ),
+            Self::CancelRequested { program } => write!(f, "\"{program}\" was cancelled"),
             Self::Exit {
                 program,
                 code,
@@ -200,6 +205,15 @@ mod tests {
         };
         assert!(error.to_string().contains("30s"), "{error}");
         assert_eq!(error.code(), code::TIMEOUT);
+    }
+
+    #[test]
+    fn a_cancelled_child_is_not_a_timeout() {
+        let error = AppError::CancelRequested {
+            program: "waydroid".to_string(),
+        };
+        assert!(error.to_string().contains("cancelled"), "{error}");
+        assert_eq!(error.code(), code::CANCELLED);
     }
 
     #[test]

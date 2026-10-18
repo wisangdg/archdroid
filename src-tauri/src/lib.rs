@@ -171,21 +171,37 @@ fn elevated_command(helper: &str, body: &str) -> Option<Command> {
     Some(command)
 }
 
+/// Run blocking work off the main thread. Tauri runs commands *without* the
+/// `async` keyword on the main thread, where a slow `waydroid` call (up to
+/// `TIMEOUT_LONG`) would freeze the whole UI; async commands on this helper
+/// park the closure on the async runtime's blocking pool instead.
+async fn off_main_thread(work: impl FnOnce() -> CommandResult + Send + 'static) -> CommandResult {
+    tauri::async_runtime::spawn_blocking(work)
+        .await
+        .unwrap_or_else(|error| AppError::Io(std::io::Error::other(error.to_string())).into())
+}
+
 #[tauri::command]
-fn waydroid_status() -> CommandResult {
-    match waydroid::Waydroid::detect().and_then(|waydroid| waydroid.status()) {
-        Ok(text) => CommandResult::with_data(text),
-        Err(error) => error.into(),
-    }
+async fn waydroid_status() -> CommandResult {
+    off_main_thread(
+        || match waydroid::Waydroid::detect().and_then(|waydroid| waydroid.status()) {
+            Ok(text) => CommandResult::with_data(text),
+            Err(error) => error.into(),
+        },
+    )
+    .await
 }
 
 /// Cheap preflight: is waydroid on PATH at all, and which version does it report.
 #[tauri::command]
-fn waydroid_version() -> CommandResult {
-    match waydroid::Waydroid::detect().and_then(|waydroid| waydroid.version()) {
-        Ok(version) => CommandResult::with_data(version),
-        Err(error) => error.into(),
-    }
+async fn waydroid_version() -> CommandResult {
+    off_main_thread(
+        || match waydroid::Waydroid::detect().and_then(|waydroid| waydroid.version()) {
+            Ok(version) => CommandResult::with_data(version),
+            Err(error) => error.into(),
+        },
+    )
+    .await
 }
 
 /// Best effort probe used by the status checks: `None` when waydroid is missing,
@@ -200,22 +216,39 @@ fn probe(run: impl FnOnce(&waydroid::Waydroid) -> error::Result<String>) -> Opti
 }
 
 #[tauri::command]
-fn waydroid_start() -> CommandResult {
+async fn waydroid_start() -> CommandResult {
     // Start the Waydroid session; an optional scheduler hint (e.g. ananicy-cpp) can be added later
-    match waydroid::Waydroid::detect().and_then(|waydroid| waydroid.session_start()) {
-        Ok(_) => CommandResult::success(),
-        Err(error) => error.into(),
-    }
+    off_main_thread(|| {
+        match waydroid::Waydroid::detect()
+            .and_then(|waydroid| waydroid.session_start(waydroid::SESSION_START_GRACE_SECS))
+        {
+            Ok(_) => CommandResult::success(),
+            Err(error) => error.into(),
+        }
+    })
+    .await
 }
 
 #[tauri::command]
-fn waydroid_stop() -> CommandResult {
+async fn waydroid_stop() -> CommandResult {
     // A failed exit is a failure again: this used to report success for any
     // spawn, so a refused stop looked like a stopped session.
-    match waydroid::Waydroid::detect().and_then(|waydroid| waydroid.session_stop()) {
-        Ok(_) => CommandResult::success(),
-        Err(error) => error.into(),
-    }
+    off_main_thread(|| {
+        match waydroid::Waydroid::detect().and_then(|waydroid| waydroid.session_stop()) {
+            Ok(_) => CommandResult::success(),
+            Err(error) => error.into(),
+        }
+    })
+    .await
+}
+
+/// Best effort kill of a cancellable long operation (`app install|remove`).
+/// Succeeds even when there was nothing running, so a Cancel button can stay
+/// simple.
+#[tauri::command]
+fn waydroid_cancel() -> CommandResult {
+    waydroid::request_cancel();
+    CommandResult::success()
 }
 
 #[tauri::command]
@@ -264,43 +297,58 @@ fn get_waydroid_apps() -> Vec<AppInfo> {
 }
 
 #[tauri::command]
-fn waydroid_install_apk(path: String) -> CommandResult {
-    match waydroid::Waydroid::detect().and_then(|waydroid| waydroid.app_install(&path)) {
-        Ok(_) => CommandResult::success(),
-        Err(error) => error.into(),
-    }
+async fn waydroid_install_apk(path: String) -> CommandResult {
+    off_main_thread(move || {
+        match waydroid::Waydroid::detect().and_then(|waydroid| waydroid.app_install(&path)) {
+            Ok(_) => CommandResult::success(),
+            Err(error) => error.into(),
+        }
+    })
+    .await
 }
 
 #[tauri::command]
-fn waydroid_uninstall_app(package: String) -> CommandResult {
-    match waydroid::Waydroid::detect().and_then(|waydroid| waydroid.app_remove(&package)) {
-        Ok(_) => CommandResult::success(),
-        Err(error) => error.into(),
-    }
+async fn waydroid_uninstall_app(package: String) -> CommandResult {
+    off_main_thread(move || {
+        match waydroid::Waydroid::detect().and_then(|waydroid| waydroid.app_remove(&package)) {
+            Ok(_) => CommandResult::success(),
+            Err(error) => error.into(),
+        }
+    })
+    .await
 }
 
 #[tauri::command]
-fn waydroid_launch_app(package: String) -> CommandResult {
-    match waydroid::Waydroid::detect().and_then(|waydroid| waydroid.app_launch(&package)) {
-        Ok(_) => CommandResult::success(),
-        Err(error) => error.into(),
-    }
+async fn waydroid_launch_app(package: String) -> CommandResult {
+    off_main_thread(move || {
+        match waydroid::Waydroid::detect().and_then(|waydroid| waydroid.app_launch(&package)) {
+            Ok(_) => CommandResult::success(),
+            Err(error) => error.into(),
+        }
+    })
+    .await
 }
 
 #[tauri::command]
-fn waydroid_prop_set(key: String, value: String) -> CommandResult {
-    match waydroid::Waydroid::detect().and_then(|waydroid| waydroid.prop_set(&key, &value)) {
-        Ok(_) => CommandResult::success(),
-        Err(error) => error.into(),
-    }
+async fn waydroid_prop_set(key: String, value: String) -> CommandResult {
+    off_main_thread(move || {
+        match waydroid::Waydroid::detect().and_then(|waydroid| waydroid.prop_set(&key, &value)) {
+            Ok(_) => CommandResult::success(),
+            Err(error) => error.into(),
+        }
+    })
+    .await
 }
 
 #[tauri::command]
-fn waydroid_prop_get(key: String) -> CommandResult {
-    match waydroid::Waydroid::detect().and_then(|waydroid| waydroid.prop_get(&key)) {
-        Ok(value) => CommandResult::with_data(value),
-        Err(error) => error.into(),
-    }
+async fn waydroid_prop_get(key: String) -> CommandResult {
+    off_main_thread(move || {
+        match waydroid::Waydroid::detect().and_then(|waydroid| waydroid.prop_get(&key)) {
+            Ok(value) => CommandResult::with_data(value),
+            Err(error) => error.into(),
+        }
+    })
+    .await
 }
 
 #[tauri::command]
@@ -364,85 +412,95 @@ fi
 }
 
 #[tauri::command]
-fn check_gapps_status() -> CommandResult {
-    let marker = marker_file("gapps_installed");
+async fn check_gapps_status() -> CommandResult {
+    off_main_thread(|| {
+        let marker = marker_file("gapps_installed");
 
-    // Method 1: ask the running container. This is the only authoritative source,
-    // so it also tells us when a previously written marker has gone stale.
-    if let Some(stdout) = probe(|waydroid| waydroid.shell(&["pm", "list", "packages"])) {
-        let has_play_store = stdout.lines().any(|l| l.contains("com.android.vending"));
-        let has_play_services = stdout.lines().any(|l| l.contains("com.google.android.gms"));
-        let has_play_framework = stdout.lines().any(|l| l.contains("com.google.android.gsf"));
+        // Method 1: ask the running container. This is the only authoritative source,
+        // so it also tells us when a previously written marker has gone stale.
+        if let Some(stdout) = probe(|waydroid| waydroid.shell(&["pm", "list", "packages"])) {
+            let has_play_store = stdout.lines().any(|l| l.contains("com.android.vending"));
+            let has_play_services = stdout.lines().any(|l| l.contains("com.google.android.gms"));
+            let has_play_framework = stdout.lines().any(|l| l.contains("com.google.android.gsf"));
 
-        if has_play_store && has_play_services {
-            write_marker(&marker);
+            if has_play_store && has_play_services {
+                write_marker(&marker);
+                return CommandResult::report(
+                    "installed",
+                    "Google Play Store and Play Services are installed.",
+                );
+            }
+
+            // The image no longer carries GApps (e.g. it was re-initialized or wiped
+            // outside DroidDeck), so forget the marker instead of trusting it forever.
+            if marker.exists() {
+                let _ = std::fs::remove_file(&marker);
+            }
+
+            if has_play_store || has_play_services || has_play_framework {
+                return CommandResult::report(
+                    "partial",
+                    "GApps partially installed. Consider reinstalling.",
+                );
+            }
+
+            return CommandResult::report("not_installed", "GApps is not installed.");
+        }
+
+        // Method 2: the container is offline, trust the marker written by a successful install
+        if marker.exists() {
             return CommandResult::report(
                 "installed",
-                "Google Play Store and Play Services are installed.",
+                "GApps installed (verified marker). Start Waydroid for a live check.",
             );
         }
 
-        // The image no longer carries GApps (e.g. it was re-initialized or wiped
-        // outside DroidDeck), so forget the marker instead of trusting it forever.
-        if marker.exists() {
-            let _ = std::fs::remove_file(&marker);
+        // Method 3: Fallback to waydroid app list (works offline but only shows launchable apps)
+        if let Some(stdout) = probe(|waydroid| waydroid.app_list()) {
+            if stdout.contains("com.android.vending") {
+                return CommandResult::report("installed", "Play Store detected via app list.");
+            }
         }
 
-        if has_play_store || has_play_services || has_play_framework {
-            return CommandResult::report(
-                "partial",
-                "GApps partially installed. Consider reinstalling.",
-            );
-        }
-
-        return CommandResult::report("not_installed", "GApps is not installed.");
-    }
-
-    // Method 2: the container is offline, trust the marker written by a successful install
-    if marker.exists() {
-        return CommandResult::report(
-            "installed",
-            "GApps installed (verified marker). Start Waydroid for a live check.",
-        );
-    }
-
-    // Method 3: Fallback to waydroid app list (works offline but only shows launchable apps)
-    if let Some(stdout) = probe(|waydroid| waydroid.app_list()) {
-        if stdout.contains("com.android.vending") {
-            return CommandResult::report("installed", "Play Store detected via app list.");
-        }
-    }
-
-    // No evidence of GApps
-    CommandResult::report("not_installed", "GApps is not installed.")
+        // No evidence of GApps
+        CommandResult::report("not_installed", "GApps is not installed.")
+    })
+    .await
 }
 
 #[tauri::command]
-fn check_houdini_status() -> CommandResult {
-    let marker = marker_file("houdini_installed");
+async fn check_houdini_status() -> CommandResult {
+    off_main_thread(|| {
+        let marker = marker_file("houdini_installed");
 
-    // The container reports the ARM translation layer in its ABI list when it is loaded.
-    if let Some(abilist) = probe(|waydroid| waydroid.shell(&["getprop", "ro.product.cpu.abilist"]))
-    {
-        let abilist = abilist.to_lowercase();
-        if abilist.contains("arm") {
-            write_marker(&marker);
-            return CommandResult::report("installed", "ARM translation (libhoudini) is active.");
+        // The container reports the ARM translation layer in its ABI list when it is loaded.
+        if let Some(abilist) =
+            probe(|waydroid| waydroid.shell(&["getprop", "ro.product.cpu.abilist"]))
+        {
+            let abilist = abilist.to_lowercase();
+            if abilist.contains("arm") {
+                write_marker(&marker);
+                return CommandResult::report(
+                    "installed",
+                    "ARM translation (libhoudini) is active.",
+                );
+            }
+            if marker.exists() {
+                let _ = std::fs::remove_file(&marker);
+            }
+            return CommandResult::report("not_installed", "ARM translation is not active.");
         }
+
         if marker.exists() {
-            let _ = std::fs::remove_file(&marker);
+            return CommandResult::report(
+                "installed",
+                "ARM translation (libhoudini) installed (verified marker).",
+            );
         }
-        return CommandResult::report("not_installed", "ARM translation is not active.");
-    }
 
-    if marker.exists() {
-        return CommandResult::report(
-            "installed",
-            "ARM translation (libhoudini) installed (verified marker).",
-        );
-    }
-
-    CommandResult::report("not_installed", "ARM Translation is not installed.")
+        CommandResult::report("not_installed", "ARM Translation is not installed.")
+    })
+    .await
 }
 
 #[tauri::command]
@@ -766,6 +824,7 @@ pub fn run() {
             waydroid_launch_app,
             waydroid_prop_set,
             waydroid_prop_get,
+            waydroid_cancel,
             waydroid_log,
             open_shared_folder,
             check_gapps_status,
