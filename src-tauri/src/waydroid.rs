@@ -316,6 +316,7 @@ pub(crate) fn run_program(
     cancellable: bool,
 ) -> Result<String> {
     let program = program_path.to_string_lossy().to_string();
+    let started = Instant::now();
     let mut command = Command::new(program_path);
     command
         .args(args)
@@ -323,9 +324,10 @@ pub(crate) fn run_program(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
-    let mut child: Child = command
-        .spawn()
-        .map_err(|error| AppError::from_spawn(&program, HINT, error))?;
+    let mut child: Child = command.spawn().map_err(|error| {
+        log::error!("{program} {:?} could not start: {error}", args);
+        AppError::from_spawn(&program, HINT, error)
+    })?;
 
     let stdout = child.stdout.take().expect("stdout was piped");
     let stderr = child.stderr.take().expect("stderr was piped");
@@ -344,8 +346,10 @@ pub(crate) fn run_program(
                     let _ = stdout_reader.join();
                     let _ = stderr_reader.join();
                     return if cancelled {
+                        log::warn!("{program} {:?} cancelled after {timeout_secs}s", args);
                         Err(AppError::CancelRequested { program })
                     } else {
+                        log::warn!("{program} {:?} timed out after {timeout_secs}s", args);
                         Err(AppError::Timeout {
                             program,
                             seconds: timeout_secs,
@@ -365,7 +369,13 @@ pub(crate) fn run_program(
     let stdout = stdout_reader.join().unwrap_or_default();
     let stderr = stderr_reader.join().unwrap_or_default();
 
-    interpret(&program, status, stdout, stderr)
+    let outcome = interpret(&program, status, stdout, stderr);
+    let elapsed = started.elapsed().as_millis();
+    match &outcome {
+        Ok(_) => log::info!("{program} {:?} ok in {elapsed}ms", args),
+        Err(failure) => log::warn!("{program} {:?} failed in {elapsed}ms: {failure}", args),
+    }
+    outcome
 }
 
 /// Decide what a finished child means. Zero exit is not success on its own:

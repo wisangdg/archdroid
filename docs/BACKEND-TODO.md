@@ -56,9 +56,9 @@ Sumber fitur: hasil RE LDPlayer 9 (`~/Downloads/ldplayer-re/ANALYSIS-LDPlayer-CL
   Telusuri semua script: pakai `sh_quote` untuk nilai dinamis.
   *DoD:* test dengan payload `x'; rm -rf /tmp/x; echo '` → tidak tereksekusi. → **selesai untuk jalur waydroid**: argv dibangun sebagai elemen terpisah dan tidak pernah lewat shell (test `a_package_name_never_becomes_a_second_command`). Script root tetap memakai `sh_quote` seperti sebelumnya.
 
-- [ ] **P1 M — Aktifkan logging terstruktur**
+- [x] **P1 M — Aktifkan logging terstruktur**
   `tauri-plugin-log` sudah jadi dependency tapi belum di-`init()`. Catat setiap command + durasi.
-  *DoD:* ada file log berisi jejak command.
+  *DoD:* ada file log berisi jejak command. → **selesai**: plugin di-`init()` pada level Info; target bawaan = stdout + `<app_log_dir>/DroidDeck.log` (rotasi 40 KB, keep-one; Linux: `~/.local/share/io.github.droiddeck/logs/`). Setiap proses anak dicatat di `run_program`: `program argv ok in Nms`, `failed in Nms: <error>`, `timed out after Ns`, `cancelled after Ns`; spawn gagal di-`error!`. Script root dicatat saat diminta, dan hasil proses elevasi (pkexec/sudo) dicatat di `run_and_stream`. Command murni in-process (mis. `waydroid_cancel`) tidak punya durasi untuk dicatat. Verifikasi runtime (buka app, cek file log) belum bisa dilakukan di mesin ini karena `waydroid` tidak terpasang.
 
 - [x] **P1 S — Tambah unit test argv builder**
   Setiap helper murni (bangun argumen `waydroid app install`, parser `waydroid status`, dst) punya test.
@@ -214,8 +214,10 @@ Catatan penting: CachyDroid tidak memiliki surface render Waydroid, jadi injeksi
 ## 7. Hardening & rilis (P1–P2)
 
 - [ ] **P1 S — Semua command tahan saat `waydroid` tak ada / belum di-init** (tidak panic, pesan jelas).
-- [ ] **P1 S — CI**: `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test`, `npm run build`.
-- [ ] **P1 S — Least privilege** di `capabilities/default.json` (tinjau scope `dialog`).
+- [x] **P1 S — CI**: `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test`, `npm run build`.
+  → **selesai**: `.github/workflows/ci.yml` (ubuntu-24.04: `npm ci` + `npm run build`, lalu `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`). Workflow belum pernah jalan (repo belum punya remote); CI baru hijau setelah file frontend yang belum ter-commit ikut masuk.
+- [x] **P1 S — Least privilege** di `capabilities/default.json` (tinjau scope `dialog`).
+  → **selesai**: `dialog:default` → `dialog:allow-open`, karena frontend hanya memakai `open()` (`src/App.jsx`). `core:default` dipertahankan sebagai baseline Tauri; memangkasnya per-API hanya menambah noise tanpa model ancaman yang jelas.
 - [ ] **P2 S — Packaging** deb/AppImage: identifier `io.github.droiddeck`, desktop entry, ikon.
 - [ ] **P2 S — First-run wizard** disambungkan ke `status_json()`.
 

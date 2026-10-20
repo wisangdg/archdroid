@@ -1026,10 +1026,12 @@ fn spawn_line_reader(
 
 /// Spawn a command, stream both of its pipes to the UI and report how it went.
 fn run_and_stream(app: &AppHandle, mut command: Command) -> StreamResult {
+    let program = command.get_program().to_string_lossy().to_string();
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = match command.spawn() {
         Ok(child) => child,
         Err(e) => {
+            log::error!("{program} could not start: {e}");
             let _ = app.emit(
                 "cmd-output",
                 format!("[ERROR] Could not start command: {}", e),
@@ -1059,7 +1061,7 @@ fn run_and_stream(app: &AppHandle, mut command: Command) -> StreamResult {
         .map(|text| text.contains(ELEVATED_SENTINEL))
         .unwrap_or(false);
 
-    match status {
+    let outcome = match status {
         Ok(status) => StreamResult {
             success: status.success(),
             code: status.code(),
@@ -1076,7 +1078,13 @@ fn run_and_stream(app: &AppHandle, mut command: Command) -> StreamResult {
                 started,
             }
         }
+    };
+    if outcome.success {
+        log::info!("{program} finished");
+    } else {
+        log::warn!("{program} finished with code {:?}", outcome.code);
     }
+    outcome
 }
 
 /// Run a script that needs root.
@@ -1091,6 +1099,7 @@ fn run_and_stream(app: &AppHandle, mut command: Command) -> StreamResult {
 /// when the app was started from a terminal. Force either one with
 /// `DROIDDECK_ELEVATE=pkexec|sudo`.
 fn stream_privileged_script(app: AppHandle, script: String) {
+    log::info!("root script requested:\n{script}");
     thread::spawn(move || {
         let body = elevate_env(&script);
         let forced = std::env::var("DROIDDECK_ELEVATE").unwrap_or_default();
@@ -1146,6 +1155,13 @@ fn stream_privileged_script(app: AppHandle, script: String) {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        // Defaults already log to stdout and `<app log dir>/<app name>.log`
+        // (40 KB, keep-one rotation); Info keeps chatty deps out of the trace.
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .level(log::LevelFilter::Info)
+                .build(),
+        )
         .invoke_handler(tauri::generate_handler![
             waydroid_status,
             waydroid_status_json,
