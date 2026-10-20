@@ -123,10 +123,9 @@ Catatan:
   host wajib punya `adb` (paket `android-tools`); tanpa itu command
   mengembalikan `not_found` + hint. Koneksi di-refresh tiap panggilan
   (`ponytail:` di `src-tauri/src/adb.rs`).
-- **`InstanceInfo`**: `width/height/dpi` masih `0` karena `waydroid status`
-  tidak melaporkan resolusi — diisi saat §3 (profil) ada. `cpu`/`memory`
-  memakai resource host (container inherit), `root` selalu `true` (shell
-  container memang root).
+- **`InstanceInfo`**: `width/height/dpi` diisi dari profil perangkat (§3);
+  `cpu`/`memory` memakai resource host (container inherit), `root` selalu
+  `true` (shell container memang root).
 - **`reboot`** memakai jalur elevasi yang sama dengan installer: hasilnya
   lewat event `cmd-output`/`cmd-finished`, bukan `CommandResult.data`.
 - Nama command memakai prefix `waydroid_*` agar konsisten dengan command lama;
@@ -138,28 +137,72 @@ Catatan:
 
 Kelompok key LDPlayer sudah terekstrak (lihat blueprint §3). Ini yang dipetakan ke Waydroid.
 
-- [ ] **P0 M — `DeviceProfile` + persistensi**
+- [x] **P0 M — `DeviceProfile` + persistensi**
   Struct + simpan/muat JSON di config dir app. Field: `width,height,dpi,cpu,memory,root,mac,imei,imsi,androidid,manufacturer,model,phone,locale`.
   *DoD:* round-trip serialize/deserialize bertest; file rusak → fallback default, tidak panic.
 
-- [ ] **P0 M — `profile_apply(profile)`**
+- [x] **P0 M — `profile_apply(profile)`**
   Tulis prop + `waydroid.cfg` / `waydroid_base.prop` (di bawah elevasi), idempoten.
   *DoD:* apply dua kali → hasil sama; test bahwa argv builder benar (tanpa menjalankan).
 
-- [ ] **P1 M — `profile_get()`**
+- [x] **P1 M — `profile_get()`**
   Baca nilai efektif (prop + cfg), kembalikan struct yang sama.
   *DoD:* `profile_get(profile_apply(x)) == x` untuk field yang didukung.
 
-- [ ] **P1 S — Resolusi/DPI/CPU/memori**
+- [x] **P1 S — Resolusi/DPI/CPU/memori**
   `--resolution w,h,dpi`, `cpuCount`, `memorySize`. Mapping eksplisit mana yang Waydroid dukung.
   *DoD:* tabel mapping di kode (bukan komentar) + test.
 
-- [ ] **P1 M — Props identitas**
+- [x] **P1 M — Props identitas**
   `manufacturer`, `model`, `androidid`, `imei/imsi`, `mac`.
   *DoD:* field yang **tidak** bisa di-set ditandai `Unsupported` dan UI disuruh menyembunyikannya — jangan diam-diam gagal.
 
 - [ ] **P2 S — `--root 1|0`** (khusus 9.x) → prop/cfg terkait.
 - [ ] **P2 S — `globalsetting`** (`--fps/--audio/--cleanmode`) → knob cfg; tandai yang tak ada padanan.
+
+**Status Phase C (20 Okt 2026): selesai (P0–P1).**
+
+| Command | Hasil |
+|---|---|
+| `profile_get` | JSON `DeviceProfile`; overlay `[properties]` dari `waydroid.cfg`, lalu `wm size`/`wm density` bila sesi + adb hidup |
+| `profile_apply` | simpan JSON; resolusi/DPI via adb (langsung); identitas ke `[properties]` lewat helper elevasi (streaming `cmd-output`/`cmd-finished`) |
+| `profile_capabilities` | tabel `field/supported/detail` untuk UI menyembunyikan field tak didukung |
+
+Mapping (tabel `FIELDS` di `src-tauri/src/device.rs`, ada test-nya):
+
+| Field profil | Mekanisme Waydroid 1.6.3 | Kapan berlaku |
+|---|---|---|
+| `width`/`height` | `adb shell wm size WxH` | langsung; override Android bertahan setelah reboot |
+| `dpi` | `adb shell wm density N` | langsung |
+| `manufacturer` | `ro.product.manufacturer` di `[properties]` | setelah container restart |
+| `model` | `ro.product.model` di `[properties]` | setelah container restart |
+| `locale` | `persist.sys.locale` di `[properties]` | setelah container restart |
+| `cpu`, `memory`, `root`, `mac`, `imei`, `imsi`, `androidid`, `phone` | tidak ada knob di Waydroid | dilaporkan `unsupported`, tidak pernah gagal diam-diam |
+
+Catatan:
+
+- `[properties]` di `waydroid.cfg` adalah sumber persisten: `tools/helpers/lxc.py`
+  menulisnya ke `waydroid_base.prop` setiap container start. Karena itu
+  identitas butuh restart, sedangkan `waydroid prop set` hanya runtime dan
+  tidak dipakai untuk apply.
+- **Tidak ada `persist.waydroid.width/height` di 1.6.3** (dicek dari sumber);
+  karena itu resolusi/DPI lewat `wm`, bukan prop. Efeknya skala UI Android,
+  bukan ukuran window Wayland.
+- Tulis cfg hanya jika nilai `[properties]` benar-benar berubah, jadi apply
+  kedua tanpa perubahan tidak memunculkan prompt root. Payload ditulis
+  sebagai base64 ke `waydroid.cfg.tmp` lalu `mv` (atomik, aman dari quoting).
+- Cfg harus terbaca (mode 644). Kalau tidak terbaca, profil tetap disimpan
+  tapi identitas **tidak** diterapkan dan alasannya dikembalikan di `notes`.
+- `profile_get` jatuh ke nilai JSON tersimpan untuk width/height/dpi saat sesi
+  mati/adb tidak ada; field identitas dibaca dari cfg dan key yang tidak ada
+  berarti default sistem (bukan nilai JSON), jadi write root yang dibatalkan
+  tidak tampak seolah-olah berhasil. Dengan begitu
+  `profile_get(profile_apply(x)) == x` untuk field yang didukung.
+- Belum ada tombol "reset ke default" (`wm size reset`/`wm density reset`);
+  nilai `0` berarti "jangan sentuh", bukan reset.
+- Verifikasi runtime belum bisa dilakukan: `waydroid`/`adb` tidak terpasang
+  di mesin ini. Parser `wm` dan round-trip JSON/properti dites dengan output
+  stub.
 
 ---
 

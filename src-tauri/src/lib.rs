@@ -8,6 +8,7 @@ use std::thread;
 use tauri::{AppHandle, Emitter};
 
 mod adb;
+mod device;
 mod error;
 mod waydroid;
 
@@ -767,11 +768,10 @@ fn host_memory_mb() -> u32 {
     parse_memory_mb(&std::fs::read_to_string("/proc/meminfo").unwrap_or_default())
 }
 
-// ponytail: Waydroid is one container that inherits host CPU/RAM and `status`
-// reports no resolution, so width/height/dpi stay 0 until §3 reads them from
-// the device profile. `root` is true by design: `waydroid shell` always runs
-// as root inside the container.
-fn single_instance(snapshot: &StatusSnapshot) -> InstanceInfo {
+// ponytail: Waydroid is one container that inherits host CPU/RAM. `root` is
+// true by design (`waydroid shell` is root), and resolution/DPI mirror the
+// saved device profile.
+fn single_instance(snapshot: &StatusSnapshot, profile: &device::DeviceProfile) -> InstanceInfo {
     InstanceInfo {
         playerid: 0,
         name: "waydroid".to_string(),
@@ -782,15 +782,118 @@ fn single_instance(snapshot: &StatusSnapshot) -> InstanceInfo {
             .unwrap_or(1),
         memory: host_memory_mb(),
         root: true,
-        width: 0,
-        height: 0,
-        dpi: 0,
+        width: profile.width,
+        height: profile.height,
+        dpi: profile.dpi,
     }
 }
 
 #[tauri::command]
 async fn waydroid_list_instances() -> CommandResult {
-    off_main_thread(|| json_result(&vec![single_instance(&status_snapshot())])).await
+    off_main_thread(|| {
+        let snapshot = status_snapshot();
+        let profile = device::load_from(&device::config_path());
+        json_result(&vec![single_instance(&snapshot, &profile)])
+    })
+    .await
+}
+
+#[tauri::command]
+fn profile_capabilities() -> CommandResult {
+    json_result(&device::FIELDS)
+}
+
+/// Saved profile overlaid with the values Android actually uses right now
+/// (waydroid.cfg on disk, plus `wm size`/`wm density` when the session is up).
+#[tauri::command]
+async fn profile_get() -> CommandResult {
+    off_main_thread(|| {
+        let mut profile = device::load_from(&device::config_path());
+        if let Ok(cfg) = std::fs::read_to_string(device::WAYDROID_CFG) {
+            device::overlay_cfg(&mut profile, &cfg);
+        }
+
+        if let Ok(output) = adb::shell_line("wm size; wm density") {
+            if let Some((width, height)) = device::parse_wm_size(&output) {
+                profile.width = width;
+                profile.height = height;
+            }
+            if let Some(dpi) = device::parse_wm_density(&output) {
+                profile.dpi = dpi;
+            }
+        }
+        json_result(&profile)
+    })
+    .await
+}
+
+/// Persist the profile, apply what Android can change live, and queue the INI
+/// changes behind one privileged write. The root part is streamed through
+/// `cmd-output`/`cmd-finished`, so the reply only says what is pending.
+#[tauri::command]
+async fn profile_apply(app: AppHandle, profile: device::DeviceProfile) -> CommandResult {
+    off_main_thread(move || {
+        if let Err(message) = device::validate(&profile) {
+            return AppError::invalid_input(message).into();
+        }
+        if let Err(error) = device::save_to(&device::config_path(), &profile) {
+            return AppError::Io(error).into();
+        }
+
+        let mut report = device::ApplyReport {
+            unsupported: device::unsupported_fields(),
+            ..device::ApplyReport::default()
+        };
+
+        if profile.width > 0 {
+            let command = format!("wm size {}x{}", profile.width, profile.height);
+            match adb::shell_line(&command) {
+                Ok(_) => report.applied.extend(["width", "height"]),
+                Err(_) => report.deferred.extend(["width", "height"]),
+            }
+        }
+        if profile.dpi > 0 {
+            match adb::shell_line(&format!("wm density {}", profile.dpi)) {
+                Ok(_) => report.applied.push("dpi"),
+                Err(_) => report.deferred.push("dpi"),
+            }
+        }
+        if !report.deferred.is_empty() {
+            report.notes.push(
+                "Resolution/DPI need a running session plus adb (android-tools); apply again once both are available."
+                    .to_string(),
+            );
+        }
+
+        let old_cfg = match std::fs::read_to_string(device::WAYDROID_CFG) {
+            Ok(text) => Some(text),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Some(String::new()),
+            Err(_) => None,
+        };
+        match old_cfg {
+            Some(old_cfg) => {
+                let updates = device::property_updates(&profile);
+                let changed = device::changed_fields(&device::read_properties(&old_cfg), &updates);
+                if !changed.is_empty() {
+                    let new_cfg = device::apply_properties(&old_cfg, &updates);
+                    stream_privileged_script(app, device::cfg_write_script(&new_cfg));
+                    report.pending = changed;
+                    report.restart_required = true;
+                    report.notes.push(
+                        "Identity fields are queued in waydroid.cfg; restart Waydroid to load them."
+                            .to_string(),
+                    );
+                }
+            }
+            None => report.notes.push(
+                "waydroid.cfg is not readable; identity fields were saved but not applied."
+                    .to_string(),
+            ),
+        }
+
+        json_result(&report)
+    })
+    .await
 }
 
 /// `waydroid container restart` needs root, so it goes through the elevation
@@ -1167,6 +1270,9 @@ pub fn run() {
             waydroid_status_json,
             waydroid_is_running,
             waydroid_list_instances,
+            profile_capabilities,
+            profile_get,
+            profile_apply,
             waydroid_reboot,
             waydroid_kill_app,
             waydroid_getprop_all,
