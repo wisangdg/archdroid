@@ -21,7 +21,7 @@
 //!   `status`, `session`, `app`, `prop` and `show-full-ui` do not need root.
 
 use std::io::Read;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
@@ -74,6 +74,15 @@ pub fn looks_uninitialized(text: &str) -> bool {
         || lower.contains(&NOT_INITIALIZED_LEGACY_MARKER.to_ascii_lowercase())
 }
 
+/// `waydroid status` prints `Session:\tRUNNING` when the session is up and
+/// `Session:\tSTOPPED` (plus only the vendor type) when it is not.
+pub fn session_running(status: &str) -> bool {
+    status.lines().any(|line| {
+        line.strip_prefix("Session:")
+            .is_some_and(|value| value.trim() == "RUNNING")
+    })
+}
+
 fn argv(parts: &[&str]) -> Vec<String> {
     parts.iter().map(|part| (*part).to_string()).collect()
 }
@@ -93,6 +102,11 @@ pub fn argv_session_start() -> Vec<String> {
 
 pub fn argv_session_stop() -> Vec<String> {
     argv(&["session", "stop"])
+}
+
+/// `waydroid adb connect` points the host adb server at the container IP.
+pub fn argv_adb_connect() -> Vec<String> {
+    argv(&["adb", "connect"])
 }
 
 pub fn argv_app_list() -> Vec<String> {
@@ -158,67 +172,13 @@ impl Waydroid {
     /// Both pipes are drained on reader threads so a chatty command cannot
     /// deadlock on a full pipe while we wait for it to exit.
     pub fn run(&self, args: &[String], timeout_secs: u64) -> Result<String> {
-        self.run_inner(args, timeout_secs, false)
+        run_program(&self.program, args, timeout_secs, false)
     }
 
     /// Same as [`run`], but a [`request_cancel`] call kills the child.
     pub fn run_cancellable(&self, args: &[String], timeout_secs: u64) -> Result<String> {
         CANCEL.store(false, Ordering::SeqCst);
-        self.run_inner(args, timeout_secs, true)
-    }
-
-    fn run_inner(&self, args: &[String], timeout_secs: u64, cancellable: bool) -> Result<String> {
-        let program = self.program.to_string_lossy().to_string();
-        let mut command = Command::new(&self.program);
-        command
-            .args(args)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-
-        let mut child: Child = command
-            .spawn()
-            .map_err(|error| AppError::from_spawn(&program, HINT, error))?;
-
-        let stdout = child.stdout.take().expect("stdout was piped");
-        let stderr = child.stderr.take().expect("stderr was piped");
-        let stdout_reader = thread::spawn(move || read_lossy(stdout));
-        let stderr_reader = thread::spawn(move || read_lossy(stderr));
-
-        let deadline = Instant::now() + Duration::from_secs(timeout_secs);
-        let status = loop {
-            match child.try_wait() {
-                Ok(Some(status)) => break status,
-                Ok(None) => {
-                    if (cancellable && cancel_requested()) || Instant::now() >= deadline {
-                        let cancelled = cancellable && cancel_requested();
-                        let _ = child.kill();
-                        let _ = child.wait();
-                        let _ = stdout_reader.join();
-                        let _ = stderr_reader.join();
-                        return if cancelled {
-                            Err(AppError::CancelRequested { program })
-                        } else {
-                            Err(AppError::Timeout {
-                                program,
-                                seconds: timeout_secs,
-                            })
-                        };
-                    }
-                    thread::sleep(Duration::from_millis(20));
-                }
-                Err(error) => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Err(AppError::Io(error));
-                }
-            }
-        };
-
-        let stdout = stdout_reader.join().unwrap_or_default();
-        let stderr = stderr_reader.join().unwrap_or_default();
-
-        interpret(&program, status, stdout, stderr)
+        run_program(&self.program, args, timeout_secs, true)
     }
 
     pub fn version(&self) -> Result<String> {
@@ -336,6 +296,76 @@ impl Waydroid {
     pub fn shell(&self, command: &[&str]) -> Result<String> {
         self.run(&argv_shell(command), TIMEOUT_NORMAL)
     }
+
+    /// Point the host `adb` server at the container. No root needed (only
+    /// `shell`, `container`, `logcat`, `init` and `upgrade` call `actionNeedRoot`).
+    pub fn adb_connect(&self) -> Result<String> {
+        self.run(&argv_adb_connect(), TIMEOUT_QUICK)
+    }
+}
+
+/// Run a child with a deadline, draining both pipes on reader threads.
+///
+/// Shared with `adb.rs`: `adb shell` gets the same timeout and "exit 0 is not
+/// success" handling as every waydroid action. `cancellable` opts into the
+/// [`request_cancel`] flag (long operations only).
+pub(crate) fn run_program(
+    program_path: &Path,
+    args: &[String],
+    timeout_secs: u64,
+    cancellable: bool,
+) -> Result<String> {
+    let program = program_path.to_string_lossy().to_string();
+    let mut command = Command::new(program_path);
+    command
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let mut child: Child = command
+        .spawn()
+        .map_err(|error| AppError::from_spawn(&program, HINT, error))?;
+
+    let stdout = child.stdout.take().expect("stdout was piped");
+    let stderr = child.stderr.take().expect("stderr was piped");
+    let stdout_reader = thread::spawn(move || read_lossy(stdout));
+    let stderr_reader = thread::spawn(move || read_lossy(stderr));
+
+    let deadline = Instant::now() + Duration::from_secs(timeout_secs);
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => {
+                if (cancellable && cancel_requested()) || Instant::now() >= deadline {
+                    let cancelled = cancellable && cancel_requested();
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    let _ = stdout_reader.join();
+                    let _ = stderr_reader.join();
+                    return if cancelled {
+                        Err(AppError::CancelRequested { program })
+                    } else {
+                        Err(AppError::Timeout {
+                            program,
+                            seconds: timeout_secs,
+                        })
+                    };
+                }
+                thread::sleep(Duration::from_millis(20));
+            }
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(AppError::Io(error));
+            }
+        }
+    };
+
+    let stdout = stdout_reader.join().unwrap_or_default();
+    let stderr = stderr_reader.join().unwrap_or_default();
+
+    interpret(&program, status, stdout, stderr)
 }
 
 /// Decide what a finished child means. Zero exit is not success on its own:
@@ -380,7 +410,21 @@ mod tests {
         assert_eq!(argv_status(), vec!["status"]);
         assert_eq!(argv_session_start(), vec!["session", "start"]);
         assert_eq!(argv_session_stop(), vec!["session", "stop"]);
+        assert_eq!(argv_adb_connect(), vec!["adb", "connect"]);
         assert_eq!(argv_version(), vec!["--version"]);
+    }
+
+    /// Format checked against `tools/actions/status.py` in waydroid 1.6.3:
+    /// running prints several tab separated lines, stopped only two.
+    #[test]
+    fn status_output_is_parsed_for_the_session_state() {
+        let running = "Session:\tRUNNING\nContainer:\tRUNNING\nVendor type:\tMAINLINE\nIP address:\t192.168.240.112\nSession user:\twdg(1000)\nWayland display:\twayland-0";
+        assert!(session_running(running));
+
+        let stopped = "Session:\tSTOPPED\nVendor type:\tMAINLINE";
+        assert!(!session_running(stopped));
+        assert!(!session_running(""));
+        assert!(!session_running("Session:\tUNKNOWN"));
     }
 
     #[test]

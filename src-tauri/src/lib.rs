@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use tauri::{AppHandle, Emitter};
 
+mod adb;
 mod error;
 mod waydroid;
 
@@ -18,6 +19,20 @@ pub struct AppInfo {
     pub name: String,
     pub package: String,
     pub icon: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct DiagnosticItem {
+    pub key: String,
+    pub title: String,
+    pub status: String,
+    pub value: String,
+    pub detail: String,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct DiagnosticsReport {
+    pub items: Vec<DiagnosticItem>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -389,6 +404,151 @@ fn open_shared_folder() -> CommandResult {
 }
 
 #[tauri::command]
+fn check_host_diagnostics() -> DiagnosticsReport {
+    let mut items = Vec::new();
+
+    // 1. Session Type (Wayland vs X11)
+    let is_wayland = std::env::var("WAYLAND_DISPLAY").is_ok()
+        || std::env::var("XDG_SESSION_TYPE")
+            .map(|s| s.to_lowercase() == "wayland")
+            .unwrap_or(false);
+
+    if is_wayland {
+        items.push(DiagnosticItem {
+            key: "session".to_string(),
+            title: "Display Session".to_string(),
+            status: "ok".to_string(),
+            value: "Wayland Native".to_string(),
+            detail: "Wayland compositor detected. Waydroid runs with native direct rendering."
+                .to_string(),
+        });
+    } else {
+        items.push(DiagnosticItem {
+            key: "session".to_string(),
+            title: "Display Session".to_string(),
+            status: "warning".to_string(),
+            value: "X11 Display".to_string(),
+            detail: "Waydroid requires Wayland. Under X11, a nested compositor (Weston/cage) may be required.".to_string(),
+        });
+    }
+
+    // 2. KVM Virtualization Acceleration
+    let kvm_path = Path::new("/dev/kvm");
+    if kvm_path.exists() {
+        let is_writable = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(kvm_path)
+            .is_ok();
+
+        if is_writable {
+            items.push(DiagnosticItem {
+                key: "kvm".to_string(),
+                title: "KVM Acceleration".to_string(),
+                status: "ok".to_string(),
+                value: "Hardware KVM Ready".to_string(),
+                detail: "/dev/kvm is available with read/write access.".to_string(),
+            });
+        } else {
+            items.push(DiagnosticItem {
+                key: "kvm".to_string(),
+                title: "KVM Acceleration".to_string(),
+                status: "warning".to_string(),
+                value: "Permission Denied".to_string(),
+                detail: "KVM device exists but user lacks write permission. Run: sudo usermod -aG kvm $USER".to_string(),
+            });
+        }
+    } else {
+        items.push(DiagnosticItem {
+            key: "kvm".to_string(),
+            title: "KVM Acceleration".to_string(),
+            status: "warning".to_string(),
+            value: "Not Detected".to_string(),
+            detail:
+                "/dev/kvm not found. Ensure Intel VT-x or AMD-V is enabled in motherboard BIOS."
+                    .to_string(),
+        });
+    }
+
+    // 3. Android Binder IPC
+    let has_binder = Path::new("/dev/binderfs").exists()
+        || Path::new("/dev/binder").exists()
+        || Path::new("/dev/binderfs/binder").exists();
+
+    if has_binder {
+        items.push(DiagnosticItem {
+            key: "binder".to_string(),
+            title: "Android Binder IPC".to_string(),
+            status: "ok".to_string(),
+            value: "Binder Nodes Active".to_string(),
+            detail: "Android kernel inter-process communication drivers are active.".to_string(),
+        });
+    } else {
+        items.push(DiagnosticItem {
+            key: "binder".to_string(),
+            title: "Android Binder IPC".to_string(),
+            status: "ok".to_string(),
+            value: "Managed by Daemon".to_string(),
+            detail: "Binderfs will be mounted automatically when container daemon starts."
+                .to_string(),
+        });
+    }
+
+    // 4. GPU 3D Passthrough
+    let has_gpu = Path::new("/dev/dri/renderD128").exists() || Path::new("/dev/dri").exists();
+    if has_gpu {
+        items.push(DiagnosticItem {
+            key: "gpu".to_string(),
+            title: "GPU Acceleration".to_string(),
+            status: "ok".to_string(),
+            value: "Direct Rendering (DRI)".to_string(),
+            detail: "Hardware Direct Rendering Manager node is available for 3D graphics."
+                .to_string(),
+        });
+    } else {
+        items.push(DiagnosticItem {
+            key: "gpu".to_string(),
+            title: "GPU Acceleration".to_string(),
+            status: "warning".to_string(),
+            value: "Software Rendering".to_string(),
+            detail: "Hardware DRI node not found. Android graphics will fall back to software rendering.".to_string(),
+        });
+    }
+
+    // 5. Waydroid Container Service
+    let output = Command::new("systemctl")
+        .arg("is-active")
+        .arg("waydroid-container")
+        .output();
+
+    let service_active = output
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim() == "active")
+        .unwrap_or(false);
+
+    if service_active {
+        items.push(DiagnosticItem {
+            key: "service".to_string(),
+            title: "Container Daemon".to_string(),
+            status: "ok".to_string(),
+            value: "Service Active".to_string(),
+            detail: "waydroid-container.service is actively running in background.".to_string(),
+        });
+    } else {
+        items.push(DiagnosticItem {
+            key: "service".to_string(),
+            title: "Container Daemon".to_string(),
+            status: "info".to_string(),
+            value: "Service Inactive".to_string(),
+            detail:
+                "Container daemon is inactive. It will start automatically when session starts."
+                    .to_string(),
+        });
+    }
+
+    DiagnosticsReport { items }
+}
+
+#[tauri::command]
 fn waydroid_init(app: AppHandle) -> CommandResult {
     let script = r#"
 set -e
@@ -411,94 +571,269 @@ fi
     CommandResult::success()
 }
 
-#[tauri::command]
-async fn check_gapps_status() -> CommandResult {
-    off_main_thread(|| {
-        let marker = marker_file("gapps_installed");
+fn gapps_state() -> CommandResult {
+    let marker = marker_file("gapps_installed");
 
-        // Method 1: ask the running container. This is the only authoritative source,
-        // so it also tells us when a previously written marker has gone stale.
-        if let Some(stdout) = probe(|waydroid| waydroid.shell(&["pm", "list", "packages"])) {
-            let has_play_store = stdout.lines().any(|l| l.contains("com.android.vending"));
-            let has_play_services = stdout.lines().any(|l| l.contains("com.google.android.gms"));
-            let has_play_framework = stdout.lines().any(|l| l.contains("com.google.android.gsf"));
+    // Method 1: ask the running container. This is the only authoritative source,
+    // so it also tells us when a previously written marker has gone stale.
+    if let Some(stdout) = probe(|waydroid| waydroid.shell(&["pm", "list", "packages"])) {
+        let has_play_store = stdout.lines().any(|l| l.contains("com.android.vending"));
+        let has_play_services = stdout.lines().any(|l| l.contains("com.google.android.gms"));
+        let has_play_framework = stdout.lines().any(|l| l.contains("com.google.android.gsf"));
 
-            if has_play_store && has_play_services {
-                write_marker(&marker);
-                return CommandResult::report(
-                    "installed",
-                    "Google Play Store and Play Services are installed.",
-                );
-            }
-
-            // The image no longer carries GApps (e.g. it was re-initialized or wiped
-            // outside DroidDeck), so forget the marker instead of trusting it forever.
-            if marker.exists() {
-                let _ = std::fs::remove_file(&marker);
-            }
-
-            if has_play_store || has_play_services || has_play_framework {
-                return CommandResult::report(
-                    "partial",
-                    "GApps partially installed. Consider reinstalling.",
-                );
-            }
-
-            return CommandResult::report("not_installed", "GApps is not installed.");
-        }
-
-        // Method 2: the container is offline, trust the marker written by a successful install
-        if marker.exists() {
+        if has_play_store && has_play_services {
+            write_marker(&marker);
             return CommandResult::report(
                 "installed",
-                "GApps installed (verified marker). Start Waydroid for a live check.",
+                "Google Play Store and Play Services are installed.",
             );
         }
 
-        // Method 3: Fallback to waydroid app list (works offline but only shows launchable apps)
-        if let Some(stdout) = probe(|waydroid| waydroid.app_list()) {
-            if stdout.contains("com.android.vending") {
-                return CommandResult::report("installed", "Play Store detected via app list.");
-            }
+        // The image no longer carries GApps (e.g. it was re-initialized or wiped
+        // outside DroidDeck), so forget the marker instead of trusting it forever.
+        if marker.exists() {
+            let _ = std::fs::remove_file(&marker);
         }
 
-        // No evidence of GApps
-        CommandResult::report("not_installed", "GApps is not installed.")
+        if has_play_store || has_play_services || has_play_framework {
+            return CommandResult::report(
+                "partial",
+                "GApps partially installed. Consider reinstalling.",
+            );
+        }
+
+        return CommandResult::report("not_installed", "GApps is not installed.");
+    }
+
+    // Method 2: the container is offline, trust the marker written by a successful install
+    if marker.exists() {
+        return CommandResult::report(
+            "installed",
+            "GApps installed (verified marker). Start Waydroid for a live check.",
+        );
+    }
+
+    // Method 3: Fallback to waydroid app list (works offline but only shows launchable apps)
+    if let Some(stdout) = probe(|waydroid| waydroid.app_list()) {
+        if stdout.contains("com.android.vending") {
+            return CommandResult::report("installed", "Play Store detected via app list.");
+        }
+    }
+
+    // No evidence of GApps
+    CommandResult::report("not_installed", "GApps is not installed.")
+}
+
+#[tauri::command]
+async fn check_gapps_status() -> CommandResult {
+    off_main_thread(gapps_state).await
+}
+
+fn houdini_state() -> CommandResult {
+    let marker = marker_file("houdini_installed");
+
+    // The container reports the ARM translation layer in its ABI list when it is loaded.
+    if let Some(abilist) = probe(|waydroid| waydroid.shell(&["getprop", "ro.product.cpu.abilist"]))
+    {
+        let abilist = abilist.to_lowercase();
+        if abilist.contains("arm") {
+            write_marker(&marker);
+            return CommandResult::report("installed", "ARM translation (libhoudini) is active.");
+        }
+        if marker.exists() {
+            let _ = std::fs::remove_file(&marker);
+        }
+        return CommandResult::report("not_installed", "ARM translation is not active.");
+    }
+
+    if marker.exists() {
+        return CommandResult::report(
+            "installed",
+            "ARM translation (libhoudini) installed (verified marker).",
+        );
+    }
+
+    CommandResult::report("not_installed", "ARM Translation is not installed.")
+}
+
+#[tauri::command]
+async fn check_houdini_status() -> CommandResult {
+    off_main_thread(houdini_state).await
+}
+
+/// One dashboard object, assembled from `waydroid status` plus the cheapest
+/// probes. Values that need a running container degrade instead of failing:
+/// this is a read-only overview, not an action.
+#[derive(Serialize, Deserialize)]
+pub struct StatusSnapshot {
+    pub available: bool,
+    pub initialized: bool,
+    pub running: bool,
+    pub booted: bool,
+    /// `installed | partial | not_installed | error`
+    pub gapps: String,
+    /// `installed | not_installed | error`
+    pub houdini: String,
+    pub phantom: bool,
+}
+
+fn status_snapshot() -> StatusSnapshot {
+    let mut snapshot = StatusSnapshot {
+        available: false,
+        initialized: false,
+        running: false,
+        booted: false,
+        gapps: "unknown".to_string(),
+        houdini: "unknown".to_string(),
+        phantom: resolve_program("phantom").is_some(),
+    };
+
+    if let Ok(waydroid) = waydroid::Waydroid::detect() {
+        snapshot.available = true;
+        match waydroid.status() {
+            Ok(text) => {
+                snapshot.initialized = true;
+                snapshot.running = waydroid::session_running(&text);
+            }
+            // Only "not initialized" means the image is absent; every other
+            // failure (d-bus down, container asleep) still leaves a configured image.
+            Err(failure) if failure.code() == error::code::NOT_INITIALIZED => {}
+            Err(_) => snapshot.initialized = true,
+        }
+    }
+
+    if snapshot.running {
+        snapshot.booted = adb::booted();
+    }
+    snapshot.gapps = gapps_state().status;
+    snapshot.houdini = houdini_state().status;
+    snapshot
+}
+
+fn json_result<T: Serialize>(value: &T) -> CommandResult {
+    match serde_json::to_string(value) {
+        Ok(json) => CommandResult::with_data(json),
+        Err(failure) => AppError::Io(std::io::Error::other(failure.to_string())).into(),
+    }
+}
+
+#[tauri::command]
+async fn waydroid_is_running() -> CommandResult {
+    off_main_thread(
+        || match waydroid::Waydroid::detect().and_then(|waydroid| waydroid.status()) {
+            Ok(text) => CommandResult::with_data(waydroid::session_running(&text).to_string()),
+            // "Not initialized" simply means: not running.
+            Err(failure) if failure.code() == error::code::NOT_INITIALIZED => {
+                CommandResult::with_data("false".to_string())
+            }
+            Err(failure) => failure.into(),
+        },
+    )
+    .await
+}
+
+#[tauri::command]
+async fn waydroid_status_json() -> CommandResult {
+    off_main_thread(|| json_result(&status_snapshot())).await
+}
+
+/// LDPlayer `list3` shape. Waydroid is a single container, so the list always
+/// has zero or one entry.
+#[derive(Serialize, Deserialize)]
+pub struct InstanceInfo {
+    pub playerid: u32,
+    pub name: String,
+    pub running: bool,
+    pub android_started: bool,
+    pub cpu: u32,
+    pub memory: u32,
+    pub root: bool,
+    pub width: u32,
+    pub height: u32,
+    pub dpi: u32,
+}
+
+fn parse_memory_mb(meminfo: &str) -> u32 {
+    meminfo
+        .lines()
+        .find_map(|line| line.strip_prefix("MemTotal:"))
+        .and_then(|rest| rest.split_whitespace().next())
+        .and_then(|kilobytes| kilobytes.parse::<u64>().ok())
+        .map(|kilobytes| (kilobytes / 1024) as u32)
+        .unwrap_or(0)
+}
+
+fn host_memory_mb() -> u32 {
+    parse_memory_mb(&std::fs::read_to_string("/proc/meminfo").unwrap_or_default())
+}
+
+// ponytail: Waydroid is one container that inherits host CPU/RAM and `status`
+// reports no resolution, so width/height/dpi stay 0 until §3 reads them from
+// the device profile. `root` is true by design: `waydroid shell` always runs
+// as root inside the container.
+fn single_instance(snapshot: &StatusSnapshot) -> InstanceInfo {
+    InstanceInfo {
+        playerid: 0,
+        name: "waydroid".to_string(),
+        running: snapshot.running,
+        android_started: snapshot.booted,
+        cpu: std::thread::available_parallelism()
+            .map(|parallelism| parallelism.get() as u32)
+            .unwrap_or(1),
+        memory: host_memory_mb(),
+        root: true,
+        width: 0,
+        height: 0,
+        dpi: 0,
+    }
+}
+
+#[tauri::command]
+async fn waydroid_list_instances() -> CommandResult {
+    off_main_thread(|| json_result(&vec![single_instance(&status_snapshot())])).await
+}
+
+/// `waydroid container restart` needs root, so it goes through the elevation
+/// helper and reports through `cmd-output`/`cmd-finished` like the installers.
+#[tauri::command]
+fn waydroid_reboot(app: AppHandle) -> CommandResult {
+    stream_privileged_script(app, "waydroid container restart".to_string());
+    CommandResult::success()
+}
+
+#[tauri::command]
+async fn waydroid_kill_app(package: String) -> CommandResult {
+    off_main_thread(move || {
+        if !adb::is_valid_package(&package) {
+            return AppError::invalid_input(
+                "That is not a valid Android package name (letters, digits, '.', '_').",
+            )
+            .into();
+        }
+        match adb::shell(&["am", "force-stop", &package]) {
+            Ok(_) => CommandResult::success(),
+            Err(failure) => failure.into(),
+        }
     })
     .await
 }
 
 #[tauri::command]
-async fn check_houdini_status() -> CommandResult {
-    off_main_thread(|| {
-        let marker = marker_file("houdini_installed");
+async fn waydroid_getprop_all() -> CommandResult {
+    off_main_thread(|| match adb::shell(&["getprop"]) {
+        Ok(text) => CommandResult::with_data(text),
+        Err(failure) => failure.into(),
+    })
+    .await
+}
 
-        // The container reports the ARM translation layer in its ABI list when it is loaded.
-        if let Some(abilist) =
-            probe(|waydroid| waydroid.shell(&["getprop", "ro.product.cpu.abilist"]))
-        {
-            let abilist = abilist.to_lowercase();
-            if abilist.contains("arm") {
-                write_marker(&marker);
-                return CommandResult::report(
-                    "installed",
-                    "ARM translation (libhoudini) is active.",
-                );
-            }
-            if marker.exists() {
-                let _ = std::fs::remove_file(&marker);
-            }
-            return CommandResult::report("not_installed", "ARM translation is not active.");
-        }
-
-        if marker.exists() {
-            return CommandResult::report(
-                "installed",
-                "ARM translation (libhoudini) installed (verified marker).",
-            );
-        }
-
-        CommandResult::report("not_installed", "ARM Translation is not installed.")
+/// Arbitrary device shell line (LDPlayer `adb --command` parity). There is no
+/// input validation on purpose: running the caller's command is the feature.
+#[tauri::command]
+async fn waydroid_adb_cmd(command: String) -> CommandResult {
+    off_main_thread(move || match adb::shell_line(&command) {
+        Ok(text) => CommandResult::with_data(text),
+        Err(failure) => failure.into(),
     })
     .await
 }
@@ -813,6 +1148,13 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             waydroid_status,
+            waydroid_status_json,
+            waydroid_is_running,
+            waydroid_list_instances,
+            waydroid_reboot,
+            waydroid_kill_app,
+            waydroid_getprop_all,
+            waydroid_adb_cmd,
             waydroid_version,
             waydroid_start,
             waydroid_stop,
@@ -832,7 +1174,8 @@ pub fn run() {
             install_gapps,
             install_houdini,
             install_phantom,
-            run_phantom
+            run_phantom,
+            check_host_diagnostics
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -846,6 +1189,16 @@ mod tests {
     fn sh_quote_wraps_and_escapes_single_quotes() {
         assert_eq!(sh_quote("/home/wdg"), "'/home/wdg'");
         assert_eq!(sh_quote("it's"), r"'it'\''s'");
+    }
+
+    #[test]
+    fn meminfo_total_becomes_megabytes() {
+        assert_eq!(
+            parse_memory_mb("MemTotal:       32768000 kB\nMemFree: 1024 kB"),
+            32000
+        );
+        assert_eq!(parse_memory_mb(""), 0);
+        assert_eq!(parse_memory_mb("MemTotal: not-a-number kB"), 0);
     }
 
     #[test]
@@ -950,5 +1303,17 @@ mod tests {
         assert_eq!(result.status, "success");
         assert_eq!(result.code, None);
         assert_eq!(result.data.as_deref(), Some("Session:\tRUNNING"));
+    }
+
+    #[test]
+    fn check_host_diagnostics_returns_core_items() {
+        let report = check_host_diagnostics();
+        assert_eq!(report.items.len(), 5);
+        let keys: Vec<_> = report.items.iter().map(|i| i.key.as_str()).collect();
+        assert!(keys.contains(&"session"));
+        assert!(keys.contains(&"kvm"));
+        assert!(keys.contains(&"binder"));
+        assert!(keys.contains(&"gpu"));
+        assert!(keys.contains(&"service"));
     }
 }

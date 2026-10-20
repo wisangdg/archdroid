@@ -17,6 +17,7 @@ pub mod code {
     pub const ELEVATION_DENIED: &str = "elevation_denied";
     pub const TIMEOUT: &str = "timeout";
     pub const CANCELLED: &str = "cancelled";
+    pub const INVALID_INPUT: &str = "invalid_input";
     pub const EXIT: &str = "exit";
     pub const IO: &str = "io";
 }
@@ -33,6 +34,8 @@ pub enum AppError {
     Timeout { program: String, seconds: u64 },
     /// The child was killed because the user pressed cancel.
     CancelRequested { program: String },
+    /// The caller sent something that must not reach a child process.
+    InvalidInput { message: String },
     /// The child ran to completion and exited non-zero.
     Exit {
         program: String,
@@ -63,6 +66,12 @@ impl AppError {
         }
     }
 
+    pub fn invalid_input(message: impl Into<String>) -> Self {
+        Self::InvalidInput {
+            message: message.into(),
+        }
+    }
+
     /// Map a failed `Command::spawn` onto the right variant, so a missing binary
     /// is reported as "not installed" instead of a bare I/O error.
     pub fn from_spawn(program: &str, hint: &str, error: io::Error) -> Self {
@@ -81,6 +90,7 @@ impl AppError {
             Self::ElevationDenied { .. } => code::ELEVATION_DENIED,
             Self::Timeout { .. } => code::TIMEOUT,
             Self::CancelRequested { .. } => code::CANCELLED,
+            Self::InvalidInput { .. } => code::INVALID_INPUT,
             Self::Exit { .. } => code::EXIT,
             Self::Io(_) => code::IO,
         }
@@ -112,6 +122,7 @@ impl fmt::Display for AppError {
                 "\"{program}\" did not finish within {seconds}s and was terminated"
             ),
             Self::CancelRequested { program } => write!(f, "\"{program}\" was cancelled"),
+            Self::InvalidInput { message } => write!(f, "{message}"),
             Self::Exit {
                 program,
                 code,
@@ -214,6 +225,13 @@ mod tests {
         };
         assert!(error.to_string().contains("cancelled"), "{error}");
         assert_eq!(error.code(), code::CANCELLED);
+    }
+
+    #[test]
+    fn invalid_input_is_its_own_code() {
+        let error = AppError::invalid_input("That is not a valid package name.");
+        assert_eq!(error.to_string(), "That is not a valid package name.");
+        assert_eq!(error.code(), code::INVALID_INPUT);
     }
 
     #[test]

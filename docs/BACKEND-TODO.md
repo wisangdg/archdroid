@@ -96,13 +96,41 @@ Sumber fitur: hasil RE LDPlayer 9 (`~/Downloads/ldplayer-re/ANALYSIS-LDPlayer-CL
 | `launch --hide/--mini` | `show_full_ui()` / headless | mode sesi (bukan window player) | **P1 S** |
 | `--directlink` | `open_uri(uri)` | `am start -a VIEW -d <uri>` | **P2 S** |
 
-- [ ] **P0 S — `InstanceInfo` (mirror skema `list3` LDPlayer)**
+- [x] **P0 S — `InstanceInfo` (mirror skema `list3` LDPlayer)**
   ```rust
   struct InstanceInfo { playerid: u32, name: String, running: bool,
       android_started: bool, cpu: u32, memory: u32, root: bool,
       width: u32, height: u32, dpi: u32 }
   ```
   *DoD:* `list_instances()` mengembalikan JSON siap dipakai UI/scripting; test parser dengan output `waydroid status` yang di-stub.
+
+**Status Phase A (20 Okt 2026): selesai.**
+
+| Command | Hasil |
+|---|---|
+| `waydroid_is_running` | parse `Session:\tRUNNING`; `not_initialized` → `false` |
+| `waydroid_status_json` | `available/initialized/running/booted/gapps/houdini/phantom`, degradasi (bukan error) saat container mati |
+| `waydroid_list_instances` | satu entri: playerid 0, name `waydroid` |
+| `waydroid_reboot` | `waydroid container restart` via helper elevasi (butuh root, streaming event) |
+| `waydroid_kill_app` | `adb shell am force-stop <pkg>`; nama paket divalidasi (`invalid_input`) |
+| `waydroid_getprop_all` | `adb shell getprop` |
+| `waydroid_adb_cmd` | `adb shell <cmd>` bebas (fitur, bukan bug) |
+
+Catatan:
+
+- **A4 lewat ADB, bukan `waydroid shell`.** `waydroid shell` butuh root
+  (`actionNeedRoot`), sedangkan `waydroid adb connect` tidak. Konsekuensi:
+  host wajib punya `adb` (paket `android-tools`); tanpa itu command
+  mengembalikan `not_found` + hint. Koneksi di-refresh tiap panggilan
+  (`ponytail:` di `src-tauri/src/adb.rs`).
+- **`InstanceInfo`**: `width/height/dpi` masih `0` karena `waydroid status`
+  tidak melaporkan resolusi — diisi saat §3 (profil) ada. `cpu`/`memory`
+  memakai resource host (container inherit), `root` selalu `true` (shell
+  container memang root).
+- **`reboot`** memakai jalur elevasi yang sama dengan installer: hasilnya
+  lewat event `cmd-output`/`cmd-finished`, bukan `CommandResult.data`.
+- Nama command memakai prefix `waydroid_*` agar konsisten dengan command lama;
+  `status_json`/`list_instances` mengembalikan JSON string di `data`.
 
 ---
 
