@@ -239,10 +239,16 @@ impl Waydroid {
     /// still alive means the session started. A background thread reaps the
     /// child afterwards so it never becomes a zombie.
     pub fn session_start(&self, grace_secs: u64) -> Result<()> {
+        self.session_start_argv(&argv_session_start(), grace_secs)
+    }
+
+    /// The argv is a parameter only so the unit tests can run a stub instead of
+    /// the real daemon (same reason as `with_program`).
+    fn session_start_argv(&self, args: &[String], grace_secs: u64) -> Result<()> {
         let program = self.program.to_string_lossy().to_string();
         let mut command = Command::new(&self.program);
         command
-            .args(argv_session_start())
+            .args(args)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -505,38 +511,22 @@ mod tests {
     /// `session start` stays alive: that is the daemon working, not a hang.
     #[test]
     fn a_session_that_outlives_the_grace_period_has_started() {
-        // A stand-in daemon: ignores its arguments and outlives the grace period.
-        // Unique name: an older run's daemon may still hold the previous file.
-        let script = std::env::temp_dir().join(format!(
-            "droiddeck-session-test-{}-{}.sh",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|since| since.subsec_nanos())
-                .unwrap_or(0)
-        ));
-        std::fs::write(&script, "#!/bin/sh\nexec sleep 30\n").unwrap();
-        let _ =
-            std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755));
-
-        let tool = Waydroid::with_program(&script);
-        let result = tool.session_start(1);
-
-        let _ = std::fs::remove_file(&script); // the daemon `exec`ed, so the file is free
-        result.unwrap();
+        let tool = Waydroid::with_program("/bin/sleep");
+        tool.session_start_argv(&argv(&["30"]), 1).unwrap();
     }
 
     #[test]
     fn a_session_that_exits_cleanly_during_grace_is_success() {
         let tool = Waydroid::with_program("/bin/echo");
-        tool.session_start(5).unwrap();
+        tool.session_start_argv(&argv(&["session", "start"]), 5)
+            .unwrap();
     }
 
     #[test]
     fn a_session_that_fails_during_grace_reports_its_error() {
         // `/bin/false` exits 1 at once, like a session start that failed.
         let tool = Waydroid::with_program("/bin/false");
-        let error = tool.session_start(5).unwrap_err();
+        let error = tool.session_start_argv(&[], 5).unwrap_err();
         assert_eq!(error.code(), code::EXIT, "{error}");
     }
 }
