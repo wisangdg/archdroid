@@ -46,10 +46,11 @@ Sumber fitur: hasil RE LDPlayer 9 (`~/Downloads/ldplayer-re/ANALYSIS-LDPlayer-CL
   `fn waydroid_version() -> Result<String>` + deteksi "belum `waydroid init`".
   *DoD:* test: PATH dikosongkan → `Err(NotFound)`; pesan error menyebut langkah perbaikan. → **selesai**: `Waydroid::detect()` (PATH → `NotFound`) dan `Waydroid::run` memetakan pesan "not initialized" ke `NotInitialized` **meski exit code 0**; command `waydroid_version` didaftarkan.
 
-- [ ] **P0 M — Operasi panjang jadi non-blocking + bisa dibatalkan**  ← **berikutnya**
+- [x] **P0 M — Operasi panjang jadi non-blocking + bisa dibatalkan**
   Bungkus dengan `tauri::async_runtime::spawn_blocking` + simpan `Child` di `State` supaya bisa `kill`.
   *DoD:* dua operasi panjang bersamaan tidak membekukan UI; tombol Cancel benar-benar menghentikan proses.
   *(Timeout per kelas command sudah ada: 30s cepat / 120s normal / 1800s sama seperti default waydroid.)*
+  → **selesai**: command yang bisa lama (`status`, `version`, `start`, `stop`, `install`, `uninstall`, `launch`, `prop get|set`, `check_gapps/houdini`) jadi `async` + `off_main_thread` → `spawn_blocking` (Tauri menjalankan command non-`async` di **main thread**, jadi command sync lama membekukan UI). Cancel: command `waydroid_cancel` + flag global `CANCEL` di `waydroid.rs` dicek di loop poll (`run_cancellable`, dipakai `app install|remove`), child dibunuh dalam satu tick (~20ms); error baru `AppError::CancelRequested` (code `cancelled`) berbeda dari timeout. **Temuan**: `waydroid session start` adalah daemon foreground (`session_manager.py` diakhiri `looper.run()`) — tidak lagi pakai timeout (dulu programnya hang); sekarang grace-wait 5s: exit cepat → error, tetap hidup → sukses + reap di thread belakang. `ponytail:` satu Cancel-flag global (UI menjalankan satu operasi panjang per waktu); kill script privileged (gapps/houdini) belum masuk. Frontend: tombol Cancel tinggal `invoke("waydroid_cancel")`.
 
 - [x] **P0 S — Audit injeksi shell**
   Telusuri semua script: pakai `sh_quote` untuk nilai dinamis.
