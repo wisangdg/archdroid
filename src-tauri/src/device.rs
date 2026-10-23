@@ -17,7 +17,13 @@ use base64::{engine::general_purpose, Engine as _};
 use serde::{Deserialize, Serialize};
 
 pub const WAYDROID_CFG: &str = "/var/lib/waydroid/waydroid.cfg";
-const APP_DIR: &str = "io.github.droiddeck"; // matches `identifier` in tauri.conf.json
+
+/// The file `make_prop()` copies verbatim into `/vendor/waydroid.prop`, which is
+/// what `resetprop` feeds Android at boot. `lxc.py` folds `[properties]` from
+/// `WAYDROID_CFG` into this file only while the container is being set up, so a
+/// plain service restart can leave an identity change unapplied.
+pub const WAYDROID_BASE_PROP: &str = "/var/lib/waydroid/waydroid_base.prop";
+const APP_DIR: &str = "io.github.archdroid"; // matches `identifier` in tauri.conf.json
 const PROFILE_FILE: &str = "profile.json";
 
 /// Everything the profile editor can store. `0`/empty means "leave the system
@@ -104,12 +110,12 @@ pub const FIELDS: &[FieldSupport] = &[
     FieldSupport {
         field: "manufacturer",
         supported: true,
-        detail: "ro.product.manufacturer in waydroid.cfg [properties] (needs restart)",
+        detail: "ro.product.manufacturer in waydroid.cfg + waydroid_base.prop (needs a container restart)",
     },
     FieldSupport {
         field: "model",
         supported: true,
-        detail: "ro.product.model in waydroid.cfg [properties] (needs restart)",
+        detail: "ro.product.model in waydroid.cfg + waydroid_base.prop (needs a container restart)",
     },
     FieldSupport {
         field: "phone",
@@ -119,7 +125,7 @@ pub const FIELDS: &[FieldSupport] = &[
     FieldSupport {
         field: "locale",
         supported: true,
-        detail: "persist.sys.locale in waydroid.cfg [properties] (needs restart)",
+        detail: "persist.sys.locale in waydroid.cfg + waydroid_base.prop (needs a container restart)",
     },
 ];
 
@@ -319,6 +325,66 @@ pub fn cfg_write_script(cfg: &str) -> String {
     )
 }
 
+/// Root-side script that replaces waydroid_base.prop atomically.
+pub fn base_prop_write_script(propfile: &str) -> String {
+    let encoded = general_purpose::STANDARD.encode(propfile.as_bytes());
+    format!(
+        "set -euo pipefail\nprintf '%s' '{encoded}' | base64 -d > '{WAYDROID_BASE_PROP}.tmp'\nchmod 644 '{WAYDROID_BASE_PROP}.tmp'\nmv '{WAYDROID_BASE_PROP}.tmp' '{WAYDROID_BASE_PROP}'\n"
+    )
+}
+
+/// The keys of a plain `key=value` prop file (no INI sections).
+pub fn read_propfile(propfile: &str) -> HashMap<String, String> {
+    let mut properties = HashMap::new();
+    for line in propfile.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if let Some((key, value)) = split_key_value(trimmed) {
+            properties.insert(key.to_string(), value.to_string());
+        }
+    }
+    properties
+}
+
+/// Rewrite only the managed keys of a plain prop file, keeping every other line
+/// untouched. Applying the same updates twice returns the same text.
+pub fn apply_propfile(propfile: &str, updates: &[(&str, Option<String>)]) -> String {
+    let managed = |key: &str| updates.iter().any(|(managed, _)| *managed == key);
+
+    let mut out = String::new();
+    for line in propfile.lines() {
+        let key = split_key_value(line.trim())
+            .map(|(key, _)| key)
+            .unwrap_or_default();
+        if !key.is_empty() && managed(key) {
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    for (key, value) in updates {
+        if let Some(value) = value {
+            out.push_str(&format!("{key}={value}\n"));
+        }
+    }
+    out
+}
+
+/// Identity keys Android is using right now, in the order they were requested.
+///
+/// One value per line, because `getprop a; getprop b` prints exactly that. Blank
+/// lines are dropped so an unset property cannot shift the remaining values.
+pub fn parse_getprop_values(output: &str) -> Vec<String> {
+    output
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
 /// Overlay the values actually stored in waydroid.cfg (what the next boot will
 /// use). A managed key that is absent means "system default", not "keep the
 /// saved JSON value" — that is what makes `profile_get` report effective state
@@ -386,7 +452,7 @@ mod tests {
 
     fn temp_path(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
-            "droiddeck-profile-{}-{name}.json",
+            "archdroid-profile-{}-{name}.json",
             std::process::id()
         ))
     }
@@ -481,6 +547,73 @@ mod tests {
         let decoded = general_purpose::STANDARD.decode(encoded).expect("base64");
         assert_eq!(String::from_utf8(decoded).unwrap(), cfg);
         assert!(!encoded.contains('\''));
+    }
+
+    #[test]
+    fn apply_propfile_is_idempotent_and_replaces_managed_keys() {
+        let propfile =
+            "ro.hardware.egl=mesa\nro.product.model=Old\nro.product.cpu.abilist=x86_64\n";
+        let updates = vec![
+            ("ro.product.manufacturer", Some("Acme".to_string())),
+            ("ro.product.model", Some("Droid X".to_string())),
+            ("persist.sys.locale", None),
+        ];
+
+        let once = apply_propfile(propfile, &updates);
+        let twice = apply_propfile(&once, &updates);
+        assert_eq!(once, twice);
+        assert!(once.contains("ro.hardware.egl=mesa"));
+        assert!(once.contains("ro.product.cpu.abilist=x86_64"));
+        assert!(!once.contains("ro.product.model=Old"));
+        assert!(once.contains("ro.product.model=Droid X"));
+        assert!(once.contains("ro.product.manufacturer=Acme"));
+        assert_eq!(
+            read_propfile(&once)
+                .get("ro.product.model")
+                .map(String::as_str),
+            Some("Droid X")
+        );
+    }
+
+    #[test]
+    fn apply_propfile_removes_a_key_when_the_value_is_cleared() {
+        let propfile = "ro.hardware.egl=mesa\npersist.sys.locale=id-ID\n";
+        let cleared = apply_propfile(propfile, &[("persist.sys.locale", None)]);
+        assert!(!cleared.contains("persist.sys.locale"));
+        assert!(cleared.contains("ro.hardware.egl=mesa"));
+    }
+
+    #[test]
+    fn read_propfile_skips_comments_and_blank_lines() {
+        let propfile = "# comment\n\nro.product.model=Droid X\n  ro.foo=bar  \n";
+        let properties = read_propfile(propfile);
+        assert_eq!(properties.get("# comment"), None);
+        assert_eq!(properties.get("ro.product.model").unwrap(), "Droid X");
+        assert_eq!(properties.get("ro.foo").unwrap(), "bar");
+    }
+
+    #[test]
+    fn base_prop_write_script_only_contains_base64_payload() {
+        let propfile = "ro.product.model=Droid X\n";
+        let script = base_prop_write_script(propfile);
+        let encoded = script
+            .split_once("printf '%s' '")
+            .and_then(|(_, rest)| rest.split_once('\''))
+            .map(|(payload, _)| payload)
+            .expect("quoted payload");
+        let decoded = general_purpose::STANDARD.decode(encoded).expect("base64");
+        assert_eq!(String::from_utf8(decoded).unwrap(), propfile);
+        assert!(script.contains(WAYDROID_BASE_PROP));
+        assert!(!encoded.contains('\''));
+    }
+
+    #[test]
+    fn parse_getprop_values_drops_blank_lines() {
+        assert_eq!(
+            parse_getprop_values("Pixel 7\nGoogle\n\n"),
+            vec!["Pixel 7".to_string(), "Google".to_string()]
+        );
+        assert!(parse_getprop_values("").is_empty());
     }
 
     #[test]

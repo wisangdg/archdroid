@@ -1,8 +1,8 @@
 {
-  "name": "droiddeck",
+  "name": "archdroid",
   "private": true,
   "version": "0.1.0",
-  "description": "DroidDeck - an LDPlayer-style Android emulator manager for Linux, powered by Waydroid",
+  "description": "ArchDroid - an LDPlayer-style Android emulator manager for Linux, powered by Waydroid",
   "type": "module",
   "scripts": {
     "dev": "vite",

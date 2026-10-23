@@ -8,6 +8,7 @@ use std::thread;
 use tauri::{AppHandle, Emitter};
 
 mod adb;
+mod capabilities;
 mod device;
 mod error;
 mod waydroid;
@@ -103,7 +104,7 @@ impl From<AppError> for CommandResult {
 }
 
 /// Sub directory of the user cache dir used for "this already happened" markers.
-const CACHE_SUBDIR: &str = "droiddeck";
+const CACHE_SUBDIR: &str = "archdroid";
 
 /// First line echoed by an elevated shell. Lets us tell "the script ran as root"
 /// apart from "elevation itself failed" without parsing pkexec messages, which
@@ -150,7 +151,7 @@ fn sh_quote(value: &str) -> String {
 ///
 /// Elevated scripts run with a restrictive umask, so markers are created as
 /// `root:root 600` by default, which the unprivileged app could not read back.
-/// `droiddeck_marker` hands them to the desktop user instead.
+/// `archdroid_marker` hands them to the desktop user instead.
 fn elevate_env(script: &str) -> String {
     let home = dirs::home_dir().unwrap_or_default();
     let path = std::env::var("PATH").unwrap_or_else(|_| "/usr/local/bin:/usr/bin:/bin".to_string());
@@ -158,14 +159,14 @@ fn elevate_env(script: &str) -> String {
     format!(
         r#"export HOME={home}
 export PATH={path}
-export DROIDDECK_CACHE={cache}
-mkdir -p "$DROIDDECK_CACHE"
-chmod 755 "$DROIDDECK_CACHE" 2>/dev/null || true
-chown "${{PKEXEC_UID:-${{SUDO_UID:-0}}}}" "$DROIDDECK_CACHE" 2>/dev/null || true
-droiddeck_marker() {{
-    echo installed > "$DROIDDECK_CACHE/$1"
-    chmod 644 "$DROIDDECK_CACHE/$1" 2>/dev/null || true
-    chown "${{PKEXEC_UID:-${{SUDO_UID:-0}}}}" "$DROIDDECK_CACHE/$1" 2>/dev/null || true
+export ARCHDROID_CACHE={cache}
+mkdir -p "$ARCHDROID_CACHE"
+chmod 755 "$ARCHDROID_CACHE" 2>/dev/null || true
+chown "${{PKEXEC_UID:-${{SUDO_UID:-0}}}}" "$ARCHDROID_CACHE" 2>/dev/null || true
+archdroid_marker() {{
+    echo installed > "$ARCHDROID_CACHE/$1"
+    chmod 644 "$ARCHDROID_CACHE/$1" 2>/dev/null || true
+    chown "${{PKEXEC_UID:-${{SUDO_UID:-0}}}}" "$ARCHDROID_CACHE/$1" 2>/dev/null || true
 }}
 echo "{sentinel} (uid=$(id -u))"
 {script}
@@ -559,7 +560,7 @@ if ! command -v waydroid > /dev/null; then
 fi
 echo "==> Initializing Waydroid (this will download ~1GB of data)..."
 if waydroid init; then
-    rm -f "$DROIDDECK_CACHE/gapps_installed" "$DROIDDECK_CACHE/houdini_installed"
+    rm -f "$ARCHDROID_CACHE/gapps_installed" "$ARCHDROID_CACHE/houdini_installed"
     echo ""
     echo "[SUCCESS] Waydroid initialized successfully!"
 else
@@ -591,7 +592,7 @@ fn gapps_state() -> CommandResult {
         }
 
         // The image no longer carries GApps (e.g. it was re-initialized or wiped
-        // outside DroidDeck), so forget the marker instead of trusting it forever.
+        // outside ArchDroid), so forget the marker instead of trusting it forever.
         if marker.exists() {
             let _ = std::fs::remove_file(&marker);
         }
@@ -660,6 +661,75 @@ fn houdini_state() -> CommandResult {
 #[tauri::command]
 async fn check_houdini_status() -> CommandResult {
     off_main_thread(houdini_state).await
+}
+
+/// Google Play decides compatibility from the hardware features the device
+/// declares, and the stock Waydroid vendor image omits the multitouch features
+/// that games such as Plants vs Zombies 2 require. `pm list features` normally
+/// goes through adb, which - unlike `waydroid shell` - needs no root; the shell
+/// path is only a fallback for hosts without adb, where it usually needs root.
+fn multitouch_state() -> CommandResult {
+    let marker = marker_file("multitouch_installed");
+
+    let features = adb::shell_line("pm list features")
+        .ok()
+        .or_else(|| probe(|waydroid| waydroid.shell(&["pm", "list", "features"])));
+
+    if let Some(output) = features {
+        let declared = capabilities::parse_features(&output);
+        let missing = capabilities::missing_features(&declared);
+
+        if missing.is_empty() {
+            write_marker(&marker);
+            return CommandResult::report(
+                "installed",
+                "Android declares the multitouch features Google Play filters on.",
+            );
+        }
+        if capabilities::file_installed() {
+            return CommandResult::report(
+                "partial",
+                "Features are installed but Android has not loaded them yet - restart Waydroid.",
+            );
+        }
+        return CommandResult::report(
+            "not_installed",
+            &format!(
+                "{} multitouch feature(s) missing: {}",
+                missing.len(),
+                missing.join(", ")
+            ),
+        );
+    }
+
+    // No running session to ask: trust the file and the marker an install left
+    // behind, and say that is what this answer is based on.
+    if capabilities::file_installed() || marker.exists() {
+        return CommandResult::report(
+            "partial",
+            "Features installed (verified marker). Start Waydroid for a live check.",
+        );
+    }
+
+    CommandResult::report("not_installed", "Multitouch features are not declared.")
+}
+
+#[tauri::command]
+async fn check_multitouch_status() -> CommandResult {
+    off_main_thread(multitouch_state).await
+}
+
+/// Writes the feature declaration into the Waydroid overlay. Android reads it
+/// only at container start, so the reply asks for a restart instead of claiming
+/// the features are already live.
+#[tauri::command]
+fn install_multitouch(app: AppHandle) -> CommandResult {
+    stream_privileged_script(app, capabilities::install_script());
+    write_marker(&marker_file("multitouch_installed"));
+    CommandResult::report(
+        "success",
+        "Multitouch features written to the Waydroid overlay. Restart Waydroid so Android declares them.",
+    )
 }
 
 /// One dashboard object, assembled from `waydroid status` plus the cheapest
@@ -865,24 +935,73 @@ async fn profile_apply(app: AppHandle, profile: device::DeviceProfile) -> Comman
             );
         }
 
-        let old_cfg = match std::fs::read_to_string(device::WAYDROID_CFG) {
+        let updates = device::property_updates(&profile);
+        let read = |path: &str| match std::fs::read_to_string(path) {
             Ok(text) => Some(text),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Some(String::new()),
             Err(_) => None,
         };
-        match old_cfg {
+
+        match read(device::WAYDROID_CFG) {
             Some(old_cfg) => {
-                let updates = device::property_updates(&profile);
-                let changed = device::changed_fields(&device::read_properties(&old_cfg), &updates);
-                if !changed.is_empty() {
-                    let new_cfg = device::apply_properties(&old_cfg, &updates);
-                    stream_privileged_script(app, device::cfg_write_script(&new_cfg));
-                    report.pending = changed;
+                let cfg_changed =
+                    device::changed_fields(&device::read_properties(&old_cfg), &updates);
+
+                // `lxc.py` folds `[properties]` into waydroid_base.prop only while
+                // the container is being prepared, and that file is what gets copied
+                // to /vendor/waydroid.prop. Writing the cfg alone therefore leaves a
+                // plain restart with the old identity. An empty or missing base.prop
+                // is skipped on purpose: it means the container was never prepared,
+                // and Waydroid folds the cfg in itself on the first start.
+                let base_prop = read(device::WAYDROID_BASE_PROP).filter(|text| !text.trim().is_empty());
+                let mut pending = cfg_changed;
+                if let Some(base_prop) = base_prop.as_deref() {
+                    for field in device::changed_fields(&device::read_propfile(base_prop), &updates) {
+                        if !pending.contains(&field) {
+                            pending.push(field);
+                        }
+                    }
+                }
+
+                if !pending.is_empty() {
+                    let mut script = device::cfg_write_script(&device::apply_properties(&old_cfg, &updates));
+                    if let Some(base_prop) = base_prop.as_deref() {
+                        script.push_str(&device::base_prop_write_script(&device::apply_propfile(
+                            base_prop, &updates,
+                        )));
+                    }
+                    stream_privileged_script(app, script);
+
+                    report.pending = pending;
                     report.restart_required = true;
+                    report.notes.push(if base_prop.is_some() {
+                        "Identity written to waydroid.cfg and waydroid_base.prop - the second file is what Android is fed at boot."
+                            .to_string()
+                    } else {
+                        "Identity written to waydroid.cfg. waydroid_base.prop does not exist yet, so start Waydroid once and its container setup will fold these values in."
+                            .to_string()
+                    });
                     report.notes.push(
-                        "Identity fields are queued in waydroid.cfg; restart Waydroid to load them."
+                        "Android only reads these when the container starts, so restart Waydroid and check again - this report cannot confirm the new identity before that."
                             .to_string(),
                     );
+
+                    match adb::shell_line("getprop ro.product.model; getprop ro.product.manufacturer") {
+                        Ok(output) => {
+                            let live = device::parse_getprop_values(&output);
+                            if !live.is_empty() {
+                                report.notes.push(format!(
+                                    "Android reports right now: model={}, manufacturer={}.",
+                                    live.first().cloned().unwrap_or_default(),
+                                    live.get(1).cloned().unwrap_or_default()
+                                ));
+                            }
+                        }
+                        Err(_) => report.notes.push(
+                            "The session is not running, so the current identity could not be read back."
+                                .to_string(),
+                        ),
+                    }
                 }
             }
             None => report.notes.push(
@@ -951,8 +1070,8 @@ fn waydroid_wipe(app: AppHandle) -> CommandResult {
     rm -rf /var/lib/waydroid
     rm -rf "$HOME/.local/share/waydroid"
     rm -rf "$HOME"/.local/share/applications/waydroid.*
-    rm -f "$DROIDDECK_CACHE/gapps_installed" "$DROIDDECK_CACHE/houdini_installed"
-    echo "[SYSTEM] Wipe complete! Please restart DroidDeck."
+    rm -f "$ARCHDROID_CACHE/gapps_installed" "$ARCHDROID_CACHE/houdini_installed"
+    echo "[SYSTEM] Wipe complete! Please restart ArchDroid."
     "#
     .to_string();
 
@@ -982,7 +1101,7 @@ if ! PYTHONUNBUFFERED=1 venv/bin/python3 main.py install gapps; then
     echo "[ERROR] Failed to install GApps."
     exit 1
 fi
-droiddeck_marker gapps_installed
+archdroid_marker gapps_installed
 echo "[SUCCESS] GApps installation complete! Please Start Waydroid."
 "#
     .to_string();
@@ -1019,7 +1138,7 @@ if ! PYTHONUNBUFFERED=1 venv/bin/python3 main.py install libhoudini; then
     echo "[ERROR] ARM Translation installation failed!"
     exit 1
 fi
-droiddeck_marker houdini_installed
+archdroid_marker houdini_installed
 echo "[SUCCESS] ARM Translation installation complete!"
     "#
     .to_string();
@@ -1040,7 +1159,7 @@ if [ ! -d "phantom" ]; then
 else
     cd phantom
     echo "[SYSTEM] Updating Phantom Keymapper..."
-    # The repository may have been cloned by the desktop user before DroidDeck
+    # The repository may have been cloned by the desktop user before ArchDroid
     # started running this script as root.
     git -c safe.directory="$PWD" pull
 fi
@@ -1197,15 +1316,15 @@ fn run_and_stream(app: &AppHandle, mut command: Command) -> StreamResult {
 /// into the user's home directory instead of `/root`.
 ///
 /// Elevation is tried through polkit first, because a polkit password dialog is
-/// drawn by a desktop agent and therefore also works when DroidDeck was started
+/// drawn by a desktop agent and therefore also works when ArchDroid was started
 /// from an app launcher. `sudo` remains the fallback because it can still prompt
 /// when the app was started from a terminal. Force either one with
-/// `DROIDDECK_ELEVATE=pkexec|sudo`.
+/// `ARCHDROID_ELEVATE=pkexec|sudo`.
 fn stream_privileged_script(app: AppHandle, script: String) {
     log::info!("root script requested:\n{script}");
     thread::spawn(move || {
         let body = elevate_env(&script);
-        let forced = std::env::var("DROIDDECK_ELEVATE").unwrap_or_default();
+        let forced = std::env::var("ARCHDROID_ELEVATE").unwrap_or_default();
 
         if forced != "sudo" {
             if let Some(command) = elevated_command("pkexec", &body) {
@@ -1247,7 +1366,7 @@ fn stream_privileged_script(app: AppHandle, script: String) {
         let attempt = run_and_stream(&app, command);
 
         if !attempt.success && !attempt.started {
-            let _ = app.emit("cmd-output", "[SYSTEM] Root access failed. Install a polkit authentication agent (for example hyprpolkitagent or polkit-gnome), or start DroidDeck from a terminal so sudo can ask for the password.".to_string());
+            let _ = app.emit("cmd-output", "[SYSTEM] Root access failed. Install a polkit authentication agent (for example hyprpolkitagent or polkit-gnome), or start ArchDroid from a terminal so sudo can ask for the password.".to_string());
         }
 
         let _ = app.emit("cmd-finished", attempt.success);
@@ -1293,8 +1412,10 @@ pub fn run() {
             open_shared_folder,
             check_gapps_status,
             check_houdini_status,
+            check_multitouch_status,
             install_gapps,
             install_houdini,
+            install_multitouch,
             install_phantom,
             run_phantom,
             check_host_diagnostics
@@ -1334,10 +1455,10 @@ mod tests {
     fn elevated_script_keeps_user_environment_and_announces_itself() {
         let body = elevate_env("echo body");
         assert!(body.contains("export HOME='"));
-        assert!(body.contains("export DROIDDECK_CACHE='"));
+        assert!(body.contains("export ARCHDROID_CACHE='"));
         assert!(body.contains(CACHE_SUBDIR));
         assert!(body.contains(ELEVATED_SENTINEL));
-        assert!(body.contains("droiddeck_marker()"));
+        assert!(body.contains("archdroid_marker()"));
         assert!(body.trim_end().ends_with("echo body"));
     }
 
@@ -1348,11 +1469,11 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
 
         let cache_root =
-            std::env::temp_dir().join(format!("droiddeck-test-{}", std::process::id()));
+            std::env::temp_dir().join(format!("archdroid-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&cache_root);
 
         std::env::set_var("XDG_CACHE_HOME", &cache_root);
-        let script = elevate_env("droiddeck_marker gapps_installed\n");
+        let script = elevate_env("archdroid_marker gapps_installed\n");
         std::env::remove_var("XDG_CACHE_HOME");
 
         let output = Command::new("bash")
@@ -1397,12 +1518,12 @@ mod tests {
     #[test]
     fn resolve_program_only_returns_existing_files() {
         assert!(resolve_program("bash").is_some());
-        assert!(resolve_program("droiddeck-no-such-binary-12345").is_none());
+        assert!(resolve_program("archdroid-no-such-binary-12345").is_none());
     }
 
     #[test]
     fn elevated_command_skips_missing_helpers() {
-        assert!(elevated_command("droiddeck-no-such-binary-12345", "true").is_none());
+        assert!(elevated_command("archdroid-no-such-binary-12345", "true").is_none());
         let command = elevated_command("bash", "true").expect("bash should be resolvable");
         assert!(command.get_args().any(|arg| arg == "-c"));
     }

@@ -1,4 +1,4 @@
-# DroidDeck — Backend TODO
+# ArchDroid — Backend TODO
 
 **Berkas ini untuk kerja di `src-tauri/src/`.** Prioritas: `P0` (fondasi/blocker) → `P1` (nilai tinggi) → `P2` (pelengkap). Effort: `S` ≤ sehari · `M` beberapa hari · `L` ~1 minggu · `XL` butuh komponen Android baru.
 
@@ -58,7 +58,7 @@ Sumber fitur: hasil RE LDPlayer 9 (`~/Downloads/ldplayer-re/ANALYSIS-LDPlayer-CL
 
 - [x] **P1 M — Aktifkan logging terstruktur**
   `tauri-plugin-log` sudah jadi dependency tapi belum di-`init()`. Catat setiap command + durasi.
-  *DoD:* ada file log berisi jejak command. → **selesai**: plugin di-`init()` pada level Info; target bawaan = stdout + `<app_log_dir>/DroidDeck.log` (rotasi 40 KB, keep-one; Linux: `~/.local/share/io.github.droiddeck/logs/`). Setiap proses anak dicatat di `run_program`: `program argv ok in Nms`, `failed in Nms: <error>`, `timed out after Ns`, `cancelled after Ns`; spawn gagal di-`error!`. Script root dicatat saat diminta, dan hasil proses elevasi (pkexec/sudo) dicatat di `run_and_stream`. Command murni in-process (mis. `waydroid_cancel`) tidak punya durasi untuk dicatat. Verifikasi runtime (buka app, cek file log) belum bisa dilakukan di mesin ini karena `waydroid` tidak terpasang.
+  *DoD:* ada file log berisi jejak command. → **selesai**: plugin di-`init()` pada level Info; target bawaan = stdout + `<app_log_dir>/ArchDroid.log` (rotasi 40 KB, keep-one; Linux: `~/.local/share/io.github.archdroid/logs/`). Setiap proses anak dicatat di `run_program`: `program argv ok in Nms`, `failed in Nms: <error>`, `timed out after Ns`, `cancelled after Ns`; spawn gagal di-`error!`. Script root dicatat saat diminta, dan hasil proses elevasi (pkexec/sudo) dicatat di `run_and_stream`. Command murni in-process (mis. `waydroid_cancel`) tidak punya durasi untuk dicatat. Verifikasi runtime (buka app, cek file log) belum bisa dilakukan di mesin ini karena `waydroid` tidak terpasang.
 
 - [x] **P1 S — Tambah unit test argv builder**
   Setiap helper murni (bangun argumen `waydroid app install`, parser `waydroid status`, dst) punya test.
@@ -81,7 +81,7 @@ Sumber fitur: hasil RE LDPlayer 9 (`~/Downloads/ldplayer-re/ANALYSIS-LDPlayer-CL
 
 ## 2. Paritas CLI inti (P0–P1, murah, langsung terasa)
 
-| LDPlayer | Fungsi DroidDeck | Padanan | Prio |
+| LDPlayer | Fungsi ArchDroid | Padanan | Prio |
 |---|---|---|---|
 | `list3` | `list_instances()` → `Vec<InstanceInfo>` | agregasi status+profil | **P0 S** |
 | `isrunning` | `is_running() -> bool` | parse `waydroid status` | **P0 S** |
@@ -261,7 +261,7 @@ Catatan penting: CachyDroid tidak memiliki surface render Waydroid, jadi injeksi
   → **selesai**: `.github/workflows/ci.yml` (ubuntu-24.04: `npm ci` + `npm run build`, lalu `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`). Workflow belum pernah jalan (repo belum punya remote); CI baru hijau setelah file frontend yang belum ter-commit ikut masuk.
 - [x] **P1 S — Least privilege** di `capabilities/default.json` (tinjau scope `dialog`).
   → **selesai**: `dialog:default` → `dialog:allow-open`, karena frontend hanya memakai `open()` (`src/App.jsx`). `core:default` dipertahankan sebagai baseline Tauri; memangkasnya per-API hanya menambah noise tanpa model ancaman yang jelas.
-- [ ] **P2 S — Packaging** deb/AppImage: identifier `io.github.droiddeck`, desktop entry, ikon.
+- [ ] **P2 S — Packaging** deb/AppImage: identifier `io.github.archdroid`, desktop entry, ikon.
 - [ ] **P2 S — First-run wizard** disambungkan ke `status_json()`.
 
 ---
