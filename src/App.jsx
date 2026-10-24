@@ -16,6 +16,12 @@ import TerminalModal from "./components/terminal/TerminalModal";
 import ToastContainer from "./components/ui/ToastContainer";
 import ConfirmModal from "./components/ui/ConfirmModal";
 
+const PROCESS_ERROR_TITLES = {
+  elevation_denied: "Root Access Denied",
+  timeout: "Operation Timed Out",
+  cancelled: "Operation Cancelled",
+};
+
 export default function App() {
   const [status, setStatus] = useState("offline");
   const [isInitialized, setIsInitialized] = useState(true);
@@ -91,12 +97,12 @@ export default function App() {
     });
 
     const unlistenFinished = listen("cmd-finished", (event) => {
-      const success = event.payload;
+      const { success, code, message } = event.payload;
       setTerminalLogs((prev) => [
         ...prev,
         success
           ? "\n[PROCESS COMPLETED SUCCESSFULLY]"
-          : "\n[PROCESS FINISHED WITH ERRORS]",
+          : `\n[PROCESS FINISHED WITH ERRORS${code ? ` (${code})` : ""}]`,
       ]);
       setInstalling(false);
       if (success) {
@@ -111,8 +117,8 @@ export default function App() {
       } else {
         addToast({
           type: "error",
-          title: "Process Failed",
-          message: "Check the terminal output for details.",
+          title: PROCESS_ERROR_TITLES[code] || "Process Failed",
+          message: message || "Check the terminal output for details.",
         });
       }
     });

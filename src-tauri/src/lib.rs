@@ -1523,6 +1523,17 @@ else notify-send "No terminal emulator found"; fi
     CommandResult::with_message("Launched Phantom Keymapper.")
 }
 
+/// Final payload for `cmd-finished`. The UI branches on `code`, so it never
+/// has to parse the human-readable `message`.
+#[derive(Clone, Serialize)]
+struct StreamFinished {
+    /// Reserved for P0-3.3; `None` until tasks get stable IDs.
+    task_id: Option<String>,
+    success: bool,
+    code: Option<&'static str>,
+    message: Option<String>,
+}
+
 struct StreamResult {
     outcome: Result<(), AppError>,
     /// True when the elevated shell actually started, i.e. elevation worked.
@@ -1546,6 +1557,23 @@ impl StreamResult {
 
     fn is_success(&self) -> bool {
         self.outcome.is_ok()
+    }
+
+    fn finished_event(&self) -> StreamFinished {
+        match &self.outcome {
+            Ok(()) => StreamFinished {
+                task_id: None,
+                success: true,
+                code: None,
+                message: None,
+            },
+            Err(error) => StreamFinished {
+                task_id: None,
+                success: false,
+                code: Some(error.code()),
+                message: Some(error.to_string()),
+            },
+        }
     }
 
     fn exit_code(&self) -> Option<i32> {
@@ -1700,7 +1728,7 @@ fn finish_stream(app: &AppHandle, attempt: &StreamResult, completion: Completion
     if attempt.is_success() {
         completion.apply();
     }
-    let _ = app.emit("cmd-finished", attempt.is_success());
+    let _ = app.emit("cmd-finished", attempt.finished_event());
 }
 
 /// Run a user-level script. Phantom installs into `$HOME/.local`, so it does
@@ -2189,6 +2217,44 @@ mod tests {
         );
         assert!(!attempt.is_success());
         assert_eq!(attempt.exit_code(), Some(126));
+    }
+
+    #[test]
+    fn finished_event_is_structured_even_for_success() {
+        let value = serde_json::to_value(StreamResult::success(true).finished_event()).unwrap();
+        assert_eq!(value["success"], true);
+        assert!(value["code"].is_null());
+        assert!(value["message"].is_null());
+        assert!(value["task_id"].is_null());
+    }
+
+    #[test]
+    fn finished_event_carries_the_error_code_instead_of_only_a_boolean() {
+        for (error, expected) in [
+            (
+                AppError::elevation_denied("dismissed"),
+                error::code::ELEVATION_DENIED,
+            ),
+            (
+                AppError::Timeout {
+                    program: "installer".to_string(),
+                    seconds: 60,
+                },
+                error::code::TIMEOUT,
+            ),
+            (
+                AppError::CancelRequested {
+                    program: "installer".to_string(),
+                },
+                error::code::CANCELLED,
+            ),
+        ] {
+            let value =
+                serde_json::to_value(StreamResult::failure(error, false).finished_event()).unwrap();
+            assert_eq!(value["success"], false);
+            assert_eq!(value["code"], expected);
+            assert!(value["message"].is_string());
+        }
     }
 
     #[test]

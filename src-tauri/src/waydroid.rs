@@ -374,10 +374,24 @@ pub(crate) fn run_program(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
-    let mut child: Child = command.spawn().map_err(|error| {
-        log::error!("{program} {:?} could not start: {error}", args);
-        AppError::from_spawn(&program, HINT, error)
-    })?;
+    // Tests create executable stubs while other tests fork. A fork can briefly
+    // inherit the stub's write fd, making exec fail with ETXTBSY until that
+    // child execs; retry only in the test build, production gets one attempt.
+    // 26 is ETXTBSY; ErrorKind::ExecutableFileBusy needs Rust 1.83.
+    let mut busy_attempts = 0;
+    let mut child: Child = loop {
+        match command.spawn() {
+            Ok(child) => break child,
+            Err(error) if cfg!(test) && error.raw_os_error() == Some(26) && busy_attempts < 50 => {
+                busy_attempts += 1;
+                thread::sleep(Duration::from_millis(10));
+            }
+            Err(error) => {
+                log::error!("{program} {:?} could not start: {error}", args);
+                return Err(AppError::from_spawn(&program, HINT, error));
+            }
+        }
+    };
 
     let stdout = child.stdout.take().expect("stdout was piped");
     let stderr = child.stderr.take().expect("stderr was piped");

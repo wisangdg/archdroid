@@ -2,10 +2,11 @@
 
 > **Status: BELUM production-ready.**
 > Basis pemeriksaan: commit `639b5ec` (24 Okt 2026), ditambah perbaikan
-> P0-3.1.
-> P0-1/P0-2 (hardening boundary privilege dan pin installer) dan P0-3.1
-> (hasil operasi privileged ditunggu sampai proses selesai) sudah selesai;
-> P0-3.2/P0-3.3 dan P0-4 (timeout/cancel) masih terbuka.
+> P0-3.1 dan P0-3.2.
+> P0-1/P0-2 (hardening boundary privilege dan pin installer), P0-3.1
+> (hasil operasi privileged ditunggu sampai proses selesai), dan P0-3.2
+> (hasil terstruktur) sudah selesai; P0-3.3 dan P0-4 (timeout/cancel) masih
+> terbuka.
 > Dokumen ini adalah **gate rilis**, bukan roadmap fitur. Fitur di
 > [`docs/BACKEND-TODO.md`](docs/BACKEND-TODO.md) tidak otomatis menjadi blocker
 > kecuali memutus alur inti yang sudah ada.
@@ -23,8 +24,11 @@
   APK bisa dibatalkan.
 - [x] P0-3.1: command privileged menunggu proses selesai dan mengembalikan
   hasil final; marker instalasi hanya ditulis setelah exit 0.
+- [x] P0-3.2: `cmd-finished` mengirim objek
+  `{ task_id, success, code, message }`; UI memakai `code` untuk membedakan
+  error root, timeout, dan cancel tanpa mencocokkan teks pesan.
 - [x] `cargo fmt --check` lulus.
-- [x] `cargo test` lulus: **81 test**.
+- [x] `cargo test` lulus: **83 test**.
 - [x] `cargo clippy --all-targets -- -D warnings` lulus.
 - [x] `npm run build` lulus.
 - [x] `.deb` berhasil dibangun:
@@ -83,7 +87,7 @@ isolasi UI, lalu validasi rilis.
     pkexec/sudo nyata tetap diverifikasi di P0-8 karena environment ini tidak
     punya Waydroid/polkit.
 
-- [ ] **P0-3.2 — Kirim hasil terstruktur, bukan hanya boolean.**
+- [x] **P0-3.2 — Kirim hasil terstruktur, bukan hanya boolean.**
   - **Bukti:** `cmd-finished` saat ini hanya mengirim `true/false`, sehingga
     kode error (`elevation_denied`, `timeout`, `cancelled`, `exit`) hilang.
   - **Kerjakan:** payload event minimal
@@ -91,6 +95,9 @@ isolasi UI, lalu validasi rilis.
     tindakan lanjutan.
   - **DoD:** error root, timeout, dan cancel bisa dibedakan di UI tanpa
     mencocokkan teks pesan.
+  - **Status:** implementasi selesai; `task_id` masih `null` sampai P0-3.3.
+    Unit test memverifikasi payload `elevation_denied`, `timeout`, dan
+    `cancelled`; produksi timeout/cancel nyata tetap dikerjakan di P0-4.
 
 - [ ] **P0-3.3 — Single-flight dan `task_id` untuk operasi privileged.**
   - **Bukti:** event `cmd-output`/`cmd-finished` global; belum ada pengunci
