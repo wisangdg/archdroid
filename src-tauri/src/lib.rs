@@ -629,7 +629,7 @@ async fn waydroid_prop_get(key: String) -> CommandResult {
 }
 
 #[tauri::command]
-fn waydroid_log(app: AppHandle) -> CommandResult {
+async fn waydroid_log(app: AppHandle) -> CommandResult {
     let script = r#"
 if [ -f /var/lib/waydroid/waydroid.log ]; then
     cat /var/lib/waydroid/waydroid.log
@@ -639,8 +639,9 @@ fi
 "#
     .to_string();
 
-    stream_privileged_script(app, script, Completion::None);
-    CommandResult::success()
+    stream_privileged_script(app, script, Completion::None)
+        .await
+        .into_command_result()
 }
 
 #[tauri::command]
@@ -811,7 +812,7 @@ fn check_host_diagnostics() -> DiagnosticsReport {
 }
 
 #[tauri::command]
-fn waydroid_init(app: AppHandle) -> CommandResult {
+async fn waydroid_init(app: AppHandle) -> CommandResult {
     let script = r#"
 set -e
 if ! command -v waydroid > /dev/null; then
@@ -828,8 +829,9 @@ else
 fi
 "#
     .to_string();
-    stream_privileged_script(app, script, Completion::ClearInstallMarkers);
-    CommandResult::success()
+    stream_privileged_script(app, script, Completion::ClearInstallMarkers)
+        .await
+        .into_command_result()
 }
 
 fn gapps_state() -> CommandResult {
@@ -984,14 +986,14 @@ async fn check_multitouch_status() -> CommandResult {
 /// only at container start, so the reply asks for a restart instead of claiming
 /// the features are already live.
 #[tauri::command]
-fn install_multitouch(app: AppHandle) -> CommandResult {
+async fn install_multitouch(app: AppHandle) -> CommandResult {
     stream_privileged_script(
         app,
         capabilities::install_script(),
         Completion::WriteMarker("multitouch_installed"),
-    );
-    CommandResult::report(
-        "success",
+    )
+    .await
+    .into_command_result_with_message(
         "Multitouch features written to the Waydroid overlay. Restart Waydroid so Android declares them.",
     )
 }
@@ -1169,9 +1171,10 @@ async fn profile_get() -> CommandResult {
     .await
 }
 
-/// Persist the profile, apply what Android can change live, and queue the INI
-/// changes behind one privileged write. The root part is streamed through
-/// `cmd-output`/`cmd-finished`, so the reply only says what is pending.
+/// Persist the profile, apply what Android can change live, and wait for the
+/// privileged INI write before replying. The root part is streamed through
+/// `cmd-output`/`cmd-finished`; a failed write is returned as an error instead
+/// of claiming the identity was applied.
 #[tauri::command]
 async fn profile_apply(app: AppHandle, profile: device::DeviceProfile) -> CommandResult {
     off_main_thread(move || {
@@ -1242,7 +1245,12 @@ async fn profile_apply(app: AppHandle, profile: device::DeviceProfile) -> Comman
                             base_prop, &updates,
                         )));
                     }
-                    stream_privileged_script(app, script, Completion::None);
+                    // This closure already runs on the blocking pool, so wait
+                    // for the privileged write here instead of returning first.
+                    let attempt = run_privileged_script(&app, script, Completion::None);
+                    if !attempt.is_success() {
+                        return attempt.into_command_result();
+                    }
 
                     report.pending = pending;
                     report.restart_required = true;
@@ -1292,13 +1300,14 @@ async fn profile_apply(app: AppHandle, profile: device::DeviceProfile) -> Comman
 /// `waydroid container restart` needs root, so it goes through the elevation
 /// helper and reports through `cmd-output`/`cmd-finished` like the installers.
 #[tauri::command]
-fn waydroid_reboot(app: AppHandle) -> CommandResult {
+async fn waydroid_reboot(app: AppHandle) -> CommandResult {
     stream_privileged_script(
         app,
         "waydroid container restart".to_string(),
         Completion::None,
-    );
-    CommandResult::success()
+    )
+    .await
+    .into_command_result()
 }
 
 #[tauri::command]
@@ -1339,7 +1348,7 @@ async fn waydroid_adb_cmd(command: String) -> CommandResult {
 }
 
 #[tauri::command]
-fn waydroid_wipe(app: AppHandle) -> CommandResult {
+async fn waydroid_wipe(app: AppHandle) -> CommandResult {
     let script = r#"
     set -eu
     echo "[SYSTEM] Stopping Waydroid services..."
@@ -1353,8 +1362,9 @@ fn waydroid_wipe(app: AppHandle) -> CommandResult {
     "#
     .to_string();
 
-    stream_privileged_script(app, script, Completion::ClearInstallMarkers);
-    CommandResult::success()
+    stream_privileged_script(app, script, Completion::ClearInstallMarkers)
+        .await
+        .into_command_result()
 }
 
 /// Upstream installer sources are pinned to immutable commits. Updating them is
@@ -1463,32 +1473,35 @@ echo "[SUCCESS] Phantom Keymapper installed successfully!"
 }
 
 #[tauri::command]
-fn install_gapps(app: AppHandle) -> CommandResult {
+async fn install_gapps(app: AppHandle) -> CommandResult {
     stream_privileged_script(
         app,
         gapps_install_script(),
         Completion::WriteMarker("gapps_installed"),
-    );
-    CommandResult::success()
+    )
+    .await
+    .into_command_result()
 }
 
 #[tauri::command]
-fn install_houdini(app: AppHandle) -> CommandResult {
+async fn install_houdini(app: AppHandle) -> CommandResult {
     stream_privileged_script(
         app,
         houdini_install_script(),
         Completion::WriteMarker("houdini_installed"),
-    );
-    CommandResult::success()
+    )
+    .await
+    .into_command_result()
 }
 
 #[tauri::command]
-fn install_phantom(app: AppHandle) -> CommandResult {
+async fn install_phantom(app: AppHandle) -> CommandResult {
     // Phantom installs into $HOME/.local and its system wrapper is disabled, so
     // it must not run through pkexec/sudo. Running it as the desktop user also
     // avoids executing the user's Rust toolchain as root.
-    stream_user_script(app, phantom_install_script());
-    CommandResult::success()
+    stream_user_script(app, phantom_install_script())
+        .await
+        .into_command_result()
 }
 
 #[tauri::command]
@@ -1511,10 +1524,50 @@ else notify-send "No terminal emulator found"; fi
 }
 
 struct StreamResult {
-    success: bool,
-    code: Option<i32>,
+    outcome: Result<(), AppError>,
     /// True when the elevated shell actually started, i.e. elevation worked.
     started: bool,
+}
+
+impl StreamResult {
+    fn success(started: bool) -> Self {
+        Self {
+            outcome: Ok(()),
+            started,
+        }
+    }
+
+    fn failure(error: AppError, started: bool) -> Self {
+        Self {
+            outcome: Err(error),
+            started,
+        }
+    }
+
+    fn is_success(&self) -> bool {
+        self.outcome.is_ok()
+    }
+
+    fn exit_code(&self) -> Option<i32> {
+        match &self.outcome {
+            Err(AppError::Exit { code, .. }) => *code,
+            _ => None,
+        }
+    }
+
+    fn into_command_result(self) -> CommandResult {
+        match self.outcome {
+            Ok(()) => CommandResult::success(),
+            Err(error) => error.into(),
+        }
+    }
+
+    fn into_command_result_with_message(self, message: &str) -> CommandResult {
+        match self.outcome {
+            Ok(()) => CommandResult::with_message(message),
+            Err(error) => error.into(),
+        }
+    }
 }
 
 /// Emit a completed line and remember the beginning of the output.
@@ -1566,16 +1619,11 @@ fn run_and_stream(app: &AppHandle, mut command: Command) -> StreamResult {
     let mut child = match command.spawn() {
         Ok(child) => child,
         Err(e) => {
-            log::error!("{program} could not start: {e}");
-            let _ = app.emit(
-                "cmd-output",
-                format!("[ERROR] Could not start command: {}", e),
-            );
-            return StreamResult {
-                success: false,
-                code: None,
-                started: false,
-            };
+            let error =
+                AppError::from_spawn(&program, "Install the missing program and try again.", e);
+            log::error!("{program} could not start: {error}");
+            let _ = app.emit("cmd-output", format!("[ERROR] {error}"));
+            return StreamResult::failure(error, false);
         }
     };
 
@@ -1591,33 +1639,31 @@ fn run_and_stream(app: &AppHandle, mut command: Command) -> StreamResult {
     let _ = stdout_reader.join();
     let _ = stderr_reader.join();
 
-    let started = captured
-        .lock()
-        .map(|text| text.contains(ELEVATED_SENTINEL))
-        .unwrap_or(false);
+    let captured_text = captured.lock().map(|text| text.clone()).unwrap_or_default();
+    let started = captured_text.contains(ELEVATED_SENTINEL);
 
     let outcome = match status {
-        Ok(status) => StreamResult {
-            success: status.success(),
-            code: status.code(),
+        Ok(status) if status.success() => StreamResult::success(started),
+        Ok(status) => StreamResult::failure(
+            AppError::Exit {
+                program: program.clone(),
+                code: status.code(),
+                output: captured_text,
+            },
             started,
-        },
+        ),
         Err(e) => {
             let _ = app.emit(
                 "cmd-output",
                 format!("[ERROR] Lost track of the running command: {}", e),
             );
-            StreamResult {
-                success: false,
-                code: None,
-                started,
-            }
+            StreamResult::failure(AppError::Io(e), started)
         }
     };
-    if outcome.success {
+    if outcome.is_success() {
         log::info!("{program} finished");
-    } else {
-        log::warn!("{program} finished with code {:?}", outcome.code);
+    } else if let Err(error) = &outcome.outcome {
+        log::warn!("{program} failed: {error}");
     }
     outcome
 }
@@ -1650,40 +1696,57 @@ impl Completion {
     }
 }
 
-fn finish_stream(app: &AppHandle, attempt: StreamResult, completion: Completion) {
-    if attempt.success {
+fn finish_stream(app: &AppHandle, attempt: &StreamResult, completion: Completion) {
+    if attempt.is_success() {
         completion.apply();
     }
-    let _ = app.emit("cmd-finished", attempt.success);
+    let _ = app.emit("cmd-finished", attempt.is_success());
 }
 
 /// Run a user-level script. Phantom installs into `$HOME/.local`, so it does
 /// not need root at all; keeping it out of the privileged path also avoids
 /// running a user-controlled Rust toolchain as root.
-fn stream_user_script(app: AppHandle, script: String) {
+fn run_user_script(app: &AppHandle, script: String) -> StreamResult {
     log::info!("user script requested:\n{script}");
-    thread::spawn(move || {
-        let Some(shell) = trusted_program("bash") else {
-            let error = AppError::not_found(
-                "bash",
-                "Install bash or start ArchDroid from a normal desktop session.",
-            );
-            let _ = app.emit("cmd-output", format!("[ERROR] {error}"));
-            let _ = app.emit("cmd-finished", false);
-            return;
-        };
-        let mut command = Command::new(shell);
-        command
-            .arg("--noprofile")
-            .arg("--norc")
-            .arg("-c")
-            .arg(&script);
-        let attempt = run_and_stream(&app, command);
-        finish_stream(&app, attempt, Completion::None);
-    });
+    let Some(shell) = trusted_program("bash") else {
+        let error = AppError::not_found(
+            "bash",
+            "Install bash or start ArchDroid from a normal desktop session.",
+        );
+        let _ = app.emit("cmd-output", format!("[ERROR] {error}"));
+        let attempt = StreamResult::failure(error, false);
+        finish_stream(app, &attempt, Completion::None);
+        return attempt;
+    };
+    let mut command = Command::new(shell);
+    command
+        .arg("--noprofile")
+        .arg("--norc")
+        .arg("-c")
+        .arg(&script);
+    let attempt = run_and_stream(app, command);
+    finish_stream(app, &attempt, Completion::None);
+    attempt
 }
 
-/// Run a script that needs root.
+/// Await the user-level script so the command only resolves after it exits.
+async fn stream_user_script(app: AppHandle, script: String) -> StreamResult {
+    let fallback_app = app.clone();
+    match tauri::async_runtime::spawn_blocking(move || run_user_script(&app, script)).await {
+        Ok(attempt) => attempt,
+        Err(error) => {
+            let error = AppError::Io(std::io::Error::other(format!(
+                "user script task failed: {error}"
+            )));
+            let _ = fallback_app.emit("cmd-output", format!("[ERROR] {error}"));
+            let attempt = StreamResult::failure(error, false);
+            finish_stream(&fallback_app, &attempt, Completion::None);
+            attempt
+        }
+    }
+}
+
+/// Run a script that needs root and wait for it to exit.
 ///
 /// The script body is written as if it were already root: there are no `sudo`
 /// calls inside. `elevate_env` supplies a fixed PATH, a passwd-derived HOME and
@@ -1694,64 +1757,131 @@ fn stream_user_script(app: AppHandle, script: String) {
 /// from an app launcher. `sudo` remains the fallback because it can still prompt
 /// when the app was started from a terminal. Force either one with
 /// `ARCHDROID_ELEVATE=pkexec|sudo`.
-fn stream_privileged_script(app: AppHandle, script: String, completion: Completion) {
+fn run_privileged_script(app: &AppHandle, script: String, completion: Completion) -> StreamResult {
     log::info!("root script requested:\n{script}");
-    thread::spawn(move || {
-        let body = match elevate_env(&script) {
-            Ok(body) => body,
-            Err(error) => {
-                let _ = app.emit("cmd-output", format!("[ERROR] {error}"));
-                let _ = app.emit("cmd-finished", false);
-                return;
-            }
-        };
-        let forced = std::env::var("ARCHDROID_ELEVATE").unwrap_or_default();
-
-        if forced != "sudo" {
-            if let Some(command) = elevated_command("pkexec", &body) {
-                let _ = app.emit(
-                    "cmd-output",
-                    "[SYSTEM] Requesting root access via polkit...".to_string(),
-                );
-                let attempt = run_and_stream(&app, command);
-
-                // Exit code 126 means the user dismissed the polkit dialog, so do
-                // not nag with a second prompt. Any other failure that never
-                // started the shell is treated as "no agent available".
-                let dismissed = attempt.code == Some(126);
-                if attempt.started || dismissed || forced == "pkexec" {
-                    finish_stream(&app, attempt, completion);
-                    return;
-                }
-
-                let _ = app.emit(
-                    "cmd-output",
-                    "[SYSTEM] polkit could not elevate here, falling back to sudo...".to_string(),
-                );
-            }
+    let body = match elevate_env(&script) {
+        Ok(body) => body,
+        Err(error) => {
+            let _ = app.emit("cmd-output", format!("[ERROR] {error}"));
+            let attempt = StreamResult::failure(error, false);
+            finish_stream(app, &attempt, completion);
+            return attempt;
         }
+    };
+    let forced = std::env::var("ARCHDROID_ELEVATE").unwrap_or_default();
+    let mut pkexec_failed = false;
 
-        let Some(command) = elevated_command("sudo", &body) else {
+    if forced != "sudo" {
+        if let Some(command) = elevated_command("pkexec", &body) {
+            let _ = app.emit(
+                "cmd-output",
+                "[SYSTEM] Requesting root access via polkit...".to_string(),
+            );
+            let mut attempt = run_and_stream(app, command);
+
+            // Exit code 126 means the user dismissed the polkit dialog, so do
+            // not nag with a second prompt.
+            if attempt.exit_code() == Some(126) {
+                attempt = StreamResult::failure(
+                    AppError::elevation_denied(
+                        "The polkit authentication dialog was dismissed; nothing was changed.",
+                    ),
+                    attempt.started,
+                );
+                finish_stream(app, &attempt, completion);
+                return attempt;
+            }
+
+            // If the shell started, the script itself failed; only fall back to
+            // sudo when elevation never got as far as running the body.
+            if attempt.started || forced == "pkexec" {
+                if !attempt.started && !attempt.is_success() {
+                    attempt = StreamResult::failure(
+                        AppError::elevation_denied(
+                            "polkit could not elevate here; no privileged shell was started.",
+                        ),
+                        false,
+                    );
+                }
+                finish_stream(app, &attempt, completion);
+                return attempt;
+            }
+
+            pkexec_failed = true;
+            let _ = app.emit(
+                "cmd-output",
+                "[SYSTEM] polkit could not elevate here, falling back to sudo...".to_string(),
+            );
+        } else if forced == "pkexec" {
             let error = AppError::elevation_denied(
-                "Neither pkexec nor sudo is available, so root access cannot be requested.",
+                "ARCHDROID_ELEVATE=pkexec but pkexec is not available, so root access cannot be requested.",
             );
             let _ = app.emit("cmd-output", format!("[ERROR] {error}"));
-            let _ = app.emit("cmd-finished", false);
-            return;
-        };
-
-        let _ = app.emit(
-            "cmd-output",
-            "[SYSTEM] Requesting root access via sudo...".to_string(),
-        );
-        let attempt = run_and_stream(&app, command);
-
-        if !attempt.success && !attempt.started {
-            let _ = app.emit("cmd-output", "[SYSTEM] Root access failed. Install a polkit authentication agent (for example hyprpolkitagent or polkit-gnome), or start ArchDroid from a terminal so sudo can ask for the password.".to_string());
+            let attempt = StreamResult::failure(error, false);
+            finish_stream(app, &attempt, completion);
+            return attempt;
         }
+    }
 
-        finish_stream(&app, attempt, completion);
-    });
+    let Some(command) = elevated_command("sudo", &body) else {
+        let detail = if forced == "sudo" {
+            "ARCHDROID_ELEVATE=sudo but sudo is not available, so root access cannot be requested."
+        } else if pkexec_failed {
+            "polkit could not elevate and sudo is not available, so root access cannot be requested."
+        } else {
+            "Neither pkexec nor sudo is available, so root access cannot be requested."
+        };
+        let error = AppError::elevation_denied(detail);
+        let _ = app.emit("cmd-output", format!("[ERROR] {error}"));
+        let attempt = StreamResult::failure(error, false);
+        finish_stream(app, &attempt, completion);
+        return attempt;
+    };
+
+    let _ = app.emit(
+        "cmd-output",
+        "[SYSTEM] Requesting root access via sudo...".to_string(),
+    );
+    let mut attempt = run_and_stream(app, command);
+
+    if !attempt.is_success() && !attempt.started {
+        let _ = app.emit("cmd-output", "[SYSTEM] Root access failed. Install a polkit authentication agent (for example hyprpolkitagent or polkit-gnome), or start ArchDroid from a terminal so sudo can ask for the password.".to_string());
+        attempt = StreamResult::failure(
+            AppError::elevation_denied(
+                "sudo could not elevate or the privileged shell never started. Install a polkit authentication agent (for example hyprpolkitagent or polkit-gnome), or start ArchDroid from a terminal so sudo can ask for the password.",
+            ),
+            false,
+        );
+    }
+
+    finish_stream(app, &attempt, completion);
+    attempt
+}
+
+/// Await the privileged script so the command only resolves after it exits.
+async fn stream_privileged_script(
+    app: AppHandle,
+    script: String,
+    completion: Completion,
+) -> StreamResult {
+    let fallback_app = app.clone();
+    let fallback_completion = completion;
+    match tauri::async_runtime::spawn_blocking(move || {
+        run_privileged_script(&app, script, completion)
+    })
+    .await
+    {
+        Ok(attempt) => attempt,
+        Err(error) => {
+            let error = AppError::Io(std::io::Error::other(format!(
+                "privileged script task failed: {error}"
+            )));
+            let _ = fallback_app.emit("cmd-output", format!("[ERROR] {error}"));
+            let attempt = StreamResult::failure(error, false);
+            finish_stream(&fallback_app, &attempt, fallback_completion);
+            attempt
+        }
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -2025,6 +2155,40 @@ mod tests {
         assert_eq!(result.status, "success");
         assert_eq!(result.code, None);
         assert_eq!(result.data.as_deref(), Some("Session:\tRUNNING"));
+    }
+
+    #[test]
+    fn a_successful_stream_maps_to_a_success_result_only_after_it_exits() {
+        let result = StreamResult::success(true).into_command_result_with_message("written");
+        assert_eq!(result.status, "success");
+        assert_eq!(result.message.as_deref(), Some("written"));
+        assert_eq!(result.code, None);
+    }
+
+    #[test]
+    fn a_failed_stream_maps_to_a_typed_error_result() {
+        let result = StreamResult::failure(
+            AppError::elevation_denied("The polkit authentication dialog was dismissed."),
+            false,
+        )
+        .into_command_result();
+        assert_eq!(result.status, "error");
+        assert_eq!(result.code.as_deref(), Some(error::code::ELEVATION_DENIED));
+        assert!(result.message.unwrap().contains("dismissed"));
+    }
+
+    #[test]
+    fn stream_exit_codes_stay_available_for_the_polkit_dismissal_path() {
+        let attempt = StreamResult::failure(
+            AppError::Exit {
+                program: "pkexec".to_string(),
+                code: Some(126),
+                output: String::new(),
+            },
+            false,
+        );
+        assert!(!attempt.is_success());
+        assert_eq!(attempt.exit_code(), Some(126));
     }
 
     #[test]

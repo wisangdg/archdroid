@@ -523,13 +523,15 @@ export default function App() {
       setTerminalTitle("Declaring Touch Features for Google Play");
       setTerminalLogs([]);
       setTerminalOpen(true);
-      await invoke("install_multitouch");
-      addToast({
-        type: "info",
-        title: "Restart Required",
-        message:
-          "Android reads declared features at boot. Restart Waydroid, then check Google Play again.",
-      });
+      const result = await invoke("install_multitouch");
+      if (result.status === "success") {
+        addToast({
+          type: "info",
+          title: "Restart Required",
+          message:
+            "Android reads declared features at boot. Restart Waydroid, then check Google Play again.",
+        });
+      }
     } catch (e) {
       console.error("Touch feature install error:", e);
       addToast({
