@@ -106,6 +106,22 @@ impl From<AppError> for CommandResult {
 /// Sub directory of the user cache dir used for "this already happened" markers.
 const CACHE_SUBDIR: &str = "archdroid";
 
+/// Fixed search path for root scripts. The GUI's PATH is user controlled, so a
+/// privileged script must never inherit it: a planted `git`, `python3`, `pacman`
+/// or `bash` would otherwise run as root.
+const SAFE_PATH: &str = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+
+/// Directories searched for programs that are invoked as root or as the
+/// privileged shell itself. User-writable directories are deliberately absent.
+const TRUSTED_DIRS: [&str; 6] = [
+    "/usr/local/sbin",
+    "/usr/local/bin",
+    "/usr/sbin",
+    "/usr/bin",
+    "/sbin",
+    "/bin",
+];
+
 /// First line echoed by an elevated shell. Lets us tell "the script ran as root"
 /// apart from "elevation itself failed" without parsing pkexec messages, which
 /// are localized and vary between polkit versions.
@@ -122,6 +138,15 @@ pub(crate) fn resolve_program(program: &str) -> Option<PathBuf> {
         .find(|candidate| candidate.is_file())
 }
 
+/// Resolve a program without consulting PATH. Used for `pkexec`, `sudo`,
+/// `bash`, `getent` and the fixed `id` fallback.
+fn trusted_program(program: &str) -> Option<PathBuf> {
+    TRUSTED_DIRS
+        .iter()
+        .map(|dir| Path::new(dir).join(program))
+        .find(|candidate| candidate.is_file())
+}
+
 fn cache_dir() -> PathBuf {
     let mut dir = dirs::cache_dir().unwrap_or_else(std::env::temp_dir);
     dir.push(CACHE_SUBDIR);
@@ -133,6 +158,8 @@ fn marker_file(name: &str) -> PathBuf {
 }
 
 /// Persist a marker so a finished install is still known after a restart.
+/// This is only called from the unprivileged app process, after a root command
+/// has completed successfully; root never writes into the user cache.
 /// Best effort: a read-only cache directory must never break a status check.
 fn write_marker(marker: &Path) {
     if let Some(parent) = marker.parent() {
@@ -146,45 +173,259 @@ fn sh_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', r"'\''"))
 }
 
-/// Prefix a script with the environment that polkit/sudo would otherwise strip,
-/// so privileged scripts still write markers into the *user* cache directory.
-///
-/// Elevated scripts run with a restrictive umask, so markers are created as
-/// `root:root 600` by default, which the unprivileged app could not read back.
-/// `archdroid_marker` hands them to the desktop user instead.
-fn elevate_env(script: &str) -> String {
-    let home = dirs::home_dir().unwrap_or_default();
-    let path = std::env::var("PATH").unwrap_or_else(|_| "/usr/local/bin:/usr/bin:/bin".to_string());
-    let cache = cache_dir();
+/// The desktop user's identity, resolved from the system account database
+/// rather than from HOME/USER/PATH/XDG_* environment variables.
+#[derive(Debug, Clone)]
+struct UserContext {
+    uid: u32,
+    home: PathBuf,
+}
+
+/// Parse the first numeric field of a `/proc/self/status` entry such as `Uid:`.
+fn parse_status_id(status: &str, key: &str) -> Option<u32> {
+    status.lines().find_map(|line| {
+        let rest = line.strip_prefix(key)?;
+        rest.split_whitespace().next()?.parse().ok()
+    })
+}
+
+fn current_uid() -> Option<u32> {
+    std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|status| parse_status_id(&status, "Uid:"))
+        .or_else(|| {
+            let id = trusted_program("id")?;
+            let output = Command::new(id)
+                .arg("-ru")
+                .env_clear()
+                .env("PATH", SAFE_PATH)
+                .output()
+                .ok()?;
+            if !output.status.success() {
+                return None;
+            }
+            String::from_utf8_lossy(&output.stdout).trim().parse().ok()
+        })
+}
+
+/// Extract a user's home from a passwd(5)-formatted record.
+fn parse_passwd_home(text: &str, uid: u32) -> Option<PathBuf> {
+    text.lines().find_map(|line| {
+        let fields: Vec<&str> = line.split(':').collect();
+        if fields.len() < 6 || fields[2].parse::<u32>().ok() != Some(uid) {
+            return None;
+        }
+        let home = fields[5].trim();
+        if home.is_empty() {
+            None
+        } else {
+            Some(PathBuf::from(home))
+        }
+    })
+}
+
+/// Canonicalise and sanity-check the home directory read from passwd. Rejecting
+/// `/` (and symlinks that resolve to it) matters because wipe runs `rm -rf`
+/// below this path as root.
+fn validated_home(home: PathBuf, uid: u32) -> Option<PathBuf> {
+    use std::os::unix::fs::MetadataExt;
+
+    if !home.is_absolute() || home == Path::new("/") {
+        return None;
+    }
+    let home = std::fs::canonicalize(home).ok()?;
+    if home == Path::new("/") || !home.is_dir() {
+        return None;
+    }
+    let metadata = std::fs::metadata(&home).ok()?;
+    if metadata.uid() != uid {
+        return None;
+    }
+    Some(home)
+}
+
+/// Resolve a home for `uid` from /etc/passwd, falling back to getent for NSS
+/// users (LDAP/SSSD). Both sources are read as root-controlled system data.
+fn user_home(uid: u32) -> Option<PathBuf> {
+    if let Ok(passwd) = std::fs::read_to_string("/etc/passwd") {
+        if let Some(home) = parse_passwd_home(&passwd, uid) {
+            if let Some(home) = validated_home(home, uid) {
+                return Some(home);
+            }
+        }
+    }
+
+    let getent = trusted_program("getent")?;
+    let output = Command::new(getent)
+        .arg("passwd")
+        .arg(uid.to_string())
+        .env_clear()
+        .env("PATH", SAFE_PATH)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    validated_home(parse_passwd_home(&text, uid)?, uid)
+}
+
+fn current_user_context() -> Option<UserContext> {
+    let uid = current_uid()?;
+    let home = user_home(uid)?;
+    Some(UserContext { uid, home })
+}
+
+/// Prefix a root script with a sanitized environment. Never derive HOME, PATH,
+/// cache paths or config locations from the GUI process: polkit/sudo may pass
+/// attacker-controlled variables through, and root must not consume them.
+fn elevate_env(script: &str) -> Result<String, AppError> {
+    let context = current_user_context().ok_or_else(|| {
+        AppError::command_failed(
+            "Could not resolve the desktop user's home directory from the system account database; refusing to run a privileged script with an untrusted HOME.",
+        )
+    })?;
+    Ok(elevate_env_for(&context, script))
+}
+
+fn elevate_env_for(context: &UserContext, script: &str) -> String {
+    let home = sh_quote(&context.home.to_string_lossy());
+    let path = sh_quote(SAFE_PATH);
     format!(
-        r#"export HOME={home}
-export PATH={path}
-export ARCHDROID_CACHE={cache}
-mkdir -p "$ARCHDROID_CACHE"
-chmod 755 "$ARCHDROID_CACHE" 2>/dev/null || true
-chown "${{PKEXEC_UID:-${{SUDO_UID:-0}}}}" "$ARCHDROID_CACHE" 2>/dev/null || true
-archdroid_marker() {{
-    echo installed > "$ARCHDROID_CACHE/$1"
-    chmod 644 "$ARCHDROID_CACHE/$1" 2>/dev/null || true
-    chown "${{PKEXEC_UID:-${{SUDO_UID:-0}}}}" "$ARCHDROID_CACHE/$1" 2>/dev/null || true
+        r#"export PATH={path}
+export USER=root
+export LOGNAME=root
+export ARCHDROID_USER_HOME={home}
+export GIT_CONFIG_GLOBAL=/dev/null
+export GIT_CONFIG_SYSTEM=/dev/null
+export GIT_CONFIG_NOSYSTEM=1
+export GIT_TERMINAL_PROMPT=0
+export GIT_ALLOW_PROTOCOL=https
+export PIP_CONFIG_FILE=/dev/null
+export PIP_NO_INPUT=1
+export PIP_DISABLE_PIP_VERSION_CHECK=1
+export PYTHONNOUSERSITE=1
+export PYTHONUNBUFFERED=1
+unset BASH_ENV ENV CDPATH IFS GLOBIGNORE SHELL \
+    PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONINSPECT \
+    LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT \
+    GIT_DIR GIT_WORK_TREE GIT_CONFIG GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS \
+    GIT_EXEC_PATH GIT_TEMPLATE_DIR GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES \
+    GIT_INDEX_FILE GIT_NAMESPACE GIT_CEILING_DIRECTORIES \
+    GIT_ASKPASS SSH_ASKPASS SUDO_ASKPASS \
+    GIT_SSH GIT_SSH_COMMAND GIT_PROXY_COMMAND \
+    GIT_SSL_NO_VERIFY GIT_SSL_CAINFO GIT_SSL_CAPATH \
+    PIP_INDEX_URL PIP_EXTRA_INDEX_URL PIP_TRUSTED_HOST PIP_FIND_LINKS PIP_CONSTRAINT \
+    PIP_CERT PIP_CLIENT_CERT \
+    SSL_CERT_FILE SSL_CERT_DIR REQUESTS_CA_BUNDLE CURL_CA_BUNDLE \
+    XDG_CONFIG_HOME XDG_CACHE_HOME XDG_DATA_HOME
+export SHELL=/bin/bash
+umask 022
+echo "{sentinel} (uid=$(id -u), caller={caller})"
+ARCHDROID_WORK="$(mktemp -d /var/tmp/archdroid.XXXXXXXXXX 2>/dev/null || mktemp -d /tmp/archdroid.XXXXXXXXXX)" || {{
+    echo "[ERROR] Could not create a private work directory for the privileged installer." >&2
+    exit 1
 }}
-echo "{sentinel} (uid=$(id -u))"
+chmod 700 "$ARCHDROID_WORK" || {{
+    echo "[ERROR] Could not secure the privileged work directory." >&2
+    exit 1
+}}
+mkdir -p "$ARCHDROID_WORK/home" || {{
+    echo "[ERROR] Could not create a private root home." >&2
+    exit 1
+}}
+chmod 700 "$ARCHDROID_WORK/home" || {{
+    echo "[ERROR] Could not secure the private root home." >&2
+    exit 1
+}}
+export HOME="$ARCHDROID_WORK/home"
+export ARCHDROID_WORK
+export TMPDIR="$ARCHDROID_WORK"
+trap 'rm -rf "$ARCHDROID_WORK"' EXIT HUP INT TERM
 {script}
 "#,
-        home = sh_quote(&home.to_string_lossy()),
-        path = sh_quote(&path),
-        cache = sh_quote(&cache.to_string_lossy()),
+        home = home,
+        path = path,
         sentinel = ELEVATED_SENTINEL,
+        caller = context.uid,
         script = script,
     )
 }
 
+/// Environment variables that must not reach the privileged helper's shell.
+/// `BASH_ENV` is especially important: bash reads it before the script body, so
+/// unsetting it inside the body would be too late.
+const PRIVILEGED_ENV_REMOVE: &[&str] = &[
+    "BASH_ENV",
+    "ENV",
+    "CDPATH",
+    "IFS",
+    "GLOBIGNORE",
+    "SHELL",
+    "PYTHONPATH",
+    "PYTHONHOME",
+    "PYTHONSTARTUP",
+    "PYTHONINSPECT",
+    "LD_PRELOAD",
+    "LD_LIBRARY_PATH",
+    "LD_AUDIT",
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_CONFIG",
+    "GIT_CONFIG_COUNT",
+    "GIT_CONFIG_PARAMETERS",
+    "GIT_CONFIG_GLOBAL",
+    "GIT_CONFIG_SYSTEM",
+    "GIT_EXEC_PATH",
+    "GIT_TEMPLATE_DIR",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_INDEX_FILE",
+    "GIT_NAMESPACE",
+    "GIT_CEILING_DIRECTORIES",
+    "GIT_ASKPASS",
+    "SSH_ASKPASS",
+    "SUDO_ASKPASS",
+    "GIT_SSH",
+    "GIT_SSH_COMMAND",
+    "GIT_PROXY_COMMAND",
+    "GIT_SSL_NO_VERIFY",
+    "GIT_SSL_CAINFO",
+    "GIT_SSL_CAPATH",
+    "PIP_CONFIG_FILE",
+    "PIP_INDEX_URL",
+    "PIP_EXTRA_INDEX_URL",
+    "PIP_TRUSTED_HOST",
+    "PIP_FIND_LINKS",
+    "PIP_CONSTRAINT",
+    "PIP_CERT",
+    "PIP_CLIENT_CERT",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "REQUESTS_CA_BUNDLE",
+    "CURL_CA_BUNDLE",
+    "XDG_CONFIG_HOME",
+    "XDG_CACHE_HOME",
+    "XDG_DATA_HOME",
+];
+
 /// Build a command that runs `body` as root through `helper` (pkexec or sudo).
+/// Both the helper and the shell are resolved without PATH; dangerous variables
+/// are removed from the helper environment before it can start bash.
 fn elevated_command(helper: &str, body: &str) -> Option<Command> {
-    let program = resolve_program(helper)?;
-    let shell = resolve_program("bash").unwrap_or_else(|| PathBuf::from("/usr/bin/bash"));
+    let program = trusted_program(helper)?;
+    let shell = trusted_program("bash")?;
     let mut command = Command::new(program);
-    command.arg(shell).arg("-c").arg(body);
+    command
+        .arg(shell)
+        .arg("--noprofile")
+        .arg("--norc")
+        .arg("-c")
+        .arg(body);
+    command.env("PATH", SAFE_PATH);
+    for key in PRIVILEGED_ENV_REMOVE {
+        command.env_remove(key);
+    }
     Some(command)
 }
 
@@ -398,7 +639,7 @@ fi
 "#
     .to_string();
 
-    stream_privileged_script(app, script);
+    stream_privileged_script(app, script, Completion::None);
     CommandResult::success()
 }
 
@@ -579,7 +820,6 @@ if ! command -v waydroid > /dev/null; then
 fi
 echo "==> Initializing Waydroid (this will download ~1GB of data)..."
 if waydroid init; then
-    rm -f "$ARCHDROID_CACHE/gapps_installed" "$ARCHDROID_CACHE/houdini_installed"
     echo ""
     echo "[SUCCESS] Waydroid initialized successfully!"
 else
@@ -588,7 +828,7 @@ else
 fi
 "#
     .to_string();
-    stream_privileged_script(app, script);
+    stream_privileged_script(app, script, Completion::ClearInstallMarkers);
     CommandResult::success()
 }
 
@@ -745,8 +985,11 @@ async fn check_multitouch_status() -> CommandResult {
 /// the features are already live.
 #[tauri::command]
 fn install_multitouch(app: AppHandle) -> CommandResult {
-    stream_privileged_script(app, capabilities::install_script());
-    write_marker(&marker_file("multitouch_installed"));
+    stream_privileged_script(
+        app,
+        capabilities::install_script(),
+        Completion::WriteMarker("multitouch_installed"),
+    );
     CommandResult::report(
         "success",
         "Multitouch features written to the Waydroid overlay. Restart Waydroid so Android declares them.",
@@ -999,7 +1242,7 @@ async fn profile_apply(app: AppHandle, profile: device::DeviceProfile) -> Comman
                             base_prop, &updates,
                         )));
                     }
-                    stream_privileged_script(app, script);
+                    stream_privileged_script(app, script, Completion::None);
 
                     report.pending = pending;
                     report.restart_required = true;
@@ -1050,7 +1293,11 @@ async fn profile_apply(app: AppHandle, profile: device::DeviceProfile) -> Comman
 /// helper and reports through `cmd-output`/`cmd-finished` like the installers.
 #[tauri::command]
 fn waydroid_reboot(app: AppHandle) -> CommandResult {
-    stream_privileged_script(app, "waydroid container restart".to_string());
+    stream_privileged_script(
+        app,
+        "waydroid container restart".to_string(),
+        Completion::None,
+    );
     CommandResult::success()
 }
 
@@ -1094,118 +1341,153 @@ async fn waydroid_adb_cmd(command: String) -> CommandResult {
 #[tauri::command]
 fn waydroid_wipe(app: AppHandle) -> CommandResult {
     let script = r#"
+    set -eu
     echo "[SYSTEM] Stopping Waydroid services..."
     waydroid session stop || true
     systemctl stop waydroid-container || true
     echo "[SYSTEM] Wiping Waydroid data..."
     rm -rf /var/lib/waydroid
-    rm -rf "$HOME/.local/share/waydroid"
-    rm -rf "$HOME"/.local/share/applications/waydroid.*
-    rm -f "$ARCHDROID_CACHE/gapps_installed" "$ARCHDROID_CACHE/houdini_installed"
+    rm -rf "$ARCHDROID_USER_HOME/.local/share/waydroid"
+    rm -rf "$ARCHDROID_USER_HOME"/.local/share/applications/waydroid.*
     echo "[SYSTEM] Wipe complete! Please restart ArchDroid."
     "#
     .to_string();
 
-    stream_privileged_script(app, script);
+    stream_privileged_script(app, script, Completion::ClearInstallMarkers);
     CommandResult::success()
 }
 
-#[tauri::command]
-fn install_gapps(app: AppHandle) -> CommandResult {
-    let script = r#"
-set -e
-cd /tmp
+/// Upstream installer sources are pinned to immutable commits. Updating them is
+/// a reviewed change, not something a branch or a user-writable `/tmp` checkout
+/// can change behind our back.
+const WAYDROID_SCRIPT_URL: &str = "https://github.com/casualsnek/waydroid_script.git";
+const WAYDROID_SCRIPT_REV: &str = "48dbfaf34a6ddbe78688c530f9ba1c26522aafb2";
+const PHANTOM_URL: &str = "https://github.com/oliviermugishak/phantom.git";
+const PHANTOM_REV: &str = "1a6b7edb423462c1bc546031ed86d9bf2cc1cffd";
+
+/// Fetch exactly `rev` into a fresh repository. `repo` is a shell expansion such
+/// as `"$repo"`, not a Rust path. The final `test` catches a server or checkout
+/// that silently resolved a different object.
+fn pinned_git_checkout(repo: &str, url: &str, rev: &str) -> String {
+    format!(
+        r#"git init -q {repo}
+git -C {repo} remote add origin {url}
+git -C {repo} fetch --depth 1 origin {rev}
+git -C {repo} checkout -q --detach FETCH_HEAD
+test "$(git -C {repo} rev-parse HEAD)" = {rev}
+"#,
+        repo = repo,
+        url = sh_quote(url),
+        rev = sh_quote(rev),
+    )
+}
+
+fn gapps_install_script() -> String {
+    format!(
+        r#"set -eu
+if ! command -v git > /dev/null; then
+    echo "[ERROR] git is required to download the pinned GApps helper." >&2
+    exit 1
+fi
 if ! command -v unsquashfs > /dev/null || ! command -v lzip > /dev/null; then
     echo "[SYSTEM] Installing required dependencies (squashfs-tools, lzip)..."
     pacman -S --noconfirm squashfs-tools lzip
 fi
-if [ ! -d "waydroid_script" ]; then
-    echo "[SYSTEM] Downloading Waydroid Script..."
-    git clone https://github.com/casualsnek/waydroid_script.git
-fi
-cd waydroid_script
+repo="$ARCHDROID_WORK/waydroid_script"
+{checkout}
 echo "[SYSTEM] Setting up Python environment..."
-python3 -m venv venv
-venv/bin/pip install -q -r requirements.txt
+python3 -m venv "$repo/venv"
+"$repo/venv/bin/pip" install --no-cache-dir --disable-pip-version-check --no-input -q -r "$repo/requirements.txt"
+cd "$repo"
 echo "[SYSTEM] Injecting GApps into Android Image (this will take a while)..."
-if ! PYTHONUNBUFFERED=1 venv/bin/python3 main.py install gapps; then
-    echo "[ERROR] Failed to install GApps."
+if ! PYTHONUNBUFFERED=1 "$repo/venv/bin/python3" main.py install gapps; then
+    echo "[ERROR] Failed to install GApps." >&2
     exit 1
 fi
-archdroid_marker gapps_installed
 echo "[SUCCESS] GApps installation complete! Please Start Waydroid."
-"#
-    .to_string();
+"#,
+        checkout = pinned_git_checkout("\"$repo\"", WAYDROID_SCRIPT_URL, WAYDROID_SCRIPT_REV),
+    )
+}
 
-    stream_privileged_script(app, script);
+fn houdini_install_script() -> String {
+    format!(
+        r#"set -eu
+if ! command -v git > /dev/null; then
+    echo "[ERROR] git is required to download the pinned libhoudini helper." >&2
+    exit 1
+fi
+if ! command -v unsquashfs > /dev/null || ! command -v lzip > /dev/null; then
+    echo "[SYSTEM] Installing required dependencies (squashfs-tools, lzip)..."
+    pacman -S --noconfirm squashfs-tools lzip
+fi
+repo="$ARCHDROID_WORK/waydroid_script"
+{checkout}
+echo "[SYSTEM] Setting up Python environment..."
+python3 -m venv "$repo/venv"
+"$repo/venv/bin/pip" install --no-cache-dir --disable-pip-version-check --no-input -q -r "$repo/requirements.txt"
+cd "$repo"
+echo "[SYSTEM] Installing ARM Translation / libhoudini (this may take several minutes)..."
+if ! PYTHONUNBUFFERED=1 "$repo/venv/bin/python3" main.py install libhoudini; then
+    echo "[ERROR] ARM Translation installation failed!" >&2
+    exit 1
+fi
+echo "[SUCCESS] ARM Translation installation complete!"
+"#,
+        checkout = pinned_git_checkout("\"$repo\"", WAYDROID_SCRIPT_URL, WAYDROID_SCRIPT_REV),
+    )
+}
+
+fn phantom_install_script() -> String {
+    format!(
+        r#"set -euo pipefail
+if ! command -v git > /dev/null; then
+    echo "[ERROR] git is required to download the pinned Phantom source." >&2
+    exit 1
+fi
+work="$(mktemp -d "${{TMPDIR:-/tmp}}/archdroid-phantom.XXXXXXXXXX")"
+trap 'rm -rf "$work"' EXIT HUP INT TERM
+repo="$work/phantom"
+{checkout}
+export INSTALL_SYSTEM_WRAPPER=0
+export PREFIX="$HOME/.local"
+echo "[SYSTEM] Running Phantom installer as the desktop user..."
+if ! bash "$repo/install.sh"; then
+    echo "[ERROR] Phantom installation failed!" >&2
+    exit 1
+fi
+echo "[SUCCESS] Phantom Keymapper installed successfully!"
+"#,
+        checkout = pinned_git_checkout("\"$repo\"", PHANTOM_URL, PHANTOM_REV),
+    )
+}
+
+#[tauri::command]
+fn install_gapps(app: AppHandle) -> CommandResult {
+    stream_privileged_script(
+        app,
+        gapps_install_script(),
+        Completion::WriteMarker("gapps_installed"),
+    );
     CommandResult::success()
 }
 
 #[tauri::command]
 fn install_houdini(app: AppHandle) -> CommandResult {
-    let script = r#"
-set -e
-cd /tmp
-# Install system dependencies
-if ! command -v unsquashfs > /dev/null || ! command -v lzip > /dev/null; then
-    echo "[SYSTEM] Installing required dependencies (squashfs-tools, lzip)..."
-    pacman -S --noconfirm squashfs-tools lzip
-fi
-# Clone or update the repository
-if [ ! -d "waydroid_script" ]; then
-    echo "[SYSTEM] Cloning waydroid_script..."
-    git clone https://github.com/casualsnek/waydroid_script.git
-fi
-cd waydroid_script
-# Setup virtual environment and install python requirements
-if [ ! -d "venv" ]; then
-    echo "[SYSTEM] Setting up Python virtual environment..."
-    python3 -m venv venv
-fi
-echo "[SYSTEM] Installing Python requirements..."
-venv/bin/pip install -q -r requirements.txt
-echo "[SYSTEM] Installing ARM Translation / libhoudini (this may take several minutes)..."
-if ! PYTHONUNBUFFERED=1 venv/bin/python3 main.py install libhoudini; then
-    echo "[ERROR] ARM Translation installation failed!"
-    exit 1
-fi
-archdroid_marker houdini_installed
-echo "[SUCCESS] ARM Translation installation complete!"
-    "#
-    .to_string();
-
-    stream_privileged_script(app, script);
+    stream_privileged_script(
+        app,
+        houdini_install_script(),
+        Completion::WriteMarker("houdini_installed"),
+    );
     CommandResult::success()
 }
 
 #[tauri::command]
 fn install_phantom(app: AppHandle) -> CommandResult {
-    let script = r#"
-set -e
-cd /tmp
-if [ ! -d "phantom" ]; then
-    echo "[SYSTEM] Cloning Phantom Keymapper..."
-    git clone https://github.com/oliviermugishak/phantom.git
-    cd phantom
-else
-    cd phantom
-    echo "[SYSTEM] Updating Phantom Keymapper..."
-    # The repository may have been cloned by the desktop user before ArchDroid
-    # started running this script as root.
-    git -c safe.directory="$PWD" pull
-fi
-echo "[SYSTEM] Running install script..."
-chmod +x install.sh
-if ./install.sh; then
-    echo "[SUCCESS] Phantom Keymapper installed successfully!"
-else
-    echo "[ERROR] Phantom installation failed!"
-    exit 1
-fi
-    "#
-    .to_string();
-
-    stream_privileged_script(app, script);
+    // Phantom installs into $HOME/.local and its system wrapper is disabled, so
+    // it must not run through pkexec/sudo. Running it as the desktop user also
+    // avoids executing the user's Rust toolchain as root.
+    stream_user_script(app, phantom_install_script());
     CommandResult::success()
 }
 
@@ -1340,21 +1622,89 @@ fn run_and_stream(app: &AppHandle, mut command: Command) -> StreamResult {
     outcome
 }
 
+/// Markers are written by the unprivileged app process *after* a root script
+/// exits successfully. Root never writes into the user cache, so a symlink
+/// planted under `~/.cache` cannot redirect a root-owned write.
+#[derive(Clone, Copy)]
+enum Completion {
+    None,
+    WriteMarker(&'static str),
+    ClearInstallMarkers,
+}
+
+impl Completion {
+    fn apply(self) {
+        match self {
+            Self::None => {}
+            Self::WriteMarker(name) => write_marker(&marker_file(name)),
+            Self::ClearInstallMarkers => {
+                for name in [
+                    "gapps_installed",
+                    "houdini_installed",
+                    "multitouch_installed",
+                ] {
+                    let _ = std::fs::remove_file(marker_file(name));
+                }
+            }
+        }
+    }
+}
+
+fn finish_stream(app: &AppHandle, attempt: StreamResult, completion: Completion) {
+    if attempt.success {
+        completion.apply();
+    }
+    let _ = app.emit("cmd-finished", attempt.success);
+}
+
+/// Run a user-level script. Phantom installs into `$HOME/.local`, so it does
+/// not need root at all; keeping it out of the privileged path also avoids
+/// running a user-controlled Rust toolchain as root.
+fn stream_user_script(app: AppHandle, script: String) {
+    log::info!("user script requested:\n{script}");
+    thread::spawn(move || {
+        let Some(shell) = trusted_program("bash") else {
+            let error = AppError::not_found(
+                "bash",
+                "Install bash or start ArchDroid from a normal desktop session.",
+            );
+            let _ = app.emit("cmd-output", format!("[ERROR] {error}"));
+            let _ = app.emit("cmd-finished", false);
+            return;
+        };
+        let mut command = Command::new(shell);
+        command
+            .arg("--noprofile")
+            .arg("--norc")
+            .arg("-c")
+            .arg(&script);
+        let attempt = run_and_stream(&app, command);
+        finish_stream(&app, attempt, Completion::None);
+    });
+}
+
 /// Run a script that needs root.
 ///
 /// The script body is written as if it were already root: there are no `sudo`
-/// calls inside. `elevate_env` restores HOME/PATH so install scripts still write
-/// into the user's home directory instead of `/root`.
+/// calls inside. `elevate_env` supplies a fixed PATH, a passwd-derived HOME and
+/// a private work directory, regardless of what polkit/sudo passed through.
 ///
 /// Elevation is tried through polkit first, because a polkit password dialog is
 /// drawn by a desktop agent and therefore also works when ArchDroid was started
 /// from an app launcher. `sudo` remains the fallback because it can still prompt
 /// when the app was started from a terminal. Force either one with
 /// `ARCHDROID_ELEVATE=pkexec|sudo`.
-fn stream_privileged_script(app: AppHandle, script: String) {
+fn stream_privileged_script(app: AppHandle, script: String, completion: Completion) {
     log::info!("root script requested:\n{script}");
     thread::spawn(move || {
-        let body = elevate_env(&script);
+        let body = match elevate_env(&script) {
+            Ok(body) => body,
+            Err(error) => {
+                let _ = app.emit("cmd-output", format!("[ERROR] {error}"));
+                let _ = app.emit("cmd-finished", false);
+                return;
+            }
+        };
         let forced = std::env::var("ARCHDROID_ELEVATE").unwrap_or_default();
 
         if forced != "sudo" {
@@ -1370,7 +1720,7 @@ fn stream_privileged_script(app: AppHandle, script: String) {
                 // started the shell is treated as "no agent available".
                 let dismissed = attempt.code == Some(126);
                 if attempt.started || dismissed || forced == "pkexec" {
-                    let _ = app.emit("cmd-finished", attempt.success);
+                    finish_stream(&app, attempt, completion);
                     return;
                 }
 
@@ -1400,7 +1750,7 @@ fn stream_privileged_script(app: AppHandle, script: String) {
             let _ = app.emit("cmd-output", "[SYSTEM] Root access failed. Install a polkit authentication agent (for example hyprpolkitagent or polkit-gnome), or start ArchDroid from a terminal so sudo can ask for the password.".to_string());
         }
 
-        let _ = app.emit("cmd-finished", attempt.success);
+        finish_stream(&app, attempt, completion);
     });
 }
 
@@ -1483,58 +1833,60 @@ mod tests {
     }
 
     #[test]
-    fn elevated_script_keeps_user_environment_and_announces_itself() {
-        let body = elevate_env("echo body");
-        assert!(body.contains("export HOME='"));
-        assert!(body.contains("export ARCHDROID_CACHE='"));
-        assert!(body.contains(CACHE_SUBDIR));
+    fn elevated_script_uses_a_sanitized_root_environment() {
+        let context = UserContext {
+            uid: 1234,
+            home: PathBuf::from("/home/archdroid-test"),
+        };
+        let body = elevate_env_for(&context, "echo body");
+
+        assert!(body.contains(&format!("export PATH={}", sh_quote(SAFE_PATH))));
+        assert!(body.contains(&format!(
+            "export ARCHDROID_USER_HOME={}",
+            sh_quote("/home/archdroid-test")
+        )));
+        assert!(body.contains("export HOME=\"$ARCHDROID_WORK/home\""));
+        assert!(!body.contains("export HOME='/home/archdroid-test'"));
+        assert!(!body.contains("ARCHDROID_CACHE"));
+        assert!(body.contains("GIT_CONFIG_GLOBAL=/dev/null"));
+        assert!(body.contains("GIT_CONFIG_SYSTEM=/dev/null"));
+        assert!(body.contains("PIP_CONFIG_FILE=/dev/null"));
+        assert!(body.contains("PYTHONNOUSERSITE=1"));
+        assert!(body.contains("mktemp -d /var/tmp/archdroid."));
+        assert!(body.contains("chmod 700 \"$ARCHDROID_WORK\""));
+        assert!(body.contains("trap 'rm -rf \"$ARCHDROID_WORK\"'"));
         assert!(body.contains(ELEVATED_SENTINEL));
-        assert!(body.contains("archdroid_marker()"));
         assert!(body.trim_end().ends_with("echo body"));
     }
 
-    /// Regression guard: elevated shells run with a restrictive umask, and markers
-    /// created by root are unreadable for the app unless they are chmodded back.
     #[test]
-    fn markers_stay_readable_for_the_app_under_a_restrictive_umask() {
-        use std::os::unix::fs::PermissionsExt;
+    fn markers_are_written_by_the_unprivileged_app_process() {
+        let root =
+            std::env::temp_dir().join(format!("archdroid-marker-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let marker = root.join("gapps_installed");
 
-        let cache_root =
-            std::env::temp_dir().join(format!("archdroid-test-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&cache_root);
+        write_marker(&marker);
 
-        std::env::set_var("XDG_CACHE_HOME", &cache_root);
-        let script = elevate_env("archdroid_marker gapps_installed\n");
-        std::env::remove_var("XDG_CACHE_HOME");
-
-        let output = Command::new("bash")
-            .arg("-c")
-            .arg(format!("umask 077\n{}", script))
-            .output()
-            .expect("failed to run bash");
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-
-        let marker = cache_root.join(CACHE_SUBDIR).join("gapps_installed");
-        let contents =
-            std::fs::read_to_string(&marker).expect("the app must be able to read its own marker");
-        assert_eq!(contents.trim(), "installed");
-
-        let mode = std::fs::metadata(&marker).unwrap().permissions().mode() & 0o777;
         assert_eq!(
-            mode, 0o644,
-            "marker should not keep the root-only umask permissions"
+            std::fs::read_to_string(&marker)
+                .expect("the app must be able to read its own marker")
+                .trim(),
+            "installed"
         );
-
-        let _ = std::fs::remove_dir_all(&cache_root);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
     fn elevated_script_is_valid_bash() {
-        let body = elevate_env("echo body\nif waydroid init; then\n  echo ok\nfi\n");
+        let context = UserContext {
+            uid: 1234,
+            home: PathBuf::from("/home/archdroid-test"),
+        };
+        let body = elevate_env_for(
+            &context,
+            "echo body\nif waydroid init; then\n  echo ok\nfi\n",
+        );
         let output = Command::new("bash")
             .args(["-n", "-c", &body])
             .output()
@@ -1544,6 +1896,90 @@ mod tests {
             "generated script is not valid bash: {}",
             String::from_utf8_lossy(&output.stderr)
         );
+    }
+
+    #[test]
+    fn passwd_and_proc_status_are_parsed_without_environment_input() {
+        let passwd = "root:x:0:0:root:/root:/bin/bash\nwdg:x:1000:1000::/home/wdg:/bin/bash\n";
+        assert_eq!(
+            parse_passwd_home(passwd, 1000),
+            Some(PathBuf::from("/home/wdg"))
+        );
+        assert_eq!(parse_passwd_home(passwd, 1234), None);
+
+        let status = "Name:\tbash\nUid:\t1000\t0\t0\t0\nGid:\t1000\t0\t0\t0\n";
+        assert_eq!(parse_status_id(status, "Uid:"), Some(1000));
+        assert_eq!(parse_status_id(status, "Gid:"), Some(1000));
+    }
+
+    #[test]
+    fn home_validation_rejects_relative_root_and_foreign_owned_directories() {
+        assert!(validated_home(PathBuf::from("relative"), 1000).is_none());
+        assert!(validated_home(PathBuf::from("/"), 0).is_none());
+
+        let dir = std::env::temp_dir().join(format!("archdroid-home-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let canonical = std::fs::canonicalize(&dir).unwrap();
+        let uid = current_uid().expect("the current uid must be readable");
+        assert_eq!(validated_home(dir.clone(), uid), Some(canonical));
+        assert!(validated_home(dir.clone(), uid.wrapping_add(1)).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn trusted_program_ignores_user_path() {
+        let bash = trusted_program("bash").expect("bash should exist in a trusted directory");
+        assert!(
+            TRUSTED_DIRS
+                .iter()
+                .any(|dir| bash == Path::new(dir).join("bash")),
+            "resolved bash outside the trusted directories: {}",
+            bash.display()
+        );
+        assert!(trusted_program("archdroid-no-such-binary-12345").is_none());
+    }
+
+    #[test]
+    fn third_party_installers_are_pinned_and_use_private_workdirs() {
+        let gapps = gapps_install_script();
+        assert!(gapps.contains(WAYDROID_SCRIPT_REV));
+        assert!(gapps.contains("$ARCHDROID_WORK"));
+        assert!(!gapps.contains("cd /tmp"));
+        assert!(!gapps.contains("git pull"));
+        assert!(!gapps.contains("archdroid_marker"));
+
+        let houdini = houdini_install_script();
+        assert!(houdini.contains(WAYDROID_SCRIPT_REV));
+        assert!(houdini.contains("$ARCHDROID_WORK"));
+        assert!(!houdini.contains("cd /tmp"));
+        assert!(!houdini.contains("git pull"));
+        assert!(!houdini.contains("archdroid_marker"));
+
+        let phantom = phantom_install_script();
+        assert!(phantom.contains(PHANTOM_REV));
+        assert!(phantom.contains("INSTALL_SYSTEM_WRAPPER=0"));
+        assert!(phantom.contains("mktemp -d"));
+        assert!(!phantom.contains("git pull"));
+    }
+
+    #[test]
+    fn third_party_installers_are_valid_bash() {
+        for (name, script) in [
+            ("gapps", gapps_install_script()),
+            ("houdini", houdini_install_script()),
+            ("phantom", phantom_install_script()),
+        ] {
+            let output = Command::new("bash")
+                .args(["-n", "-c", &script])
+                .output()
+                .expect("failed to run bash");
+            assert!(
+                output.status.success(),
+                "{name} installer is not valid bash: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
     }
 
     #[test]
@@ -1557,6 +1993,18 @@ mod tests {
         assert!(elevated_command("archdroid-no-such-binary-12345", "true").is_none());
         let command = elevated_command("bash", "true").expect("bash should be resolvable");
         assert!(command.get_args().any(|arg| arg == "-c"));
+    }
+
+    #[test]
+    fn elevated_command_uses_a_fixed_path_and_drops_bash_env() {
+        let command = elevated_command("bash", "true").expect("bash should be resolvable");
+        let envs: Vec<_> = command.get_envs().collect();
+        assert!(envs.iter().any(|(key, value)| {
+            *key == "PATH" && *value == Some(std::ffi::OsStr::new(SAFE_PATH))
+        }));
+        assert!(envs
+            .iter()
+            .any(|(key, value)| *key == "BASH_ENV" && value.is_none()));
     }
 
     /// The UI reads `status`, `data` and `message`; `code` is the addition that
