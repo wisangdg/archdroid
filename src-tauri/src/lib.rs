@@ -232,6 +232,25 @@ fn probe(run: impl FnOnce(&waydroid::Waydroid) -> error::Result<String>) -> Opti
     run(&waydroid).ok()
 }
 
+/// Live shell probe for the status cards. ADB is unprivileged and is tried
+/// first. The root-only `waydroid shell` fallback is skipped when the session is
+/// stopped or the container is frozen: that path cannot answer, and it may
+/// prompt or hang instead of degrading to a cached marker.
+fn live_shell(args: &[&str]) -> Option<String> {
+    match adb::shell(args) {
+        Ok(stdout) => Some(stdout),
+        Err(error)
+            if matches!(
+                error.code(),
+                error::code::SESSION_FROZEN | error::code::SESSION_NOT_RUNNING
+            ) =>
+        {
+            None
+        }
+        Err(_) => probe(|waydroid| waydroid.shell(args)),
+    }
+}
+
 #[tauri::command]
 async fn waydroid_start() -> CommandResult {
     // Start the Waydroid session; an optional scheduler hint (e.g. ananicy-cpp) can be added later
@@ -576,9 +595,11 @@ fi
 fn gapps_state() -> CommandResult {
     let marker = marker_file("gapps_installed");
 
-    // Method 1: ask the running container. This is the only authoritative source,
-    // so it also tells us when a previously written marker has gone stale.
-    if let Some(stdout) = probe(|waydroid| waydroid.shell(&["pm", "list", "packages"])) {
+    // Method 1: ask the running container. ADB needs no root (unlike
+    // `waydroid shell`), so try it first; the root path remains for hosts
+    // without android-tools. This is the only authoritative source, so it also
+    // tells us when a previously written marker has gone stale.
+    if let Some(stdout) = live_shell(&["pm", "list", "packages"]) {
         let has_play_store = stdout.lines().any(|l| l.contains("com.android.vending"));
         let has_play_services = stdout.lines().any(|l| l.contains("com.google.android.gms"));
         let has_play_framework = stdout.lines().any(|l| l.contains("com.google.android.gsf"));
@@ -634,9 +655,9 @@ async fn check_gapps_status() -> CommandResult {
 fn houdini_state() -> CommandResult {
     let marker = marker_file("houdini_installed");
 
-    // The container reports the ARM translation layer in its ABI list when it is loaded.
-    if let Some(abilist) = probe(|waydroid| waydroid.shell(&["getprop", "ro.product.cpu.abilist"]))
-    {
+    // The container reports the ARM translation layer in its ABI list when it is
+    // loaded. Prefer ADB for the same reason as gapps_state().
+    if let Some(abilist) = live_shell(&["getprop", "ro.product.cpu.abilist"]) {
         let abilist = abilist.to_lowercase();
         if abilist.contains("arm") {
             write_marker(&marker);
@@ -740,6 +761,10 @@ pub struct StatusSnapshot {
     pub available: bool,
     pub initialized: bool,
     pub running: bool,
+    /// The session is up, but Waydroid suspended the container (no Android app
+    /// is active). ADB commands hang while frozen, so the UI must not show this
+    /// as "ready" even though the session is running.
+    pub frozen: bool,
     pub booted: bool,
     /// `installed | partial | not_installed | error`
     pub gapps: String,
@@ -753,6 +778,7 @@ fn status_snapshot() -> StatusSnapshot {
         available: false,
         initialized: false,
         running: false,
+        frozen: false,
         booted: false,
         gapps: "unknown".to_string(),
         houdini: "unknown".to_string(),
@@ -765,6 +791,7 @@ fn status_snapshot() -> StatusSnapshot {
             Ok(text) => {
                 snapshot.initialized = true;
                 snapshot.running = waydroid::session_running(&text);
+                snapshot.frozen = waydroid::container_frozen(&text);
             }
             // Only "not initialized" means the image is absent; every other
             // failure (d-bus down, container asleep) still leaves a configured image.
@@ -773,7 +800,9 @@ fn status_snapshot() -> StatusSnapshot {
         }
     }
 
-    if snapshot.running {
+    // A frozen container never answers `adb shell`; asking would block for the
+    // whole timeout. The passive probes below return "not now" on their own.
+    if snapshot.running && !snapshot.frozen {
         snapshot.booted = adb::booted();
     }
     snapshot.gapps = gapps_state().status;
@@ -917,13 +946,13 @@ async fn profile_apply(app: AppHandle, profile: device::DeviceProfile) -> Comman
 
         if profile.width > 0 {
             let command = format!("wm size {}x{}", profile.width, profile.height);
-            match adb::shell_line(&command) {
+            match adb::shell_line_active(&command) {
                 Ok(_) => report.applied.extend(["width", "height"]),
                 Err(_) => report.deferred.extend(["width", "height"]),
             }
         }
         if profile.dpi > 0 {
-            match adb::shell_line(&format!("wm density {}", profile.dpi)) {
+            match adb::shell_line_active(&format!("wm density {}", profile.dpi)) {
                 Ok(_) => report.applied.push("dpi"),
                 Err(_) => report.deferred.push("dpi"),
             }
@@ -986,7 +1015,9 @@ async fn profile_apply(app: AppHandle, profile: device::DeviceProfile) -> Comman
                             .to_string(),
                     );
 
-                    match adb::shell_line("getprop ro.product.model; getprop ro.product.manufacturer") {
+                    match adb::shell_line_active(
+                        "getprop ro.product.model; getprop ro.product.manufacturer",
+                    ) {
                         Ok(output) => {
                             let live = device::parse_getprop_values(&output);
                             if !live.is_empty() {
@@ -1032,7 +1063,7 @@ async fn waydroid_kill_app(package: String) -> CommandResult {
             )
             .into();
         }
-        match adb::shell(&["am", "force-stop", &package]) {
+        match adb::shell_active(&["am", "force-stop", &package]) {
             Ok(_) => CommandResult::success(),
             Err(failure) => failure.into(),
         }
@@ -1042,7 +1073,7 @@ async fn waydroid_kill_app(package: String) -> CommandResult {
 
 #[tauri::command]
 async fn waydroid_getprop_all() -> CommandResult {
-    off_main_thread(|| match adb::shell(&["getprop"]) {
+    off_main_thread(|| match adb::shell_active(&["getprop"]) {
         Ok(text) => CommandResult::with_data(text),
         Err(failure) => failure.into(),
     })
@@ -1053,7 +1084,7 @@ async fn waydroid_getprop_all() -> CommandResult {
 /// input validation on purpose: running the caller's command is the feature.
 #[tauri::command]
 async fn waydroid_adb_cmd(command: String) -> CommandResult {
-    off_main_thread(move || match adb::shell_line(&command) {
+    off_main_thread(move || match adb::shell_line_active(&command) {
         Ok(text) => CommandResult::with_data(text),
         Err(failure) => failure.into(),
     })

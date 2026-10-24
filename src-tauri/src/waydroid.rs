@@ -46,6 +46,20 @@ pub const NOT_INITIALIZED_MARKER: &str = "Waydroid is not initialized";
 /// 1.6.3 no longer produces it, but the UI still greps for it.
 pub const NOT_INITIALIZED_LEGACY_MARKER: &str = "Cannot locate waydroid config";
 
+/// Terminal failures logged by Waydroid's Python/binder helpers while the CLI
+/// still exits 0. A retry warning such as "Failed to get service ... trying
+/// again" is deliberately absent: a later retry can succeed. These markers are
+/// only treated as failures when the exit code is already zero; a non-zero exit
+/// keeps the more useful `Exit` error.
+const FAILURE_MARKERS: [&str; 6] = [
+    "sending reply failed",
+    "waydroid session is stopped",
+    "failed with code:",
+    "failed to access iplatform service",
+    "service manager never appeared",
+    "failed to uninstall package",
+];
+
 /// How long `session start` may take to either fail (fast exit) or prove it is
 /// up (still running) before we report success and hand it to a reaper thread.
 pub const SESSION_START_GRACE_SECS: u64 = 5;
@@ -83,6 +97,40 @@ pub fn session_running(status: &str) -> bool {
     })
 }
 
+fn status_value<'a>(status: &'a str, key: &str) -> Option<&'a str> {
+    status.lines().find_map(|line| {
+        line.strip_prefix(key)
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty())
+    })
+}
+
+/// `waydroid status` prints `Container:\tFROZEN` when Android asked the
+/// container to suspend. `waydroid shell`/`adb shell` hang while frozen, so
+/// callers must never start a shell based on `session_running` alone.
+pub fn container_frozen(status: &str) -> bool {
+    status_value(status, "Container:").is_some_and(|value| value == "FROZEN")
+}
+
+pub fn container_running(status: &str) -> bool {
+    status_value(status, "Container:").is_some_and(|value| value == "RUNNING")
+}
+
+/// The container IP is the only address ADB should target, so a physical phone
+/// or another emulator on the same adb server cannot steal the command.
+pub fn device_ip(status: &str) -> Option<String> {
+    status_value(status, "IP address:")
+        .filter(|value| !value.eq_ignore_ascii_case("unknown"))
+        .map(str::to_string)
+}
+
+/// Waydroid's CLI prints these when a binder/platform transaction failed but
+/// the process still exited 0.
+fn looks_failed(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    FAILURE_MARKERS.iter().any(|marker| lower.contains(marker))
+}
+
 fn argv(parts: &[&str]) -> Vec<String> {
     parts.iter().map(|part| (*part).to_string()).collect()
 }
@@ -102,11 +150,6 @@ pub fn argv_session_start() -> Vec<String> {
 
 pub fn argv_session_stop() -> Vec<String> {
     argv(&["session", "stop"])
-}
-
-/// `waydroid adb connect` points the host adb server at the container IP.
-pub fn argv_adb_connect() -> Vec<String> {
-    argv(&["adb", "connect"])
 }
 
 pub fn argv_app_list() -> Vec<String> {
@@ -290,17 +333,24 @@ impl Waydroid {
     }
 
     pub fn prop_set(&self, key: &str, value: &str) -> Result<String> {
-        self.run(&argv_prop_set(key, value), TIMEOUT_QUICK)
+        let output = self.run(&argv_prop_set(key, value), TIMEOUT_QUICK)?;
+
+        // `waydroid prop set` exits 0 even when the platform service rejected
+        // the write (read-only props, a stopped platform service, or a binder
+        // reply failure), so the observed value is the only proof it worked.
+        let actual = self.prop_get(key)?;
+        if actual != value.trim() {
+            return Err(AppError::command_failed(format!(
+                "waydroid did not apply {key}={value:?}: Android still reports {actual:?}. \
+                 The property is probably read-only, or the platform service rejected it."
+            )));
+        }
+
+        Ok(output)
     }
 
     pub fn shell(&self, command: &[&str]) -> Result<String> {
         self.run(&argv_shell(command), TIMEOUT_NORMAL)
-    }
-
-    /// Point the host `adb` server at the container. No root needed (only
-    /// `shell`, `container`, `logcat`, `init` and `upgrade` call `actionNeedRoot`).
-    pub fn adb_connect(&self) -> Result<String> {
-        self.run(&argv_adb_connect(), TIMEOUT_QUICK)
     }
 }
 
@@ -390,6 +440,19 @@ fn interpret(program: &str, status: ExitStatus, stdout: String, stderr: String) 
     }
 
     if status.success() {
+        // Waydroid logs the failure and exits 0 (notably `prop set` after the
+        // platform service fails). Keep only the last non-empty line so the UI
+        // does not get a thousand retry warnings as its message.
+        let combined = format!("{stdout}\n{stderr}");
+        if looks_failed(&combined) {
+            let detail = combined
+                .lines()
+                .rev()
+                .map(str::trim)
+                .find(|line| !line.is_empty())
+                .unwrap_or("waydroid reported a failure");
+            return Err(AppError::command_failed(detail));
+        }
         return Ok(stdout);
     }
 
@@ -414,13 +477,29 @@ fn read_lossy(mut reader: impl Read) -> String {
 mod tests {
     use super::*;
     use crate::error::code;
+    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::process::ExitStatusExt;
+
+    fn stub_script(name: &str, body: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "archdroid-waydroid-test-{}-{name}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("stub");
+        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        let mut permissions = std::fs::metadata(&path).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&path, permissions).unwrap();
+        path
+    }
 
     #[test]
     fn status_and_session_argv_match_the_upstream_actions() {
         assert_eq!(argv_status(), vec!["status"]);
         assert_eq!(argv_session_start(), vec!["session", "start"]);
         assert_eq!(argv_session_stop(), vec!["session", "stop"]);
-        assert_eq!(argv_adb_connect(), vec!["adb", "connect"]);
         assert_eq!(argv_version(), vec!["--version"]);
     }
 
@@ -435,6 +514,84 @@ mod tests {
         assert!(!session_running(stopped));
         assert!(!session_running(""));
         assert!(!session_running("Session:\tUNKNOWN"));
+    }
+
+    #[test]
+    fn container_state_and_ip_are_parsed_from_the_same_status_output() {
+        let frozen = "Session:\tRUNNING\nContainer:\tFROZEN\nVendor type:\tMAINLINE\nIP address:\t192.168.240.112";
+        assert!(container_frozen(frozen));
+        assert!(!container_running(frozen));
+        assert_eq!(device_ip(frozen).as_deref(), Some("192.168.240.112"));
+
+        let running = "Session:\tRUNNING\nContainer:\tRUNNING\nIP address:\t192.168.240.112";
+        assert!(container_running(running));
+        assert!(!container_frozen(running));
+
+        let booting = "Session:\tRUNNING\nContainer:\tRUNNING\nIP address:\tUNKNOWN";
+        assert_eq!(device_ip(booting), None);
+
+        let stopped = "Session:\tSTOPPED\nVendor type:\tMAINLINE";
+        assert!(!container_frozen(stopped));
+        assert!(!container_running(stopped));
+        assert_eq!(device_ip(stopped), None);
+    }
+
+    /// Exit code 0 from `waydroid prop set` is not proof: the platform service
+    /// logs a failure and the CLI still reports success.
+    #[test]
+    fn a_platform_failure_with_exit_zero_is_rejected() {
+        let error = interpret(
+            "waydroid",
+            ExitStatus::from_raw(0),
+            String::new(),
+            "Failed with code: 1\nSending reply failed".to_string(),
+        )
+        .unwrap_err();
+        assert_eq!(error.code(), code::COMMAND_FAILED);
+        assert!(
+            error.to_string().contains("Sending reply failed"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn a_retry_warning_alone_is_not_a_failure() {
+        assert!(!looks_failed(
+            "Failed to get service waydroidplatform, trying again..."
+        ));
+        assert!(looks_failed("Sending reply failed"));
+        assert!(looks_failed("WayDroid session is stopped"));
+        assert!(looks_failed("Failed to access IPlatform service"));
+    }
+
+    #[test]
+    fn prop_set_fails_when_android_still_reports_the_old_value() {
+        let stub = stub_script(
+            "prop-set-stale",
+            r#"case "$1 $2" in
+  "prop set") exit 0 ;;
+  "prop get") echo old ;;
+  *) exit 9 ;;
+esac"#,
+        );
+        let tool = Waydroid::with_program(&stub);
+        let error = tool.prop_set("ro.sf.lcd_density", "280").unwrap_err();
+        assert_eq!(error.code(), code::COMMAND_FAILED, "{error:?}");
+        assert!(error.to_string().contains("did not apply"), "{error}");
+        assert!(error.to_string().contains("old"), "{error}");
+        let _ = std::fs::remove_dir_all(stub.parent().unwrap());
+    }
+
+    #[test]
+    fn prop_set_accepts_a_value_android_reads_back() {
+        let stub = stub_script(
+            "prop-set-applied",
+            r#"if [ "$1 $2" = "prop get" ]; then echo 280; fi
+exit 0"#,
+        );
+        let tool = Waydroid::with_program(&stub);
+        tool.prop_set("persist.archdroid.test", "280").unwrap();
+        let _ = std::fs::remove_dir_all(stub.parent().unwrap());
     }
 
     #[test]

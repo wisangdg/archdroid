@@ -20,6 +20,10 @@ pub mod code {
     pub const INVALID_INPUT: &str = "invalid_input";
     pub const EXIT: &str = "exit";
     pub const IO: &str = "io";
+    pub const SESSION_NOT_RUNNING: &str = "session_not_running";
+    pub const SESSION_FROZEN: &str = "session_frozen";
+    pub const ADB_UNAUTHORIZED: &str = "adb_unauthorized";
+    pub const COMMAND_FAILED: &str = "command_failed";
 }
 
 #[derive(Debug)]
@@ -42,6 +46,16 @@ pub enum AppError {
         code: Option<i32>,
         output: String,
     },
+    /// No Android session is running, so there is no device to talk to.
+    SessionNotRunning { detail: String },
+    /// The session is running but Waydroid suspended the container. ADB
+    /// commands hang while an LXC container is frozen, so callers must resume
+    /// it or report this state instead of waiting for a timeout.
+    SessionFrozen { detail: String },
+    /// The device is reachable but has not accepted this host's ADB key.
+    AdbUnauthorized { detail: String },
+    /// A command reported failure in its output even though it exited 0.
+    CommandFailed { detail: String },
     /// Anything that came out of `std::io`.
     Io(io::Error),
 }
@@ -72,6 +86,30 @@ impl AppError {
         }
     }
 
+    pub fn session_not_running(detail: impl Into<String>) -> Self {
+        Self::SessionNotRunning {
+            detail: detail.into(),
+        }
+    }
+
+    pub fn session_frozen(detail: impl Into<String>) -> Self {
+        Self::SessionFrozen {
+            detail: detail.into(),
+        }
+    }
+
+    pub fn adb_unauthorized(detail: impl Into<String>) -> Self {
+        Self::AdbUnauthorized {
+            detail: detail.into(),
+        }
+    }
+
+    pub fn command_failed(detail: impl Into<String>) -> Self {
+        Self::CommandFailed {
+            detail: detail.into(),
+        }
+    }
+
     /// Map a failed `Command::spawn` onto the right variant, so a missing binary
     /// is reported as "not installed" instead of a bare I/O error.
     pub fn from_spawn(program: &str, hint: &str, error: io::Error) -> Self {
@@ -92,6 +130,10 @@ impl AppError {
             Self::CancelRequested { .. } => code::CANCELLED,
             Self::InvalidInput { .. } => code::INVALID_INPUT,
             Self::Exit { .. } => code::EXIT,
+            Self::SessionNotRunning { .. } => code::SESSION_NOT_RUNNING,
+            Self::SessionFrozen { .. } => code::SESSION_FROZEN,
+            Self::AdbUnauthorized { .. } => code::ADB_UNAUTHORIZED,
+            Self::CommandFailed { .. } => code::COMMAND_FAILED,
             Self::Io(_) => code::IO,
         }
     }
@@ -131,6 +173,36 @@ impl fmt::Display for AppError {
                 Some(code) => write!(f, "\"{program}\" failed with exit code {code}: {output}"),
                 None => write!(f, "\"{program}\" was terminated by a signal: {output}"),
             },
+            Self::SessionNotRunning { detail } => {
+                if detail.trim().is_empty() {
+                    write!(f, "Waydroid is not running. Start it first.")
+                } else {
+                    write!(f, "Waydroid is not running. {}", detail.trim())
+                }
+            }
+            Self::SessionFrozen { detail } => {
+                if detail.trim().is_empty() {
+                    write!(f, "Waydroid is suspended (container FROZEN).")
+                } else {
+                    write!(
+                        f,
+                        "Waydroid is suspended (container FROZEN). {}",
+                        detail.trim()
+                    )
+                }
+            }
+            Self::AdbUnauthorized { detail } => {
+                if detail.trim().is_empty() {
+                    write!(f, "ADB is not authorized for the Waydroid device.")
+                } else {
+                    write!(
+                        f,
+                        "ADB is not authorized for the Waydroid device. {}",
+                        detail.trim()
+                    )
+                }
+            }
+            Self::CommandFailed { detail } => write!(f, "{detail}"),
             Self::Io(error) => write!(f, "{error}"),
         }
     }
@@ -232,6 +304,30 @@ mod tests {
         let error = AppError::invalid_input("That is not a valid package name.");
         assert_eq!(error.to_string(), "That is not a valid package name.");
         assert_eq!(error.code(), code::INVALID_INPUT);
+    }
+
+    #[test]
+    fn session_errors_have_stable_codes_and_actionable_text() {
+        let not_running = AppError::session_not_running("Start the session from the dashboard.");
+        assert_eq!(not_running.code(), code::SESSION_NOT_RUNNING);
+        assert!(not_running.to_string().contains("not running"));
+
+        let frozen = AppError::session_frozen("Open the Waydroid window to resume it.");
+        assert_eq!(frozen.code(), code::SESSION_FROZEN);
+        assert!(frozen.to_string().contains("FROZEN"));
+        assert!(frozen.to_string().contains("resume"));
+    }
+
+    #[test]
+    fn adb_authorization_and_command_failures_do_not_look_like_exit_codes() {
+        let unauthorized = AppError::adb_unauthorized("The host key was not accepted.");
+        assert_eq!(unauthorized.code(), code::ADB_UNAUTHORIZED);
+        assert!(unauthorized.to_string().contains("not authorized"));
+
+        let failed = AppError::command_failed("waydroid prop set did not take effect.");
+        assert_eq!(failed.code(), code::COMMAND_FAILED);
+        assert_eq!(failed.to_string(), "waydroid prop set did not take effect.");
+        assert!(!failed.to_string().contains("exit code"));
     }
 
     #[test]
