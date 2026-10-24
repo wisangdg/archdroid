@@ -34,6 +34,7 @@ export default function App() {
   const [isOperating, setIsOperating] = useState(false);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const prevStatusRef = useRef("offline");
+  const operationInFlight = useRef(false);
 
   // In-App Toast State
   const [toasts, setToasts] = useState([]);
@@ -76,6 +77,42 @@ export default function App() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
+  const runStreamingTask = async (command, { taskType, title }) => {
+    if (operationInFlight.current) {
+      addToast({
+        type: "warning",
+        title: "Operation In Progress",
+        message: "Wait for the current operation to finish before starting another.",
+      });
+      return null;
+    }
+
+    operationInFlight.current = true;
+    setInstalling(true);
+    setTerminalTaskType(taskType);
+    setTerminalTitle(title);
+    setTerminalLogs([]);
+    setTerminalOpen(true);
+
+    try {
+      const result = await invoke(command);
+      if (result?.status === "error" && result.code === "busy") {
+        operationInFlight.current = false;
+        setInstalling(false);
+        addToast({
+          type: "warning",
+          title: "Operation In Progress",
+          message: result.message || "Another operation is already running.",
+        });
+      }
+      return result;
+    } catch (error) {
+      operationInFlight.current = false;
+      setInstalling(false);
+      throw error;
+    }
+  };
+
   useEffect(() => {
     checkStatus();
     loadApps();
@@ -90,7 +127,7 @@ export default function App() {
     }, 5000);
 
     const unlistenOutput = listen("cmd-output", (event) => {
-      setTerminalLogs((prev) => [...prev, event.payload]);
+      setTerminalLogs((prev) => [...prev, event.payload.line]);
       if (terminalRef.current) {
         terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
       }
@@ -104,6 +141,7 @@ export default function App() {
           ? "\n[PROCESS COMPLETED SUCCESSFULLY]"
           : `\n[PROCESS FINISHED WITH ERRORS${code ? ` (${code})` : ""}]`,
       ]);
+      operationInFlight.current = false;
       setInstalling(false);
       if (success) {
         addToast({
@@ -486,12 +524,10 @@ export default function App() {
 
   const handleInstallGApps = async () => {
     try {
-      setInstalling(true);
-      setTerminalTaskType("gapps");
-      setTerminalTitle("Installing Google Play Services (GApps)");
-      setTerminalLogs([]);
-      setTerminalOpen(true);
-      await invoke("install_gapps");
+      await runStreamingTask("install_gapps", {
+        taskType: "gapps",
+        title: "Installing Google Play Services (GApps)",
+      });
     } catch (e) {
       console.error("GApps install error:", e);
       addToast({
@@ -499,18 +535,15 @@ export default function App() {
         title: "GApps Error",
         message: String(e),
       });
-      setInstalling(false);
     }
   };
 
   const handleInstallHoudini = async () => {
     try {
-      setInstalling(true);
-      setTerminalTaskType("houdini");
-      setTerminalTitle("Installing ARM Translation (libhoudini)");
-      setTerminalLogs([]);
-      setTerminalOpen(true);
-      await invoke("install_houdini");
+      await runStreamingTask("install_houdini", {
+        taskType: "houdini",
+        title: "Installing ARM Translation (libhoudini)",
+      });
     } catch (e) {
       console.error("Houdini install error:", e);
       addToast({
@@ -518,19 +551,16 @@ export default function App() {
         title: "ARM Translation Error",
         message: String(e),
       });
-      setInstalling(false);
     }
   };
 
   const handleInstallMultitouch = async () => {
     try {
-      setInstalling(true);
-      setTerminalTaskType("multitouch");
-      setTerminalTitle("Declaring Touch Features for Google Play");
-      setTerminalLogs([]);
-      setTerminalOpen(true);
-      const result = await invoke("install_multitouch");
-      if (result.status === "success") {
+      const result = await runStreamingTask("install_multitouch", {
+        taskType: "multitouch",
+        title: "Declaring Touch Features for Google Play",
+      });
+      if (result?.status === "success") {
         addToast({
           type: "info",
           title: "Restart Required",
@@ -545,18 +575,15 @@ export default function App() {
         title: "Touch Feature Error",
         message: String(e),
       });
-      setInstalling(false);
     }
   };
 
   const handleViewLogs = async () => {
     try {
-      setInstalling(true);
-      setTerminalTaskType("logs");
-      setTerminalTitle("Waydroid Diagnostic Logs");
-      setTerminalLogs([]);
-      setTerminalOpen(true);
-      await invoke("waydroid_log");
+      await runStreamingTask("waydroid_log", {
+        taskType: "logs",
+        title: "Waydroid Diagnostic Logs",
+      });
     } catch (e) {
       console.error("View logs error:", e);
       addToast({
@@ -564,7 +591,6 @@ export default function App() {
         title: "Log Read Error",
         message: String(e),
       });
-      setInstalling(false);
     }
   };
 
@@ -719,12 +745,10 @@ export default function App() {
 
   const handleInstallPhantom = async () => {
     try {
-      setInstalling(true);
-      setTerminalTaskType("phantom");
-      setTerminalTitle("Installing / Updating Phantom Keymapper");
-      setTerminalLogs([]);
-      setTerminalOpen(true);
-      await invoke("install_phantom");
+      await runStreamingTask("install_phantom", {
+        taskType: "phantom",
+        title: "Installing / Updating Phantom Keymapper",
+      });
     } catch (e) {
       console.error("Install Phantom error:", e);
       addToast({
@@ -732,7 +756,6 @@ export default function App() {
         title: "Phantom Error",
         message: String(e),
       });
-      setInstalling(false);
     }
   };
 
@@ -756,12 +779,10 @@ export default function App() {
 
   const handleInitWaydroid = async () => {
     try {
-      setInstalling(true);
-      setTerminalTaskType("init");
-      setTerminalTitle("Initializing Waydroid System Image");
-      setTerminalLogs([]);
-      setTerminalOpen(true);
-      await invoke("waydroid_init");
+      await runStreamingTask("waydroid_init", {
+        taskType: "init",
+        title: "Initializing Waydroid System Image",
+      });
     } catch (e) {
       console.error("Init Waydroid error:", e);
       addToast({
@@ -769,7 +790,6 @@ export default function App() {
         title: "Init Error",
         message: String(e),
       });
-      setInstalling(false);
     }
   };
 
@@ -785,12 +805,10 @@ export default function App() {
       onConfirm: async () => {
         setConfirmModal((prev) => ({ ...prev, isOpen: false }));
         try {
-          setInstalling(true);
-          setTerminalTaskType("wipe");
-          setTerminalTitle("Factory Reset in Progress...");
-          setTerminalLogs([]);
-          setTerminalOpen(true);
-          await invoke("waydroid_wipe");
+          await runStreamingTask("waydroid_wipe", {
+            taskType: "wipe",
+            title: "Factory Reset in Progress...",
+          });
         } catch (e) {
           console.error("Wipe data error:", e);
           addToast({
@@ -798,7 +816,6 @@ export default function App() {
             title: "Wipe Failed",
             message: String(e),
           });
-          setInstalling(false);
         }
       },
     });

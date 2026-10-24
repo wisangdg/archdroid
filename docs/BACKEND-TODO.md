@@ -16,7 +16,7 @@ Sumber fitur: hasil RE LDPlayer 9 (`~/Downloads/ldplayer-re/ANALYSIS-LDPlayer-CL
 | `waydroid_prop_set/prop_get` | |
 | `waydroid_log`, `open_shared_folder` | |
 | `check_/install_gapps`, `check_/install_houdini`, `install_/run_phantom` | lewat `stream_privileged_script` |
-| Infra | `CommandResult{status,data,message}`, event `cmd-output`/`cmd-finished`, `elevate_env`, `sh_quote`, `resolve_program`, `run_and_stream`, 7 unit test |
+| Infra | `CommandResult{status,data,message}`, event `cmd-output`/`cmd-finished` dengan `task_id`, `elevate_env`, `sh_quote`, `resolve_program`, `run_and_stream` |
 
 **Batasan bawaan yang harus diingat:** Waydroid = **1 container**, jadi tidak ada multi-instance nyata. Semua item di sini untuk instance tunggal.
 
@@ -50,7 +50,7 @@ Sumber fitur: hasil RE LDPlayer 9 (`~/Downloads/ldplayer-re/ANALYSIS-LDPlayer-CL
   Bungkus dengan `tauri::async_runtime::spawn_blocking` + simpan `Child` di `State` supaya bisa `kill`.
   *DoD:* dua operasi panjang bersamaan tidak membekukan UI; tombol Cancel benar-benar menghentikan proses.
   *(Timeout per kelas command sudah ada: 30s cepat / 120s normal / 1800s sama seperti default waydroid.)*
-  → **selesai**: command yang bisa lama (`status`, `version`, `start`, `stop`, `install`, `uninstall`, `launch`, `prop get|set`, `check_gapps/houdini`) jadi `async` + `off_main_thread` → `spawn_blocking` (Tauri menjalankan command non-`async` di **main thread**, jadi command sync lama membekukan UI). Cancel: command `waydroid_cancel` + flag global `CANCEL` di `waydroid.rs` dicek di loop poll (`run_cancellable`, dipakai `app install|remove`), child dibunuh dalam satu tick (~20ms); error baru `AppError::CancelRequested` (code `cancelled`) berbeda dari timeout. **Temuan**: `waydroid session start` adalah daemon foreground (`session_manager.py` diakhiri `looper.run()`) — tidak lagi pakai timeout (dulu programnya hang); sekarang grace-wait 5s: exit cepat → error, tetap hidup → sukses + reap di thread belakang. `ponytail:` satu Cancel-flag global (UI menjalankan satu operasi panjang per waktu); kill script privileged (gapps/houdini) belum masuk. Frontend: tombol Cancel tinggal `invoke("waydroid_cancel")`.
+  → **selesai**: command yang bisa lama (`status`, `version`, `start`, `stop`, `install`, `uninstall`, `launch`, `prop get|set`, `check_gapps/houdini`) jadi `async` + `off_main_thread` → `spawn_blocking` (Tauri menjalankan command non-`async` di **main thread**, jadi command sync lama membekukan UI). Cancel: command `waydroid_cancel` + flag global `CANCEL` di `waydroid.rs` dicek di loop poll (`run_cancellable`, dipakai `app install|remove`), child dibunuh dalam satu tick (~20ms); error baru `AppError::CancelRequested` (code `cancelled`) berbeda dari timeout. **Temuan**: `waydroid session start` adalah daemon foreground (`session_manager.py` diakhiri `looper.run()`) — tidak lagi pakai timeout (dulu programnya hang); sekarang grace-wait 5s: exit cepat → error, tetap hidup → sukses + reap di thread belakang. `ponytail:` satu Cancel-flag global; sejak P0-3.3 backend juga memaksa satu task streaming aktif lewat `TaskGuard`, dan event membawa `task_id`. Kill script privileged (gapps/houdini) belum masuk; tombol Cancel masih `invoke("waydroid_cancel")` dan baru menghentikan `app install/remove` sampai P0-4.2.
 
 - [x] **P0 S — Audit injeksi shell**
   Telusuri semua script: pakai `sh_quote` untuk nilai dinamis.

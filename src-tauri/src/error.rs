@@ -24,6 +24,7 @@ pub mod code {
     pub const SESSION_FROZEN: &str = "session_frozen";
     pub const ADB_UNAUTHORIZED: &str = "adb_unauthorized";
     pub const COMMAND_FAILED: &str = "command_failed";
+    pub const BUSY: &str = "busy";
 }
 
 #[derive(Debug)]
@@ -56,6 +57,8 @@ pub enum AppError {
     AdbUnauthorized { detail: String },
     /// A command reported failure in its output even though it exited 0.
     CommandFailed { detail: String },
+    /// Another streaming task already owns the single-flight slot.
+    Busy { detail: String },
     /// Anything that came out of `std::io`.
     Io(io::Error),
 }
@@ -110,6 +113,12 @@ impl AppError {
         }
     }
 
+    pub fn busy(detail: impl Into<String>) -> Self {
+        Self::Busy {
+            detail: detail.into(),
+        }
+    }
+
     /// Map a failed `Command::spawn` onto the right variant, so a missing binary
     /// is reported as "not installed" instead of a bare I/O error.
     pub fn from_spawn(program: &str, hint: &str, error: io::Error) -> Self {
@@ -134,6 +143,7 @@ impl AppError {
             Self::SessionFrozen { .. } => code::SESSION_FROZEN,
             Self::AdbUnauthorized { .. } => code::ADB_UNAUTHORIZED,
             Self::CommandFailed { .. } => code::COMMAND_FAILED,
+            Self::Busy { .. } => code::BUSY,
             Self::Io(_) => code::IO,
         }
     }
@@ -203,6 +213,10 @@ impl fmt::Display for AppError {
                 }
             }
             Self::CommandFailed { detail } => write!(f, "{detail}"),
+            Self::Busy { detail } => write!(
+                f,
+                "another operation is already running ({detail}); wait for it to finish."
+            ),
             Self::Io(error) => write!(f, "{error}"),
         }
     }
@@ -328,6 +342,17 @@ mod tests {
         assert_eq!(failed.code(), code::COMMAND_FAILED);
         assert_eq!(failed.to_string(), "waydroid prop set did not take effect.");
         assert!(!failed.to_string().contains("exit code"));
+    }
+
+    #[test]
+    fn busy_is_distinct_from_a_failed_command() {
+        let error = AppError::busy("privileged operation");
+        assert_eq!(error.code(), code::BUSY);
+        assert!(
+            error.to_string().contains("privileged operation"),
+            "{error}"
+        );
+        assert!(error.to_string().contains("already running"), "{error}");
     }
 
     #[test]

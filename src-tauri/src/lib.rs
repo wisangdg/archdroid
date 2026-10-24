@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use tauri::{AppHandle, Emitter};
@@ -1181,6 +1182,13 @@ async fn profile_apply(app: AppHandle, profile: device::DeviceProfile) -> Comman
         if let Err(message) = device::validate(&profile) {
             return AppError::invalid_input(message).into();
         }
+        // Profile writes touch both adb and root-owned files. Hold the same
+        // single-flight slot as the streaming installers so two apply calls
+        // cannot interleave their writes.
+        let task = match TaskGuard::start("profile update") {
+            Ok(task) => task,
+            Err(error) => return error.into(),
+        };
         if let Err(error) = device::save_to(&device::config_path(), &profile) {
             return AppError::Io(error).into();
         }
@@ -1247,7 +1255,8 @@ async fn profile_apply(app: AppHandle, profile: device::DeviceProfile) -> Comman
                     }
                     // This closure already runs on the blocking pool, so wait
                     // for the privileged write here instead of returning first.
-                    let attempt = run_privileged_script(&app, script, Completion::None);
+                    let attempt =
+                        run_privileged_script_for_task(&app, task.id(), script, Completion::None);
                     if !attempt.is_success() {
                         return attempt.into_command_result();
                     }
@@ -1523,12 +1532,67 @@ else notify-send "No terminal emulator found"; fi
     CommandResult::with_message("Launched Phantom Keymapper.")
 }
 
+/// The single-flight slot. Streaming operations share one terminal, so only
+/// one of them may own the slot at a time.
+static ACTIVE_TASK: Mutex<Option<ActiveTask>> = Mutex::new(None);
+static NEXT_TASK_ID: AtomicU64 = AtomicU64::new(1);
+
+struct ActiveTask {
+    id: String,
+    label: &'static str,
+}
+
+/// Holds the single-flight slot until the operation finishes, including on
+/// every early return or panic.
+struct TaskGuard {
+    id: String,
+}
+
+impl TaskGuard {
+    fn start(label: &'static str) -> Result<Self, AppError> {
+        let mut active = ACTIVE_TASK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(current) = active.as_ref() {
+            return Err(AppError::busy(current.label));
+        }
+        let id = format!("task-{}", NEXT_TASK_ID.fetch_add(1, Ordering::Relaxed));
+        active.replace(ActiveTask {
+            id: id.clone(),
+            label,
+        });
+        Ok(Self { id })
+    }
+
+    fn id(&self) -> &str {
+        &self.id
+    }
+}
+
+impl Drop for TaskGuard {
+    fn drop(&mut self) {
+        let mut active = ACTIVE_TASK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if active.as_ref().is_some_and(|task| task.id == self.id) {
+            *active = None;
+        }
+    }
+}
+
+/// Payload for `cmd-output`. The task ID lets the UI ignore output that does
+/// not belong to the operation it is currently showing.
+#[derive(Clone, Serialize)]
+struct StreamOutput {
+    task_id: String,
+    line: String,
+}
+
 /// Final payload for `cmd-finished`. The UI branches on `code`, so it never
 /// has to parse the human-readable `message`.
 #[derive(Clone, Serialize)]
 struct StreamFinished {
-    /// Reserved for P0-3.3; `None` until tasks get stable IDs.
-    task_id: Option<String>,
+    task_id: String,
     success: bool,
     code: Option<&'static str>,
     message: Option<String>,
@@ -1559,16 +1623,16 @@ impl StreamResult {
         self.outcome.is_ok()
     }
 
-    fn finished_event(&self) -> StreamFinished {
+    fn finished_event(&self, task_id: &str) -> StreamFinished {
         match &self.outcome {
             Ok(()) => StreamFinished {
-                task_id: None,
+                task_id: task_id.to_string(),
                 success: true,
                 code: None,
                 message: None,
             },
             Err(error) => StreamFinished {
-                task_id: None,
+                task_id: task_id.to_string(),
                 success: false,
                 code: Some(error.code()),
                 message: Some(error.to_string()),
@@ -1598,12 +1662,22 @@ impl StreamResult {
     }
 }
 
+fn emit_output(app: &AppHandle, task_id: &str, line: impl Into<String>) {
+    let _ = app.emit(
+        "cmd-output",
+        StreamOutput {
+            task_id: task_id.to_string(),
+            line: line.into(),
+        },
+    );
+}
+
 /// Emit a completed line and remember the beginning of the output.
-fn flush_line(app: &AppHandle, buffer: &mut String, captured: &Arc<Mutex<String>>) {
+fn flush_line(app: &AppHandle, task_id: &str, buffer: &mut String, captured: &Arc<Mutex<String>>) {
     if buffer.is_empty() {
         return;
     }
-    let _ = app.emit("cmd-output", buffer.clone());
+    emit_output(app, task_id, buffer.clone());
     if let Ok(mut text) = captured.lock() {
         if text.len() < MAX_CAPTURED_OUTPUT {
             text.push_str(buffer);
@@ -1617,9 +1691,11 @@ fn flush_line(app: &AppHandle, buffer: &mut String, captured: &Arc<Mutex<String>
 /// curl) are streamed as their own lines, and flush the trailing line at EOF.
 fn spawn_line_reader(
     app: AppHandle,
+    task_id: &str,
     reader: impl Read + Send + 'static,
     captured: Arc<Mutex<String>>,
 ) -> thread::JoinHandle<()> {
+    let task_id = task_id.to_string();
     thread::spawn(move || {
         let mut reader = BufReader::new(reader);
         let mut buffer = String::new();
@@ -1631,17 +1707,17 @@ fn spawn_line_reader(
             }
             let c = byte[0] as char;
             if c == '\n' || c == '\r' {
-                flush_line(&app, &mut buffer, &captured);
+                flush_line(&app, &task_id, &mut buffer, &captured);
             } else {
                 buffer.push(c);
             }
         }
-        flush_line(&app, &mut buffer, &captured);
+        flush_line(&app, &task_id, &mut buffer, &captured);
     })
 }
 
 /// Spawn a command, stream both of its pipes to the UI and report how it went.
-fn run_and_stream(app: &AppHandle, mut command: Command) -> StreamResult {
+fn run_and_stream(app: &AppHandle, task_id: &str, mut command: Command) -> StreamResult {
     let program = command.get_program().to_string_lossy().to_string();
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = match command.spawn() {
@@ -1650,7 +1726,7 @@ fn run_and_stream(app: &AppHandle, mut command: Command) -> StreamResult {
             let error =
                 AppError::from_spawn(&program, "Install the missing program and try again.", e);
             log::error!("{program} could not start: {error}");
-            let _ = app.emit("cmd-output", format!("[ERROR] {error}"));
+            emit_output(app, task_id, format!("[ERROR] {error}"));
             return StreamResult::failure(error, false);
         }
     };
@@ -1659,8 +1735,8 @@ fn run_and_stream(app: &AppHandle, mut command: Command) -> StreamResult {
     let stderr = child.stderr.take().unwrap();
 
     let captured = Arc::new(Mutex::new(String::new()));
-    let stdout_reader = spawn_line_reader(app.clone(), stdout, captured.clone());
-    let stderr_reader = spawn_line_reader(app.clone(), stderr, captured.clone());
+    let stdout_reader = spawn_line_reader(app.clone(), task_id, stdout, captured.clone());
+    let stderr_reader = spawn_line_reader(app.clone(), task_id, stderr, captured.clone());
 
     let status = child.wait();
 
@@ -1681,8 +1757,9 @@ fn run_and_stream(app: &AppHandle, mut command: Command) -> StreamResult {
             started,
         ),
         Err(e) => {
-            let _ = app.emit(
-                "cmd-output",
+            emit_output(
+                app,
+                task_id,
                 format!("[ERROR] Lost track of the running command: {}", e),
             );
             StreamResult::failure(AppError::Io(e), started)
@@ -1724,26 +1801,26 @@ impl Completion {
     }
 }
 
-fn finish_stream(app: &AppHandle, attempt: &StreamResult, completion: Completion) {
+fn finish_stream(app: &AppHandle, task_id: &str, attempt: &StreamResult, completion: Completion) {
     if attempt.is_success() {
         completion.apply();
     }
-    let _ = app.emit("cmd-finished", attempt.finished_event());
+    let _ = app.emit("cmd-finished", attempt.finished_event(task_id));
 }
 
 /// Run a user-level script. Phantom installs into `$HOME/.local`, so it does
 /// not need root at all; keeping it out of the privileged path also avoids
 /// running a user-controlled Rust toolchain as root.
-fn run_user_script(app: &AppHandle, script: String) -> StreamResult {
+fn run_user_script(app: &AppHandle, task_id: &str, script: String) -> StreamResult {
     log::info!("user script requested:\n{script}");
     let Some(shell) = trusted_program("bash") else {
         let error = AppError::not_found(
             "bash",
             "Install bash or start ArchDroid from a normal desktop session.",
         );
-        let _ = app.emit("cmd-output", format!("[ERROR] {error}"));
+        emit_output(app, task_id, format!("[ERROR] {error}"));
         let attempt = StreamResult::failure(error, false);
-        finish_stream(app, &attempt, Completion::None);
+        finish_stream(app, task_id, &attempt, Completion::None);
         return attempt;
     };
     let mut command = Command::new(shell);
@@ -1752,23 +1829,34 @@ fn run_user_script(app: &AppHandle, script: String) -> StreamResult {
         .arg("--norc")
         .arg("-c")
         .arg(&script);
-    let attempt = run_and_stream(app, command);
-    finish_stream(app, &attempt, Completion::None);
+    let attempt = run_and_stream(app, task_id, command);
+    finish_stream(app, task_id, &attempt, Completion::None);
     attempt
 }
 
 /// Await the user-level script so the command only resolves after it exits.
 async fn stream_user_script(app: AppHandle, script: String) -> StreamResult {
+    let task = match TaskGuard::start("user script") {
+        Ok(task) => task,
+        Err(error) => return StreamResult::failure(error, false),
+    };
+    let task_id = task.id().to_string();
     let fallback_app = app.clone();
-    match tauri::async_runtime::spawn_blocking(move || run_user_script(&app, script)).await {
+    let fallback_task_id = task_id.clone();
+    match tauri::async_runtime::spawn_blocking(move || {
+        let _task = task;
+        run_user_script(&app, &task_id, script)
+    })
+    .await
+    {
         Ok(attempt) => attempt,
         Err(error) => {
             let error = AppError::Io(std::io::Error::other(format!(
                 "user script task failed: {error}"
             )));
-            let _ = fallback_app.emit("cmd-output", format!("[ERROR] {error}"));
+            emit_output(&fallback_app, &fallback_task_id, format!("[ERROR] {error}"));
             let attempt = StreamResult::failure(error, false);
-            finish_stream(&fallback_app, &attempt, Completion::None);
+            finish_stream(&fallback_app, &fallback_task_id, &attempt, Completion::None);
             attempt
         }
     }
@@ -1785,14 +1873,19 @@ async fn stream_user_script(app: AppHandle, script: String) -> StreamResult {
 /// from an app launcher. `sudo` remains the fallback because it can still prompt
 /// when the app was started from a terminal. Force either one with
 /// `ARCHDROID_ELEVATE=pkexec|sudo`.
-fn run_privileged_script(app: &AppHandle, script: String, completion: Completion) -> StreamResult {
+fn run_privileged_script_for_task(
+    app: &AppHandle,
+    task_id: &str,
+    script: String,
+    completion: Completion,
+) -> StreamResult {
     log::info!("root script requested:\n{script}");
     let body = match elevate_env(&script) {
         Ok(body) => body,
         Err(error) => {
-            let _ = app.emit("cmd-output", format!("[ERROR] {error}"));
+            emit_output(app, task_id, format!("[ERROR] {error}"));
             let attempt = StreamResult::failure(error, false);
-            finish_stream(app, &attempt, completion);
+            finish_stream(app, task_id, &attempt, completion);
             return attempt;
         }
     };
@@ -1801,11 +1894,12 @@ fn run_privileged_script(app: &AppHandle, script: String, completion: Completion
 
     if forced != "sudo" {
         if let Some(command) = elevated_command("pkexec", &body) {
-            let _ = app.emit(
-                "cmd-output",
-                "[SYSTEM] Requesting root access via polkit...".to_string(),
+            emit_output(
+                app,
+                task_id,
+                "[SYSTEM] Requesting root access via polkit...",
             );
-            let mut attempt = run_and_stream(app, command);
+            let mut attempt = run_and_stream(app, task_id, command);
 
             // Exit code 126 means the user dismissed the polkit dialog, so do
             // not nag with a second prompt.
@@ -1816,7 +1910,7 @@ fn run_privileged_script(app: &AppHandle, script: String, completion: Completion
                     ),
                     attempt.started,
                 );
-                finish_stream(app, &attempt, completion);
+                finish_stream(app, task_id, &attempt, completion);
                 return attempt;
             }
 
@@ -1831,22 +1925,23 @@ fn run_privileged_script(app: &AppHandle, script: String, completion: Completion
                         false,
                     );
                 }
-                finish_stream(app, &attempt, completion);
+                finish_stream(app, task_id, &attempt, completion);
                 return attempt;
             }
 
             pkexec_failed = true;
-            let _ = app.emit(
-                "cmd-output",
-                "[SYSTEM] polkit could not elevate here, falling back to sudo...".to_string(),
+            emit_output(
+                app,
+                task_id,
+                "[SYSTEM] polkit could not elevate here, falling back to sudo...",
             );
         } else if forced == "pkexec" {
             let error = AppError::elevation_denied(
                 "ARCHDROID_ELEVATE=pkexec but pkexec is not available, so root access cannot be requested.",
             );
-            let _ = app.emit("cmd-output", format!("[ERROR] {error}"));
+            emit_output(app, task_id, format!("[ERROR] {error}"));
             let attempt = StreamResult::failure(error, false);
-            finish_stream(app, &attempt, completion);
+            finish_stream(app, task_id, &attempt, completion);
             return attempt;
         }
     }
@@ -1860,20 +1955,17 @@ fn run_privileged_script(app: &AppHandle, script: String, completion: Completion
             "Neither pkexec nor sudo is available, so root access cannot be requested."
         };
         let error = AppError::elevation_denied(detail);
-        let _ = app.emit("cmd-output", format!("[ERROR] {error}"));
+        emit_output(app, task_id, format!("[ERROR] {error}"));
         let attempt = StreamResult::failure(error, false);
-        finish_stream(app, &attempt, completion);
+        finish_stream(app, task_id, &attempt, completion);
         return attempt;
     };
 
-    let _ = app.emit(
-        "cmd-output",
-        "[SYSTEM] Requesting root access via sudo...".to_string(),
-    );
-    let mut attempt = run_and_stream(app, command);
+    emit_output(app, task_id, "[SYSTEM] Requesting root access via sudo...");
+    let mut attempt = run_and_stream(app, task_id, command);
 
     if !attempt.is_success() && !attempt.started {
-        let _ = app.emit("cmd-output", "[SYSTEM] Root access failed. Install a polkit authentication agent (for example hyprpolkitagent or polkit-gnome), or start ArchDroid from a terminal so sudo can ask for the password.".to_string());
+        emit_output(app, task_id, "[SYSTEM] Root access failed. Install a polkit authentication agent (for example hyprpolkitagent or polkit-gnome), or start ArchDroid from a terminal so sudo can ask for the password.");
         attempt = StreamResult::failure(
             AppError::elevation_denied(
                 "sudo could not elevate or the privileged shell never started. Install a polkit authentication agent (for example hyprpolkitagent or polkit-gnome), or start ArchDroid from a terminal so sudo can ask for the password.",
@@ -1882,7 +1974,7 @@ fn run_privileged_script(app: &AppHandle, script: String, completion: Completion
         );
     }
 
-    finish_stream(app, &attempt, completion);
+    finish_stream(app, task_id, &attempt, completion);
     attempt
 }
 
@@ -1892,10 +1984,17 @@ async fn stream_privileged_script(
     script: String,
     completion: Completion,
 ) -> StreamResult {
+    let task = match TaskGuard::start("privileged operation") {
+        Ok(task) => task,
+        Err(error) => return StreamResult::failure(error, false),
+    };
+    let task_id = task.id().to_string();
     let fallback_app = app.clone();
+    let fallback_task_id = task_id.clone();
     let fallback_completion = completion;
     match tauri::async_runtime::spawn_blocking(move || {
-        run_privileged_script(&app, script, completion)
+        let _task = task;
+        run_privileged_script_for_task(&app, &task_id, script, completion)
     })
     .await
     {
@@ -1904,9 +2003,14 @@ async fn stream_privileged_script(
             let error = AppError::Io(std::io::Error::other(format!(
                 "privileged script task failed: {error}"
             )));
-            let _ = fallback_app.emit("cmd-output", format!("[ERROR] {error}"));
+            emit_output(&fallback_app, &fallback_task_id, format!("[ERROR] {error}"));
             let attempt = StreamResult::failure(error, false);
-            finish_stream(&fallback_app, &attempt, fallback_completion);
+            finish_stream(
+                &fallback_app,
+                &fallback_task_id,
+                &attempt,
+                fallback_completion,
+            );
             attempt
         }
     }
@@ -2220,12 +2324,42 @@ mod tests {
     }
 
     #[test]
+    fn single_flight_allows_only_one_active_task() {
+        let first = TaskGuard::start("first task").expect("the slot must start empty");
+        let first_id = first.id().to_string();
+        assert!(first_id.starts_with("task-"));
+
+        let error = match TaskGuard::start("second task") {
+            Ok(_) => panic!("a second task must not acquire the active slot"),
+            Err(error) => error,
+        };
+        assert_eq!(error.code(), error::code::BUSY);
+        assert!(error.to_string().contains("first task"), "{error}");
+
+        drop(first);
+        let next = TaskGuard::start("third task").expect("dropping must release the slot");
+        assert_ne!(first_id, next.id());
+    }
+
+    #[test]
     fn finished_event_is_structured_even_for_success() {
-        let value = serde_json::to_value(StreamResult::success(true).finished_event()).unwrap();
+        let value =
+            serde_json::to_value(StreamResult::success(true).finished_event("task-7")).unwrap();
+        assert_eq!(value["task_id"], "task-7");
         assert_eq!(value["success"], true);
         assert!(value["code"].is_null());
         assert!(value["message"].is_null());
-        assert!(value["task_id"].is_null());
+    }
+
+    #[test]
+    fn output_event_carries_the_task_id_with_the_line() {
+        let value = serde_json::to_value(StreamOutput {
+            task_id: "task-9".to_string(),
+            line: "installing".to_string(),
+        })
+        .unwrap();
+        assert_eq!(value["task_id"], "task-9");
+        assert_eq!(value["line"], "installing");
     }
 
     #[test]
@@ -2250,7 +2384,9 @@ mod tests {
             ),
         ] {
             let value =
-                serde_json::to_value(StreamResult::failure(error, false).finished_event()).unwrap();
+                serde_json::to_value(StreamResult::failure(error, false).finished_event("task-8"))
+                    .unwrap();
+            assert_eq!(value["task_id"], "task-8");
             assert_eq!(value["success"], false);
             assert_eq!(value["code"], expected);
             assert!(value["message"].is_string());

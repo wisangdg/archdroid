@@ -2,11 +2,11 @@
 
 > **Status: BELUM production-ready.**
 > Basis pemeriksaan: commit `639b5ec` (24 Okt 2026), ditambah perbaikan
-> P0-3.1 dan P0-3.2.
+> P0-3.1, P0-3.2, dan P0-3.3.
 > P0-1/P0-2 (hardening boundary privilege dan pin installer), P0-3.1
-> (hasil operasi privileged ditunggu sampai proses selesai), dan P0-3.2
-> (hasil terstruktur) sudah selesai; P0-3.3 dan P0-4 (timeout/cancel) masih
-> terbuka.
+> (hasil operasi privileged ditunggu sampai proses selesai), P0-3.2
+> (hasil terstruktur), dan P0-3.3 (single-flight dan `task_id`) sudah selesai;
+> P0-4 (timeout/cancel) masih terbuka.
 > Dokumen ini adalah **gate rilis**, bukan roadmap fitur. Fitur di
 > [`docs/BACKEND-TODO.md`](docs/BACKEND-TODO.md) tidak otomatis menjadi blocker
 > kecuali memutus alur inti yang sudah ada.
@@ -27,8 +27,13 @@
 - [x] P0-3.2: `cmd-finished` mengirim objek
   `{ task_id, success, code, message }`; UI memakai `code` untuk membedakan
   error root, timeout, dan cancel tanpa mencocokkan teks pesan.
+- [x] P0-3.3: single-flight backend dan frontend. `TaskGuard` memberi
+  `task_id` stabil, menolak task kedua dengan code `busy`, dan melepas slot
+  pada sukses, gagal, panic, atau future pemanggil yang dibatalkan.
+  `cmd-output` mengirim `{ task_id, line }`; `cmd-finished` mengirim
+  `task_id` nyata.
 - [x] `cargo fmt --check` lulus.
-- [x] `cargo test` lulus: **83 test**.
+- [x] `cargo test` lulus: **86 test**.
 - [x] `cargo clippy --all-targets -- -D warnings` lulus.
 - [x] `npm run build` lulus.
 - [x] `.deb` berhasil dibangun:
@@ -42,7 +47,8 @@
 - [ ] CSP produksi masih `null`; font masih diambil dari Google Fonts.
 - [ ] Uji live pkexec/sudo untuk hasil P0-3.1 (sukses, batal, exit non-zero,
   sudo gagal) tetap harus dilakukan di P0-8.
-- [ ] Timeout/cancel belum berlaku untuk script privileged.
+- [ ] Timeout/cancel belum berlaku untuk script privileged; Cancel baru
+  menghentikan `waydroid app install/remove` (P0-4.1/P0-4.2).
 - [ ] Dependency Python `waydroid_script` belum di-hash-pin.
 - [ ] Dukungan distro masih ambigu: script memakai `pacman`, tetapi artefak
   yang dibangun adalah `.deb`.
@@ -95,17 +101,26 @@ isolasi UI, lalu validasi rilis.
     tindakan lanjutan.
   - **DoD:** error root, timeout, dan cancel bisa dibedakan di UI tanpa
     mencocokkan teks pesan.
-  - **Status:** implementasi selesai; `task_id` masih `null` sampai P0-3.3.
-    Unit test memverifikasi payload `elevation_denied`, `timeout`, dan
-    `cancelled`; produksi timeout/cancel nyata tetap dikerjakan di P0-4.
+  - **Status:** implementasi selesai. Unit test memverifikasi payload
+    `elevation_denied`, `timeout`, dan `cancelled`; produksi timeout/cancel
+    nyata tetap dikerjakan di P0-4. Sejak P0-3.3 `task_id` berisi ID nyata.
 
-- [ ] **P0-3.3 — Single-flight dan `task_id` untuk operasi privileged.**
+- [x] **P0-3.3 — Single-flight dan `task_id` untuk operasi privileged.**
   - **Bukti:** event `cmd-output`/`cmd-finished` global; belum ada pengunci
     backend yang mencegah dua installer root berjalan bersamaan.
   - **Kerjakan:** tolak operasi kedua saat ada task aktif, atau beri `task_id`
     dan routing event per task. Bersihkan state saat task selesai/gagal.
   - **DoD:** dua klik cepat tidak mencampur log, tidak memunculkan dua prompt
     root, dan Cancel hanya menghentikan task yang dimaksud.
+  - **Status:** implementasi selesai. `TaskGuard` global memberi ID `task-N`,
+    menolak task kedua dengan code `busy` tanpa mengirim event, dan melepas
+    slot pada sukses, gagal, panic, atau future pemanggil yang dibatalkan.
+    Slot dipegang di thread script, jadi script yang sudah mulai tetap
+    single-flight walau future Tauri dijatuhkan. `cmd-output` mengirim
+    `{ task_id, line }`; `cmd-finished` mengirim `task_id` nyata. Frontend
+    memakai ref single-flight dan menangani `busy` tanpa mereset terminal.
+    Cancel per task (GApps/Houdini/init/wipe/Phantom/log) tetap P0-4.2; P0-3.3
+    hanya menjamin tidak ada task lain yang bisa menerima Cancel.
 
 ### P0-4 — Timeout, cancel, dan pembersihan script privileged
 
