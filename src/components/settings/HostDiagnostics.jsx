@@ -17,14 +17,17 @@ import {
 export default function HostDiagnostics() {
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
 
   const fetchDiagnostics = async () => {
     setLoading(true);
+    setError(null);
     try {
       const res = await invoke("check_host_diagnostics");
       setReport(res);
     } catch (err) {
       console.error("Failed to load host diagnostics:", err);
+      setError(String(err));
     } finally {
       setLoading(false);
     }
@@ -112,7 +115,12 @@ export default function HostDiagnostics() {
 
       {/* Diagnostics Cards Grid */}
       <div className="diag-grid">
-        {report && report.items ? (
+        {error ? (
+          <div className="diag-loading-placeholder" style={{ borderColor: "rgba(239, 68, 68, 0.4)", color: "#f87171" }}>
+            <AlertCircle size={18} />
+            <span>Diagnostics scan failed: {error}</span>
+          </div>
+        ) : report && report.items ? (
           report.items.map((item) => {
             const Icon = getIcon(item.key);
             return (

@@ -1,7 +1,9 @@
-import React from "react";
+import React, { useState } from "react";
 import { Trash2, Play } from "lucide-react";
 
 export default function AppCard({ app, onLaunch, onUninstall, onContextMenu }) {
+  const [imgError, setImgError] = useState(false);
+
   return (
     <div
       className="app-card"
@@ -17,12 +19,13 @@ export default function AppCard({ app, onLaunch, onUninstall, onContextMenu }) {
       {/* Icon with glowing backdrop */}
       <div className="app-icon-container">
         <div className="app-icon">
-          {app.icon ? (
+          {app.icon && !imgError ? (
             <img
               src={app.icon}
               alt={app.name}
               className="app-icon-img"
               loading="lazy"
+              onError={() => setImgError(true)}
             />
           ) : (
             <span className="app-icon-fallback" role="img" aria-label="App">🤖</span>
