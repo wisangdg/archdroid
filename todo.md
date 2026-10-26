@@ -2,11 +2,12 @@
 
 > **Status: BELUM production-ready.**
 > Basis pemeriksaan: commit `639b5ec` (24 Okt 2026), ditambah perbaikan
-> P0-3.1, P0-3.2, dan P0-3.3.
+> P0-3.1, P0-3.2, P0-3.3, dan P0-4.1.
 > P0-1/P0-2 (hardening boundary privilege dan pin installer), P0-3.1
 > (hasil operasi privileged ditunggu sampai proses selesai), P0-3.2
-> (hasil terstruktur), dan P0-3.3 (single-flight dan `task_id`) sudah selesai;
-> P0-4 (timeout/cancel) masih terbuka.
+> (hasil terstruktur), P0-3.3 (single-flight dan `task_id`), dan P0-4.1
+> (deadline script privileged/user) sudah selesai; P0-4.2/P0-4.3
+> (cancel per task dan failure-path) masih terbuka.
 > Dokumen ini adalah **gate rilis**, bukan roadmap fitur. Fitur di
 > [`docs/BACKEND-TODO.md`](docs/BACKEND-TODO.md) tidak otomatis menjadi blocker
 > kecuali memutus alur inti yang sudah ada.
@@ -32,8 +33,13 @@
   pada sukses, gagal, panic, atau future pemanggil yang dibatalkan.
   `cmd-output` mengirim `{ task_id, line }`; `cmd-finished` mengirim
   `task_id` nyata.
+- [x] P0-4.1: semua script privileged/user punya deadline. Timeout mengirim
+  SIGTERM ke **process group** (agar trap `EXIT` sempat menghapus
+  `$ARCHDROID_WORK`), lalu SIGKILL setelah 5 detik. Hasilnya
+  `AppError::Timeout` (code `timeout`), marker tidak ditulis, dan prompt sudo
+  kedua tidak dijalankan.
 - [x] `cargo fmt --check` lulus.
-- [x] `cargo test` lulus: **86 test**.
+- [x] `cargo test` lulus: **90 test**.
 - [x] `cargo clippy --all-targets -- -D warnings` lulus.
 - [x] `npm run build` lulus.
 - [x] `.deb` berhasil dibangun:
@@ -47,8 +53,8 @@
 - [ ] CSP produksi masih `null`; font masih diambil dari Google Fonts.
 - [ ] Uji live pkexec/sudo untuk hasil P0-3.1 (sukses, batal, exit non-zero,
   sudo gagal) tetap harus dilakukan di P0-8.
-- [ ] Timeout/cancel belum berlaku untuk script privileged; Cancel baru
-  menghentikan `waydroid app install/remove` (P0-4.1/P0-4.2).
+- [ ] Timeout script privileged/user sudah berlaku sejak P0-4.1; Cancel per
+  task baru menghentikan `waydroid app install/remove` sampai P0-4.2.
 - [ ] Dependency Python `waydroid_script` belum di-hash-pin.
 - [ ] Dukungan distro masih ambigu: script memakai `pacman`, tetapi artefak
   yang dibangun adalah `.deb`.
@@ -124,7 +130,7 @@ isolasi UI, lalu validasi rilis.
 
 ### P0-4 — Timeout, cancel, dan pembersihan script privileged
 
-- [ ] **P0-4.1 — Tambahkan deadline untuk semua script privileged/user.**
+- [x] **P0-4.1 — Tambahkan deadline untuk semua script privileged/user.**
   - **Bukti:** `run_and_stream()` menunggu child tanpa deadline;
     `stream_privileged_script()` tidak punya timeout. `cancel` yang ada hanya
     flag `waydroid::CANCEL` untuk `app install/remove`, bukan installer.
@@ -136,6 +142,16 @@ isolasi UI, lalu validasi rilis.
     sudo/bash ikut mati, lalu cleanup workdir.
   - **DoD:** proses `sleep` yang disisipkan sebagai stub bisa dibunuh; timeout
     menghasilkan `timeout`; tidak ada proses yatim setelah Cancel.
+  - **Status:** implementasi selesai. `run_and_stream` sekarang memakai
+    `try_wait` + deadline; `init`/wipe/GApps/Houdini/Phantom memakai
+    `TIMEOUT_LONG` (1800s), sedangkan log/reboot/multitouch/root write
+    memakai `TIMEOUT_NORMAL` (120s). Child diberi process group sendiri;
+    timeout mengirim SIGTERM ke grup, memberi 5 detik agar trap `EXIT`
+    membersihkan `$ARCHDROID_WORK`, lalu SIGKILL. Timeout menghasilkan
+    `AppError::Timeout` (code `timeout`), tidak menulis marker, dan tidak
+    memicu fallback sudo kedua. Unit test membunuh `sleep` anak, memastikan
+    workdir bersih, dan membuktikan marker tidak ditulis saat timeout. Cancel
+    per task tetap P0-4.2, jadi klausa “setelah Cancel” di DoD diuji di sana.
 
 - [ ] **P0-4.2 — Hubungkan tombol Cancel ke task yang benar.**
   - **Bukti:** `TerminalModal` menampilkan Cancel untuk semua task, tetapi

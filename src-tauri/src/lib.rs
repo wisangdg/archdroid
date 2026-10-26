@@ -1,11 +1,13 @@
 use base64::{engine::general_purpose, Engine as _};
 use serde::{Deserialize, Serialize};
 use std::io::{BufReader, Read};
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 
 mod adb;
@@ -130,6 +132,11 @@ const ELEVATED_SENTINEL: &str = "[SYSTEM] Elevated shell started";
 
 /// Upper bound for the output kept around for inspection.
 const MAX_CAPTURED_OUTPUT: usize = 4096;
+
+/// How long a terminated script gets to run its `trap ... EXIT` cleanup before
+/// the whole process group is killed outright. `elevate_env_for` relies on that
+/// trap to remove `$ARCHDROID_WORK`, so SIGKILL must not be the first signal.
+const KILL_GRACE: Duration = Duration::from_secs(5);
 
 /// Resolve a program name against the current PATH without spawning a shell.
 pub(crate) fn resolve_program(program: &str) -> Option<PathBuf> {
@@ -640,7 +647,7 @@ fi
 "#
     .to_string();
 
-    stream_privileged_script(app, script, Completion::None)
+    stream_privileged_script(app, script, Completion::None, waydroid::TIMEOUT_NORMAL)
         .await
         .into_command_result()
 }
@@ -830,9 +837,14 @@ else
 fi
 "#
     .to_string();
-    stream_privileged_script(app, script, Completion::ClearInstallMarkers)
-        .await
-        .into_command_result()
+    stream_privileged_script(
+        app,
+        script,
+        Completion::ClearInstallMarkers,
+        waydroid::TIMEOUT_LONG,
+    )
+    .await
+    .into_command_result()
 }
 
 fn gapps_state() -> CommandResult {
@@ -992,6 +1004,7 @@ async fn install_multitouch(app: AppHandle) -> CommandResult {
         app,
         capabilities::install_script(),
         Completion::WriteMarker("multitouch_installed"),
+        waydroid::TIMEOUT_NORMAL,
     )
     .await
     .into_command_result_with_message(
@@ -1255,8 +1268,13 @@ async fn profile_apply(app: AppHandle, profile: device::DeviceProfile) -> Comman
                     }
                     // This closure already runs on the blocking pool, so wait
                     // for the privileged write here instead of returning first.
-                    let attempt =
-                        run_privileged_script_for_task(&app, task.id(), script, Completion::None);
+                    let attempt = run_privileged_script_for_task(
+                        &app,
+                        task.id(),
+                        script,
+                        Completion::None,
+                        waydroid::TIMEOUT_NORMAL,
+                    );
                     if !attempt.is_success() {
                         return attempt.into_command_result();
                     }
@@ -1314,6 +1332,7 @@ async fn waydroid_reboot(app: AppHandle) -> CommandResult {
         app,
         "waydroid container restart".to_string(),
         Completion::None,
+        waydroid::TIMEOUT_NORMAL,
     )
     .await
     .into_command_result()
@@ -1371,9 +1390,14 @@ async fn waydroid_wipe(app: AppHandle) -> CommandResult {
     "#
     .to_string();
 
-    stream_privileged_script(app, script, Completion::ClearInstallMarkers)
-        .await
-        .into_command_result()
+    stream_privileged_script(
+        app,
+        script,
+        Completion::ClearInstallMarkers,
+        waydroid::TIMEOUT_LONG,
+    )
+    .await
+    .into_command_result()
 }
 
 /// Upstream installer sources are pinned to immutable commits. Updating them is
@@ -1487,6 +1511,7 @@ async fn install_gapps(app: AppHandle) -> CommandResult {
         app,
         gapps_install_script(),
         Completion::WriteMarker("gapps_installed"),
+        waydroid::TIMEOUT_LONG,
     )
     .await
     .into_command_result()
@@ -1498,6 +1523,7 @@ async fn install_houdini(app: AppHandle) -> CommandResult {
         app,
         houdini_install_script(),
         Completion::WriteMarker("houdini_installed"),
+        waydroid::TIMEOUT_LONG,
     )
     .await
     .into_command_result()
@@ -1508,7 +1534,7 @@ async fn install_phantom(app: AppHandle) -> CommandResult {
     // Phantom installs into $HOME/.local and its system wrapper is disabled, so
     // it must not run through pkexec/sudo. Running it as the desktop user also
     // avoids executing the user's Rust toolchain as root.
-    stream_user_script(app, phantom_install_script())
+    stream_user_script(app, phantom_install_script(), waydroid::TIMEOUT_LONG)
         .await
         .into_command_result()
 }
@@ -1623,6 +1649,10 @@ impl StreamResult {
         self.outcome.is_ok()
     }
 
+    fn timed_out(&self) -> bool {
+        matches!(&self.outcome, Err(AppError::Timeout { .. }))
+    }
+
     fn finished_event(&self, task_id: &str) -> StreamFinished {
         match &self.outcome {
             Ok(()) => StreamFinished {
@@ -1716,10 +1746,92 @@ fn spawn_line_reader(
     })
 }
 
+/// Why a child is no longer being waited for.
+enum WaitOutcome {
+    Exited(ExitStatus),
+    TimedOut,
+}
+
+/// Send `signal` to the process group led by `pid`.
+///
+/// `kill` is resolved without PATH, like every other helper that runs with more
+/// privilege than the caller. `--` stops the negative group ID from being read
+/// as an option.
+fn signal_process_group(pid: u32, signal: &str) -> bool {
+    let Some(kill) = trusted_program("kill") else {
+        return false;
+    };
+    Command::new(kill)
+        .args([signal, "--", &format!("-{pid}")])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
+/// Stop the child and everything it spawned.
+///
+/// SIGTERM goes to the whole group first so the elevated shell can run its EXIT
+/// trap (`rm -rf "$ARCHDROID_WORK"`); a group that ignores it is SIGKILLed
+/// after [`KILL_GRACE`].
+// ponytail: process group only; a child that calls setsid() (sudo with
+// use_pty, a daemonising installer) escapes. Move to a cgroup/PID namespace
+// if that ever becomes a real failure.
+fn terminate_process_group(child: &mut Child) {
+    let pid = child.id();
+    let term_sent = signal_process_group(pid, "-TERM");
+    let deadline = Instant::now() + KILL_GRACE;
+    while Instant::now() < deadline {
+        match child.try_wait() {
+            Ok(Some(_)) | Err(_) => break,
+            Ok(None) => thread::sleep(Duration::from_millis(20)),
+        }
+    }
+
+    // No trusted `kill`: at least stop the direct child instead of leaking it.
+    if !term_sent {
+        let _ = child.kill();
+    }
+    // Sweep the rest of the group too: a child may ignore SIGTERM or outlive
+    // the shell that led the group.
+    let _ = signal_process_group(pid, "-KILL");
+    let _ = child.wait();
+}
+
+/// Wait for `child`, but kill its process group once `timeout_secs` elapses.
+fn wait_with_deadline(child: &mut Child, timeout_secs: u64) -> std::io::Result<WaitOutcome> {
+    let deadline = Instant::now() + Duration::from_secs(timeout_secs);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return Ok(WaitOutcome::Exited(status)),
+            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(20)),
+            Ok(None) => {
+                terminate_process_group(child);
+                return Ok(WaitOutcome::TimedOut);
+            }
+            Err(error) => {
+                terminate_process_group(child);
+                return Err(error);
+            }
+        }
+    }
+}
+
 /// Spawn a command, stream both of its pipes to the UI and report how it went.
-fn run_and_stream(app: &AppHandle, task_id: &str, mut command: Command) -> StreamResult {
+fn run_and_stream(
+    app: &AppHandle,
+    task_id: &str,
+    mut command: Command,
+    timeout_secs: u64,
+) -> StreamResult {
     let program = command.get_program().to_string_lossy().to_string();
-    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        // Own process group: a deadline can then stop pkexec/sudo, bash and
+        // everything they spawned together instead of just the direct child.
+        .process_group(0);
     let mut child = match command.spawn() {
         Ok(child) => child,
         Err(e) => {
@@ -1738,7 +1850,7 @@ fn run_and_stream(app: &AppHandle, task_id: &str, mut command: Command) -> Strea
     let stdout_reader = spawn_line_reader(app.clone(), task_id, stdout, captured.clone());
     let stderr_reader = spawn_line_reader(app.clone(), task_id, stderr, captured.clone());
 
-    let status = child.wait();
+    let wait = wait_with_deadline(&mut child, timeout_secs);
 
     let _ = stdout_reader.join();
     let _ = stderr_reader.join();
@@ -1746,9 +1858,9 @@ fn run_and_stream(app: &AppHandle, task_id: &str, mut command: Command) -> Strea
     let captured_text = captured.lock().map(|text| text.clone()).unwrap_or_default();
     let started = captured_text.contains(ELEVATED_SENTINEL);
 
-    let outcome = match status {
-        Ok(status) if status.success() => StreamResult::success(started),
-        Ok(status) => StreamResult::failure(
+    let outcome = match wait {
+        Ok(WaitOutcome::Exited(status)) if status.success() => StreamResult::success(started),
+        Ok(WaitOutcome::Exited(status)) => StreamResult::failure(
             AppError::Exit {
                 program: program.clone(),
                 code: status.code(),
@@ -1756,6 +1868,14 @@ fn run_and_stream(app: &AppHandle, task_id: &str, mut command: Command) -> Strea
             },
             started,
         ),
+        Ok(WaitOutcome::TimedOut) => {
+            let error = AppError::Timeout {
+                program: program.clone(),
+                seconds: timeout_secs,
+            };
+            emit_output(app, task_id, format!("[ERROR] {error}"));
+            StreamResult::failure(error, started)
+        }
         Err(e) => {
             emit_output(
                 app,
@@ -1801,17 +1921,28 @@ impl Completion {
     }
 }
 
-fn finish_stream(app: &AppHandle, task_id: &str, attempt: &StreamResult, completion: Completion) {
+/// Apply a completion marker only after a successful run. Timeout and cancel
+/// are failures, so they must never leave an "installed" marker behind.
+fn apply_completion(attempt: &StreamResult, completion: Completion) {
     if attempt.is_success() {
         completion.apply();
     }
+}
+
+fn finish_stream(app: &AppHandle, task_id: &str, attempt: &StreamResult, completion: Completion) {
+    apply_completion(attempt, completion);
     let _ = app.emit("cmd-finished", attempt.finished_event(task_id));
 }
 
 /// Run a user-level script. Phantom installs into `$HOME/.local`, so it does
 /// not need root at all; keeping it out of the privileged path also avoids
 /// running a user-controlled Rust toolchain as root.
-fn run_user_script(app: &AppHandle, task_id: &str, script: String) -> StreamResult {
+fn run_user_script(
+    app: &AppHandle,
+    task_id: &str,
+    script: String,
+    timeout_secs: u64,
+) -> StreamResult {
     log::info!("user script requested:\n{script}");
     let Some(shell) = trusted_program("bash") else {
         let error = AppError::not_found(
@@ -1829,13 +1960,13 @@ fn run_user_script(app: &AppHandle, task_id: &str, script: String) -> StreamResu
         .arg("--norc")
         .arg("-c")
         .arg(&script);
-    let attempt = run_and_stream(app, task_id, command);
+    let attempt = run_and_stream(app, task_id, command, timeout_secs);
     finish_stream(app, task_id, &attempt, Completion::None);
     attempt
 }
 
 /// Await the user-level script so the command only resolves after it exits.
-async fn stream_user_script(app: AppHandle, script: String) -> StreamResult {
+async fn stream_user_script(app: AppHandle, script: String, timeout_secs: u64) -> StreamResult {
     let task = match TaskGuard::start("user script") {
         Ok(task) => task,
         Err(error) => return StreamResult::failure(error, false),
@@ -1845,7 +1976,7 @@ async fn stream_user_script(app: AppHandle, script: String) -> StreamResult {
     let fallback_task_id = task_id.clone();
     match tauri::async_runtime::spawn_blocking(move || {
         let _task = task;
-        run_user_script(&app, &task_id, script)
+        run_user_script(&app, &task_id, script, timeout_secs)
     })
     .await
     {
@@ -1878,6 +2009,7 @@ fn run_privileged_script_for_task(
     task_id: &str,
     script: String,
     completion: Completion,
+    timeout_secs: u64,
 ) -> StreamResult {
     log::info!("root script requested:\n{script}");
     let body = match elevate_env(&script) {
@@ -1899,7 +2031,7 @@ fn run_privileged_script_for_task(
                 task_id,
                 "[SYSTEM] Requesting root access via polkit...",
             );
-            let mut attempt = run_and_stream(app, task_id, command);
+            let mut attempt = run_and_stream(app, task_id, command, timeout_secs);
 
             // Exit code 126 means the user dismissed the polkit dialog, so do
             // not nag with a second prompt.
@@ -1910,6 +2042,13 @@ fn run_privileged_script_for_task(
                     ),
                     attempt.started,
                 );
+                finish_stream(app, task_id, &attempt, completion);
+                return attempt;
+            }
+
+            // A deadline is terminal too: the prompt already hung, so starting
+            // a sudo prompt would just hang for another full timeout.
+            if attempt.timed_out() {
                 finish_stream(app, task_id, &attempt, completion);
                 return attempt;
             }
@@ -1962,9 +2101,9 @@ fn run_privileged_script_for_task(
     };
 
     emit_output(app, task_id, "[SYSTEM] Requesting root access via sudo...");
-    let mut attempt = run_and_stream(app, task_id, command);
+    let mut attempt = run_and_stream(app, task_id, command, timeout_secs);
 
-    if !attempt.is_success() && !attempt.started {
+    if !attempt.is_success() && !attempt.started && !attempt.timed_out() {
         emit_output(app, task_id, "[SYSTEM] Root access failed. Install a polkit authentication agent (for example hyprpolkitagent or polkit-gnome), or start ArchDroid from a terminal so sudo can ask for the password.");
         attempt = StreamResult::failure(
             AppError::elevation_denied(
@@ -1983,6 +2122,7 @@ async fn stream_privileged_script(
     app: AppHandle,
     script: String,
     completion: Completion,
+    timeout_secs: u64,
 ) -> StreamResult {
     let task = match TaskGuard::start("privileged operation") {
         Ok(task) => task,
@@ -1994,7 +2134,7 @@ async fn stream_privileged_script(
     let fallback_completion = completion;
     match tauri::async_runtime::spawn_blocking(move || {
         let _task = task;
-        run_privileged_script_for_task(&app, &task_id, script, completion)
+        run_privileged_script_for_task(&app, &task_id, script, completion, timeout_secs)
     })
     .await
     {
@@ -2339,6 +2479,154 @@ mod tests {
         drop(first);
         let next = TaskGuard::start("third task").expect("dropping must release the slot");
         assert_ne!(first_id, next.id());
+    }
+
+    fn wait_for_pid_file(path: &Path) -> i32 {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Ok(text) = std::fs::read_to_string(path) {
+                if let Ok(pid) = text.trim().parse() {
+                    return pid;
+                }
+            }
+            assert!(Instant::now() < deadline, "pid file was never written");
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    fn process_is_gone(pid: i32) -> bool {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let alive = Command::new("kill")
+                .args(["-0", &pid.to_string()])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .is_ok_and(|status| status.success());
+            if !alive {
+                return true;
+            }
+            if Instant::now() >= deadline {
+                return false;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    /// A deadline must stop the shell, the child it spawned, and let the EXIT
+    /// trap clean up before the group is SIGKILLed.
+    #[test]
+    fn a_script_past_its_deadline_is_killed_with_its_children_and_cleans_up() {
+        let dir = std::env::temp_dir().join(format!(
+            "archdroid-deadline-{}-{}",
+            std::process::id(),
+            NEXT_TASK_ID.fetch_add(1, Ordering::Relaxed)
+        ));
+        let work = dir.join("work");
+        let pid_file = dir.join("grandchild.pid");
+        std::fs::create_dir_all(&work).expect("test workdir must be creatable");
+
+        let mut command = Command::new("bash");
+        command
+            .args([
+                "--noprofile",
+                "--norc",
+                "-c",
+                r#"trap 'rm -rf "$WORK"' EXIT TERM
+sleep 300 &
+echo $! > "$PID_FILE"
+wait
+"#,
+            ])
+            .env("WORK", &work)
+            .env("PID_FILE", &pid_file)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .process_group(0);
+        let mut child = command.spawn().expect("bash must start");
+
+        let grandchild = wait_for_pid_file(&pid_file);
+        let started = Instant::now();
+        let outcome = wait_with_deadline(&mut child, 1).expect("waiting must not fail");
+
+        assert!(matches!(outcome, WaitOutcome::TimedOut));
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "the deadline was not enforced"
+        );
+        assert!(!work.exists(), "the EXIT trap must run before SIGKILL");
+        assert!(
+            process_is_gone(grandchild),
+            "the child spawned by the script must not be orphaned"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_script_that_finishes_before_its_deadline_keeps_its_exit_code() {
+        let mut command = Command::new("bash");
+        command
+            .args(["--noprofile", "--norc", "-c", "exit 7"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .process_group(0);
+        let mut child = command.spawn().expect("bash must start");
+
+        match wait_with_deadline(&mut child, 30).expect("waiting must not fail") {
+            WaitOutcome::Exited(status) => assert_eq!(status.code(), Some(7)),
+            WaitOutcome::TimedOut => panic!("a quick script must not time out"),
+        }
+    }
+
+    #[test]
+    fn a_timeout_after_elevation_stays_started_and_is_terminal() {
+        let attempt = StreamResult::failure(
+            AppError::Timeout {
+                program: "bash".to_string(),
+                seconds: 1,
+            },
+            true,
+        );
+        assert!(attempt.started);
+        assert!(attempt.timed_out());
+        assert!(!attempt.is_success());
+        assert_eq!(attempt.exit_code(), None);
+        assert_eq!(
+            attempt.finished_event("task-1").code,
+            Some(error::code::TIMEOUT)
+        );
+    }
+
+    #[test]
+    fn a_timed_out_stream_never_writes_its_completion_marker() {
+        let marker = marker_file("timeout_test_marker");
+        let _ = std::fs::remove_file(&marker);
+
+        apply_completion(
+            &StreamResult::failure(
+                AppError::Timeout {
+                    program: "installer".to_string(),
+                    seconds: 1,
+                },
+                true,
+            ),
+            Completion::WriteMarker("timeout_test_marker"),
+        );
+        assert!(
+            !marker.exists(),
+            "a timeout must not leave an installed marker"
+        );
+
+        apply_completion(
+            &StreamResult::success(true),
+            Completion::WriteMarker("timeout_test_marker"),
+        );
+        assert!(marker.exists(), "the gate must still apply a real success");
+        let _ = std::fs::remove_file(&marker);
     }
 
     #[test]
