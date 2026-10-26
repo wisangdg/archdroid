@@ -15,6 +15,7 @@ import SetupWizard from "./components/setup/SetupWizard";
 import TerminalModal from "./components/terminal/TerminalModal";
 import ToastContainer from "./components/ui/ToastContainer";
 import ConfirmModal from "./components/ui/ConfirmModal";
+import { isEventForTask } from "./lib/taskEvents";
 
 const PROCESS_ERROR_TITLES = {
   elevation_denied: "Root Access Denied",
@@ -35,6 +36,9 @@ export default function App() {
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const prevStatusRef = useRef("offline");
   const operationInFlight = useRef(false);
+  // ID of the streaming task currently shown in the terminal. Events from any
+  // other task (a late finish, or a non-modal background write) are ignored.
+  const activeTaskId = useRef(null);
 
   // In-App Toast State
   const [toasts, setToasts] = useState([]);
@@ -88,6 +92,7 @@ export default function App() {
     }
 
     operationInFlight.current = true;
+    activeTaskId.current = null;
     setInstalling(true);
     setTerminalTaskType(taskType);
     setTerminalTitle(title);
@@ -98,6 +103,7 @@ export default function App() {
       const result = await invoke(command);
       if (result?.status === "error" && result.code === "busy") {
         operationInFlight.current = false;
+        activeTaskId.current = null;
         setInstalling(false);
         addToast({
           type: "warning",
@@ -108,6 +114,7 @@ export default function App() {
       return result;
     } catch (error) {
       operationInFlight.current = false;
+      activeTaskId.current = null;
       setInstalling(false);
       throw error;
     }
@@ -126,7 +133,14 @@ export default function App() {
       checkHoudiniStatus();
     }, 5000);
 
+    const unlistenStarted = listen("cmd-started", (event) => {
+      if (operationInFlight.current) {
+        activeTaskId.current = event.payload.task_id;
+      }
+    });
+
     const unlistenOutput = listen("cmd-output", (event) => {
+      if (!isEventForTask(event.payload, activeTaskId.current)) return;
       setTerminalLogs((prev) => [...prev, event.payload.line]);
       if (terminalRef.current) {
         terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
@@ -135,6 +149,10 @@ export default function App() {
 
     const unlistenFinished = listen("cmd-finished", (event) => {
       const { success, code, message } = event.payload;
+      // A late event from the previous task must not close the terminal or
+      // clear the single-flight flag of the task that replaced it.
+      if (!isEventForTask(event.payload, activeTaskId.current)) return;
+      activeTaskId.current = null;
       setTerminalLogs((prev) => [
         ...prev,
         success
@@ -163,6 +181,7 @@ export default function App() {
 
     return () => {
       clearInterval(interval);
+      unlistenStarted.then((f) => f());
       unlistenOutput.then((f) => f());
       unlistenFinished.then((f) => f());
     };
@@ -674,13 +693,25 @@ export default function App() {
   };
 
   const handleCancelTask = async () => {
+    const taskId = activeTaskId.current;
+    if (!taskId) {
+      addToast({
+        type: "warning",
+        title: "Nothing to Cancel",
+        message: "No streaming operation is active.",
+      });
+      return;
+    }
+
     try {
       addToast({
         type: "warning",
         title: "Cancelling Operation",
-        message: "Stopping current background operation...",
+        message: "Stopping the current operation...",
       });
-      await invoke("waydroid_cancel");
+      // Send the ID, not a global flag: a stale click must not stop the next
+      // task, and the backend only cancels the operation that owns this ID.
+      await invoke("cancel_task", { taskId });
     } catch (err) {
       console.error("Cancel task failed:", err);
       addToast({

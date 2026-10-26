@@ -2,12 +2,12 @@
 
 > **Status: BELUM production-ready.**
 > Basis pemeriksaan: commit `639b5ec` (24 Okt 2026), ditambah perbaikan
-> P0-3.1, P0-3.2, P0-3.3, dan P0-4.1.
+> P0-3.1, P0-3.2, P0-3.3, P0-4.1, dan P0-4.2.
 > P0-1/P0-2 (hardening boundary privilege dan pin installer), P0-3.1
 > (hasil operasi privileged ditunggu sampai proses selesai), P0-3.2
-> (hasil terstruktur), P0-3.3 (single-flight dan `task_id`), dan P0-4.1
-> (deadline script privileged/user) sudah selesai; P0-4.2/P0-4.3
-> (cancel per task dan failure-path) masih terbuka.
+> (hasil terstruktur), P0-3.3 (single-flight dan `task_id`), P0-4.1
+> (deadline script privileged/user), dan P0-4.2 (cancel per task)
+> sudah selesai; P0-4.3 (failure-path) masih terbuka.
 > Dokumen ini adalah **gate rilis**, bukan roadmap fitur. Fitur di
 > [`docs/BACKEND-TODO.md`](docs/BACKEND-TODO.md) tidak otomatis menjadi blocker
 > kecuali memutus alur inti yang sudah ada.
@@ -38,12 +38,20 @@
   `$ARCHDROID_WORK`), lalu SIGKILL setelah 5 detik. Hasilnya
   `AppError::Timeout` (code `timeout`), marker tidak ditulis, dan prompt sudo
   kedua tidak dijalankan.
+- [x] P0-4.2: Cancel memakai `cancel_task(task_id)` dan hanya menghentikan
+  task yang sedang ditampilkan. Backend mengirim `cmd-started` berisi
+  `task_id`; `wait_with_deadline` mengecek flag cancel per task, menghentikan
+  process group, dan menghasilkan `AppError::CancelRequested` (code
+  `cancelled`) tanpa fallback sudo. UI menyimpan `task_id` aktif, memfilter
+  `cmd-output`/`cmd-finished`, dan kembali idle setelah event task itu.
 - [x] `cargo fmt --check` lulus.
-- [x] `cargo test` lulus: **90 test**.
+- [x] `cargo test` lulus: **96 test**.
 - [x] `cargo clippy --all-targets -- -D warnings` lulus.
+- [x] `npm test` lulus: **4 test** isolasi event task (Node test runner).
 - [x] `npm run build` lulus.
-- [x] `.deb` berhasil dibangun:
-  `src-tauri/target/release/bundle/deb/ArchDroid_0.1.0_amd64.deb`.
+- [x] `.deb` berhasil dibangun ulang:
+  `src-tauri/target/release/bundle/deb/ArchDroid_0.1.0_amd64.deb`
+  (SHA-256 `21a75250bd9e47da73ee993e54b1aea2ed64c25244d339876c01a9c9c2403480`).
 - [x] `npm audit --omit=dev`: **0 vulnerability** pada dependency runtime.
 
 ### Belum selesai / belum diverifikasi
@@ -53,13 +61,15 @@
 - [ ] CSP produksi masih `null`; font masih diambil dari Google Fonts.
 - [ ] Uji live pkexec/sudo untuk hasil P0-3.1 (sukses, batal, exit non-zero,
   sudo gagal) tetap harus dilakukan di P0-8.
-- [ ] Timeout script privileged/user sudah berlaku sejak P0-4.1; Cancel per
-  task baru menghentikan `waydroid app install/remove` sampai P0-4.2.
+- [ ] Timeout dan Cancel per task sudah diimplementasikan, tetapi eksekusi
+  live-nya (polkit prompt, installer, init, wipe) belum diuji di mesin ini;
+  verifikasinya masuk P0-8.
 - [ ] Dependency Python `waydroid_script` belum di-hash-pin.
 - [ ] Dukungan distro masih ambigu: script memakai `pacman`, tetapi artefak
   yang dibangun adalah `.deb`.
 - [ ] CI belum pernah berjalan di remote/PR.
-- [ ] Belum ada test/lint frontend dan belum ada E2E.
+- [ ] Belum ada lint frontend, test komponen, dan E2E; baru ada 4 unit test
+  murni untuk isolasi event task.
 - [ ] Hanya `.deb` yang dibangun; target bundle lain belum, dan instalasi
   `.deb` belum diuji di VM bersih.
 - [ ] README, LICENSE, SECURITY, PRIVACY, dan CHANGELOG belum ada.
@@ -125,8 +135,8 @@ isolasi UI, lalu validasi rilis.
     single-flight walau future Tauri dijatuhkan. `cmd-output` mengirim
     `{ task_id, line }`; `cmd-finished` mengirim `task_id` nyata. Frontend
     memakai ref single-flight dan menangani `busy` tanpa mereset terminal.
-    Cancel per task (GApps/Houdini/init/wipe/Phantom/log) tetap P0-4.2; P0-3.3
-    hanya menjamin tidak ada task lain yang bisa menerima Cancel.
+    P0-3.3 hanya menjamin tidak ada task lain yang bisa menerima Cancel;
+    penghubungan tombol Cancel ke `task_id` diselesaikan di P0-4.2.
 
 ### P0-4 — Timeout, cancel, dan pembersihan script privileged
 
@@ -150,10 +160,9 @@ isolasi UI, lalu validasi rilis.
     membersihkan `$ARCHDROID_WORK`, lalu SIGKILL. Timeout menghasilkan
     `AppError::Timeout` (code `timeout`), tidak menulis marker, dan tidak
     memicu fallback sudo kedua. Unit test membunuh `sleep` anak, memastikan
-    workdir bersih, dan membuktikan marker tidak ditulis saat timeout. Cancel
-    per task tetap P0-4.2, jadi klausa “setelah Cancel” di DoD diuji di sana.
+    workdir bersih, dan membuktikan marker tidak ditulis saat timeout.
 
-- [ ] **P0-4.2 — Hubungkan tombol Cancel ke task yang benar.**
+- [x] **P0-4.2 — Hubungkan tombol Cancel ke task yang benar.**
   - **Bukti:** `TerminalModal` menampilkan Cancel untuk semua task, tetapi
     `handleCancelTask()` memanggil `waydroid_cancel`, yang hanya memengaruhi
     `waydroid app install/remove`.
@@ -162,6 +171,21 @@ isolasi UI, lalu validasi rilis.
   - **DoD:** Cancel menghentikan proses dalam hitungan detik, mengirim
     `cancelled`, menutup prompt bila memungkinkan, dan UI kembali ke state
     idle tanpa menunggu timeout.
+  - **Status:** implementasi selesai. `TaskGuard` menyimpan flag cancel
+    `Arc<AtomicBool>` per task; `cmd-started` membawa `task_id`; command
+    `cancel_task(task_id)` hanya menyalakan flag bila ID itu masih memegang
+    slot. ID basi/asing adalah no-op, jadi klik yang berlomba dengan akhir
+    task tidak bisa membatalkan task penggantinya. `wait_with_deadline`
+    mengecek flag setiap poll (~20ms), memakai `terminate_process_group`
+    (SIGTERM + grace 5s + SIGKILL), dan menghasilkan
+    `AppError::CancelRequested` (code `cancelled`); cancel juga terminal,
+    sehingga prompt sudo kedua tidak dibuka. Frontend menyimpan `task_id`
+    dari `cmd-started`, memfilter `cmd-output`/`cmd-finished` berdasarkan ID,
+    dan memanggil `cancel_task` dengan `taskId`. Unit test mencakup cancel
+    yang cocok, ID basi, process group + cleanup workdir, marker yang tidak
+    ditulis, serta payload `cancelled`; 4 unit test frontend memverifikasi
+    filter event per `task_id`. Eksekusi live polkit/Waydroid tetap
+    diverifikasi di P0-8.
 
 - [ ] **P0-4.3 — Uji failure path, bukan hanya happy path.**
   - **DoD:** ada test/stub untuk exit 1, polkit 126, sudo gagal, hang, cancel,

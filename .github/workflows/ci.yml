@@ -19,6 +19,7 @@ jobs:
       - name: Frontend build
         run: |
           npm ci
+          npm test
           npm run build
 
       - name: Install Tauri system dependencies

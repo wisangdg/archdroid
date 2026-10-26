@@ -4,7 +4,7 @@ use std::io::{BufReader, Read};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -534,6 +534,19 @@ async fn waydroid_stop() -> CommandResult {
 fn waydroid_cancel() -> CommandResult {
     waydroid::request_cancel();
     CommandResult::success()
+}
+
+/// Stop the streaming task that owns `task_id`.
+///
+/// A stale or unknown ID is deliberately a no-op success: a click that races
+/// the end of one operation must not touch the operation that follows it.
+#[tauri::command]
+fn cancel_task(task_id: String) -> CommandResult {
+    if cancel_active_task(&task_id) {
+        CommandResult::success()
+    } else {
+        CommandResult::with_message("No matching operation is running.")
+    }
 }
 
 #[tauri::command]
@@ -1268,12 +1281,14 @@ async fn profile_apply(app: AppHandle, profile: device::DeviceProfile) -> Comman
                     }
                     // This closure already runs on the blocking pool, so wait
                     // for the privileged write here instead of returning first.
+                    let cancel = task.cancel_flag();
                     let attempt = run_privileged_script_for_task(
                         &app,
                         task.id(),
                         script,
                         Completion::None,
                         waydroid::TIMEOUT_NORMAL,
+                        &cancel,
                     );
                     if !attempt.is_success() {
                         return attempt.into_command_result();
@@ -1566,12 +1581,14 @@ static NEXT_TASK_ID: AtomicU64 = AtomicU64::new(1);
 struct ActiveTask {
     id: String,
     label: &'static str,
+    cancel: Arc<AtomicBool>,
 }
 
 /// Holds the single-flight slot until the operation finishes, including on
 /// every early return or panic.
 struct TaskGuard {
     id: String,
+    cancel: Arc<AtomicBool>,
 }
 
 impl TaskGuard {
@@ -1583,15 +1600,44 @@ impl TaskGuard {
             return Err(AppError::busy(current.label));
         }
         let id = format!("task-{}", NEXT_TASK_ID.fetch_add(1, Ordering::Relaxed));
+        let cancel = Arc::new(AtomicBool::new(false));
         active.replace(ActiveTask {
             id: id.clone(),
             label,
+            cancel: cancel.clone(),
         });
-        Ok(Self { id })
+        Ok(Self { id, cancel })
     }
 
     fn id(&self) -> &str {
         &self.id
+    }
+
+    fn cancel_flag(&self) -> Arc<AtomicBool> {
+        self.cancel.clone()
+    }
+
+    #[cfg(test)]
+    fn is_cancelled(&self) -> bool {
+        self.cancel.load(Ordering::SeqCst)
+    }
+}
+
+/// Ask the active task to stop, but only when `task_id` still owns the slot.
+///
+/// A stale ID (the operation finished between the click and this call, or the
+/// UI kept an old ID) is a no-op: it must never cancel the task that replaced
+/// it. Returns whether a live task matched.
+fn cancel_active_task(task_id: &str) -> bool {
+    let active = ACTIVE_TASK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    match active.as_ref() {
+        Some(task) if task.id == task_id => {
+            task.cancel.store(true, Ordering::SeqCst);
+            true
+        }
+        _ => false,
     }
 }
 
@@ -1604,6 +1650,13 @@ impl Drop for TaskGuard {
             *active = None;
         }
     }
+}
+
+/// Payload for `cmd-started`. The UI stores this ID and sends it back to
+/// `cancel_task`, so Cancel can only stop the operation it is showing.
+#[derive(Clone, Serialize)]
+struct StreamStarted {
+    task_id: String,
 }
 
 /// Payload for `cmd-output`. The task ID lets the UI ignore output that does
@@ -1653,6 +1706,10 @@ impl StreamResult {
         matches!(&self.outcome, Err(AppError::Timeout { .. }))
     }
 
+    fn cancelled(&self) -> bool {
+        matches!(&self.outcome, Err(AppError::CancelRequested { .. }))
+    }
+
     fn finished_event(&self, task_id: &str) -> StreamFinished {
         match &self.outcome {
             Ok(()) => StreamFinished {
@@ -1690,6 +1747,15 @@ impl StreamResult {
             Err(error) => error.into(),
         }
     }
+}
+
+fn emit_started(app: &AppHandle, task_id: &str) {
+    let _ = app.emit(
+        "cmd-started",
+        StreamStarted {
+            task_id: task_id.to_string(),
+        },
+    );
 }
 
 fn emit_output(app: &AppHandle, task_id: &str, line: impl Into<String>) {
@@ -1750,6 +1816,7 @@ fn spawn_line_reader(
 enum WaitOutcome {
     Exited(ExitStatus),
     TimedOut,
+    Cancelled,
 }
 
 /// Send `signal` to the process group led by `pid`.
@@ -1799,12 +1866,21 @@ fn terminate_process_group(child: &mut Child) {
     let _ = child.wait();
 }
 
-/// Wait for `child`, but kill its process group once `timeout_secs` elapses.
-fn wait_with_deadline(child: &mut Child, timeout_secs: u64) -> std::io::Result<WaitOutcome> {
+/// Wait for `child`, but kill its process group when the deadline elapses or
+/// the task-scoped cancel flag is raised.
+fn wait_with_deadline(
+    child: &mut Child,
+    timeout_secs: u64,
+    cancel: &AtomicBool,
+) -> std::io::Result<WaitOutcome> {
     let deadline = Instant::now() + Duration::from_secs(timeout_secs);
     loop {
         match child.try_wait() {
             Ok(Some(status)) => return Ok(WaitOutcome::Exited(status)),
+            Ok(None) if cancel.load(Ordering::SeqCst) => {
+                terminate_process_group(child);
+                return Ok(WaitOutcome::Cancelled);
+            }
             Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(20)),
             Ok(None) => {
                 terminate_process_group(child);
@@ -1824,8 +1900,18 @@ fn run_and_stream(
     task_id: &str,
     mut command: Command,
     timeout_secs: u64,
+    cancel: &AtomicBool,
 ) -> StreamResult {
     let program = command.get_program().to_string_lossy().to_string();
+    // The UI can press Cancel between `cmd-started` and this spawn. Do not open
+    // a polkit/sudo prompt for a task the user already stopped.
+    if cancel.load(Ordering::SeqCst) {
+        let error = AppError::CancelRequested {
+            program: program.clone(),
+        };
+        emit_output(app, task_id, format!("[ERROR] {error}"));
+        return StreamResult::failure(error, false);
+    }
     command
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -1850,7 +1936,7 @@ fn run_and_stream(
     let stdout_reader = spawn_line_reader(app.clone(), task_id, stdout, captured.clone());
     let stderr_reader = spawn_line_reader(app.clone(), task_id, stderr, captured.clone());
 
-    let wait = wait_with_deadline(&mut child, timeout_secs);
+    let wait = wait_with_deadline(&mut child, timeout_secs, cancel);
 
     let _ = stdout_reader.join();
     let _ = stderr_reader.join();
@@ -1872,6 +1958,13 @@ fn run_and_stream(
             let error = AppError::Timeout {
                 program: program.clone(),
                 seconds: timeout_secs,
+            };
+            emit_output(app, task_id, format!("[ERROR] {error}"));
+            StreamResult::failure(error, started)
+        }
+        Ok(WaitOutcome::Cancelled) => {
+            let error = AppError::CancelRequested {
+                program: program.clone(),
             };
             emit_output(app, task_id, format!("[ERROR] {error}"));
             StreamResult::failure(error, started)
@@ -1942,6 +2035,7 @@ fn run_user_script(
     task_id: &str,
     script: String,
     timeout_secs: u64,
+    cancel: &AtomicBool,
 ) -> StreamResult {
     log::info!("user script requested:\n{script}");
     let Some(shell) = trusted_program("bash") else {
@@ -1960,7 +2054,7 @@ fn run_user_script(
         .arg("--norc")
         .arg("-c")
         .arg(&script);
-    let attempt = run_and_stream(app, task_id, command, timeout_secs);
+    let attempt = run_and_stream(app, task_id, command, timeout_secs, cancel);
     finish_stream(app, task_id, &attempt, Completion::None);
     attempt
 }
@@ -1972,11 +2066,13 @@ async fn stream_user_script(app: AppHandle, script: String, timeout_secs: u64) -
         Err(error) => return StreamResult::failure(error, false),
     };
     let task_id = task.id().to_string();
+    emit_started(&app, &task_id);
+    let cancel = task.cancel_flag();
     let fallback_app = app.clone();
     let fallback_task_id = task_id.clone();
     match tauri::async_runtime::spawn_blocking(move || {
         let _task = task;
-        run_user_script(&app, &task_id, script, timeout_secs)
+        run_user_script(&app, &task_id, script, timeout_secs, &cancel)
     })
     .await
     {
@@ -2010,6 +2106,7 @@ fn run_privileged_script_for_task(
     script: String,
     completion: Completion,
     timeout_secs: u64,
+    cancel: &AtomicBool,
 ) -> StreamResult {
     log::info!("root script requested:\n{script}");
     let body = match elevate_env(&script) {
@@ -2031,7 +2128,14 @@ fn run_privileged_script_for_task(
                 task_id,
                 "[SYSTEM] Requesting root access via polkit...",
             );
-            let mut attempt = run_and_stream(app, task_id, command, timeout_secs);
+            let mut attempt = run_and_stream(app, task_id, command, timeout_secs, cancel);
+
+            // Cancel is terminal: never open a sudo prompt for a task the user
+            // already stopped.
+            if attempt.cancelled() {
+                finish_stream(app, task_id, &attempt, completion);
+                return attempt;
+            }
 
             // Exit code 126 means the user dismissed the polkit dialog, so do
             // not nag with a second prompt.
@@ -2101,9 +2205,9 @@ fn run_privileged_script_for_task(
     };
 
     emit_output(app, task_id, "[SYSTEM] Requesting root access via sudo...");
-    let mut attempt = run_and_stream(app, task_id, command, timeout_secs);
+    let mut attempt = run_and_stream(app, task_id, command, timeout_secs, cancel);
 
-    if !attempt.is_success() && !attempt.started && !attempt.timed_out() {
+    if !attempt.is_success() && !attempt.started && !attempt.timed_out() && !attempt.cancelled() {
         emit_output(app, task_id, "[SYSTEM] Root access failed. Install a polkit authentication agent (for example hyprpolkitagent or polkit-gnome), or start ArchDroid from a terminal so sudo can ask for the password.");
         attempt = StreamResult::failure(
             AppError::elevation_denied(
@@ -2129,12 +2233,14 @@ async fn stream_privileged_script(
         Err(error) => return StreamResult::failure(error, false),
     };
     let task_id = task.id().to_string();
+    emit_started(&app, &task_id);
+    let cancel = task.cancel_flag();
     let fallback_app = app.clone();
     let fallback_task_id = task_id.clone();
     let fallback_completion = completion;
     match tauri::async_runtime::spawn_blocking(move || {
         let _task = task;
-        run_privileged_script_for_task(&app, &task_id, script, completion, timeout_secs)
+        run_privileged_script_for_task(&app, &task_id, script, completion, timeout_secs, &cancel)
     })
     .await
     {
@@ -2191,6 +2297,7 @@ pub fn run() {
             waydroid_prop_set,
             waydroid_prop_get,
             waydroid_cancel,
+            cancel_task,
             waydroid_log,
             open_shared_folder,
             check_gapps_status,
@@ -2463,8 +2570,19 @@ mod tests {
         assert_eq!(attempt.exit_code(), Some(126));
     }
 
+    /// `ACTIVE_TASK` is process-global, so tests that manipulate the slot must
+    /// not run concurrently with each other.
+    static TASK_SLOT_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    fn lock_task_slot_for_test() -> std::sync::MutexGuard<'static, ()> {
+        TASK_SLOT_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     #[test]
     fn single_flight_allows_only_one_active_task() {
+        let _slot = lock_task_slot_for_test();
         let first = TaskGuard::start("first task").expect("the slot must start empty");
         let first_id = first.id().to_string();
         assert!(first_id.starts_with("task-"));
@@ -2479,6 +2597,42 @@ mod tests {
         drop(first);
         let next = TaskGuard::start("third task").expect("dropping must release the slot");
         assert_ne!(first_id, next.id());
+    }
+
+    #[test]
+    fn cancel_only_matches_the_task_that_owns_the_slot() {
+        let _slot = lock_task_slot_for_test();
+        assert!(!cancel_active_task("task-none"), "no task must be a no-op");
+
+        let task = TaskGuard::start("cancellable task").expect("the slot must start empty");
+        let task_id = task.id().to_string();
+        assert!(!task.is_cancelled());
+
+        assert!(!cancel_active_task("task-999999"));
+        assert!(
+            !task.is_cancelled(),
+            "a stale ID must not cancel the active task"
+        );
+
+        assert!(cancel_active_task(&task_id));
+        assert!(task.is_cancelled(), "the matching task must be cancelled");
+    }
+
+    #[test]
+    fn a_stale_cancel_cannot_reach_the_next_task() {
+        let _slot = lock_task_slot_for_test();
+        let first = TaskGuard::start("first task").expect("the slot must start empty");
+        let stale_id = first.id().to_string();
+        drop(first);
+
+        let second = TaskGuard::start("second task").expect("the slot must be reusable");
+        assert!(!cancel_active_task(&stale_id));
+        assert!(
+            !second.is_cancelled(),
+            "the replacement task must stay untouched"
+        );
+        assert!(cancel_active_task(second.id()));
+        assert!(second.is_cancelled());
     }
 
     fn wait_for_pid_file(path: &Path) -> i32 {
@@ -2549,12 +2703,65 @@ wait
 
         let grandchild = wait_for_pid_file(&pid_file);
         let started = Instant::now();
-        let outcome = wait_with_deadline(&mut child, 1).expect("waiting must not fail");
+        let cancel = AtomicBool::new(false);
+        let outcome = wait_with_deadline(&mut child, 1, &cancel).expect("waiting must not fail");
 
         assert!(matches!(outcome, WaitOutcome::TimedOut));
         assert!(
             started.elapsed() < Duration::from_secs(10),
             "the deadline was not enforced"
+        );
+        assert!(!work.exists(), "the EXIT trap must run before SIGKILL");
+        assert!(
+            process_is_gone(grandchild),
+            "the child spawned by the script must not be orphaned"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Cancel uses the same group termination as a deadline, so it must also
+    /// stop grandchildren and let the EXIT trap clean the work directory.
+    #[test]
+    fn a_cancelled_script_is_killed_with_its_children_and_cleans_up() {
+        let dir = std::env::temp_dir().join(format!(
+            "archdroid-cancel-{}-{}",
+            std::process::id(),
+            NEXT_TASK_ID.fetch_add(1, Ordering::Relaxed)
+        ));
+        let work = dir.join("work");
+        let pid_file = dir.join("grandchild.pid");
+        std::fs::create_dir_all(&work).expect("test workdir must be creatable");
+
+        let mut command = Command::new("bash");
+        command
+            .args([
+                "--noprofile",
+                "--norc",
+                "-c",
+                r#"trap 'rm -rf "$WORK"' EXIT TERM
+sleep 300 &
+echo $! > "$PID_FILE"
+wait
+"#,
+            ])
+            .env("WORK", &work)
+            .env("PID_FILE", &pid_file)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .process_group(0);
+        let mut child = command.spawn().expect("bash must start");
+
+        let grandchild = wait_for_pid_file(&pid_file);
+        let cancel = AtomicBool::new(true);
+        let started = Instant::now();
+        let outcome = wait_with_deadline(&mut child, 30, &cancel).expect("waiting must not fail");
+
+        assert!(matches!(outcome, WaitOutcome::Cancelled));
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "cancel was not enforced"
         );
         assert!(!work.exists(), "the EXIT trap must run before SIGKILL");
         assert!(
@@ -2576,9 +2783,11 @@ wait
             .process_group(0);
         let mut child = command.spawn().expect("bash must start");
 
-        match wait_with_deadline(&mut child, 30).expect("waiting must not fail") {
+        let cancel = AtomicBool::new(false);
+        match wait_with_deadline(&mut child, 30, &cancel).expect("waiting must not fail") {
             WaitOutcome::Exited(status) => assert_eq!(status.code(), Some(7)),
             WaitOutcome::TimedOut => panic!("a quick script must not time out"),
+            WaitOutcome::Cancelled => panic!("a quick script must not be cancelled"),
         }
     }
 
@@ -2598,6 +2807,44 @@ wait
         assert_eq!(
             attempt.finished_event("task-1").code,
             Some(error::code::TIMEOUT)
+        );
+    }
+
+    #[test]
+    fn a_cancelled_stream_is_terminal_and_not_an_elevation_failure() {
+        let attempt = StreamResult::failure(
+            AppError::CancelRequested {
+                program: "bash".to_string(),
+            },
+            false,
+        );
+        assert!(attempt.cancelled());
+        assert!(!attempt.timed_out());
+        assert!(!attempt.is_success());
+        assert_eq!(attempt.exit_code(), None);
+        assert_eq!(
+            attempt.finished_event("task-2").code,
+            Some(error::code::CANCELLED)
+        );
+    }
+
+    #[test]
+    fn a_cancelled_stream_never_writes_its_completion_marker() {
+        let marker = marker_file("cancel_test_marker");
+        let _ = std::fs::remove_file(&marker);
+
+        apply_completion(
+            &StreamResult::failure(
+                AppError::CancelRequested {
+                    program: "installer".to_string(),
+                },
+                true,
+            ),
+            Completion::WriteMarker("cancel_test_marker"),
+        );
+        assert!(
+            !marker.exists(),
+            "a cancel must not leave an installed marker"
         );
     }
 
@@ -2637,6 +2884,16 @@ wait
         assert_eq!(value["success"], true);
         assert!(value["code"].is_null());
         assert!(value["message"].is_null());
+    }
+
+    #[test]
+    fn started_event_carries_the_task_id() {
+        let value = serde_json::to_value(StreamStarted {
+            task_id: "task-11".to_string(),
+        })
+        .unwrap();
+        assert_eq!(value["task_id"], "task-11");
+        assert_eq!(value.as_object().unwrap().len(), 1);
     }
 
     #[test]
