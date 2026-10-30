@@ -1,13 +1,16 @@
 # ArchDroid — TODO Production Readiness
 
 > **Status: BELUM production-ready.**
-> Basis pemeriksaan: commit `639b5ec` (24 Okt 2026), ditambah perbaikan
-> P0-3.1, P0-3.2, P0-3.3, P0-4.1, dan P0-4.2.
+> Basis pemeriksaan: commit `7798457` (review ulang 30 Okt 2026; sebelumnya
+> `639b5ec`, 24 Okt 2026).
 > P0-1/P0-2 (hardening boundary privilege dan pin installer), P0-3.1
 > (hasil operasi privileged ditunggu sampai proses selesai), P0-3.2
-> (hasil terstruktur), P0-3.3 (single-flight dan `task_id`), P0-4.1
-> (deadline script privileged/user), dan P0-4.2 (cancel per task)
-> sudah selesai; P0-4.3 (failure-path) masih terbuka.
+> (hasil terstruktur), P0-3.3 (single-flight dan `task_id`), P0-3.4
+> (single-flight untuk semua operasi yang mengubah state), P0-4.1
+> (deadline script privileged/user), P0-4.2 (cancel per task), P0-4.3
+> (uji failure path), serta P0-5.1–P0-5.4 (CSP, font offline, audit webview,
+> dan gate command IPC) sudah selesai. Review 30 Okt juga menambahkan
+> beberapa temuan di P1.
 > Dokumen ini adalah **gate rilis**, bukan roadmap fitur. Fitur di
 > [`docs/BACKEND-TODO.md`](docs/BACKEND-TODO.md) tidak otomatis menjadi blocker
 > kecuali memutus alur inti yang sudah ada.
@@ -21,8 +24,10 @@
 - [x] Installer pihak ketiga di-pin ke commit immutable; Phantom berjalan
   sebagai user. Lihat [`docs/THIRD-PARTY.md`](docs/THIRD-PARTY.md).
 - [x] Error backend bertipe dan punya `code` stabil di `CommandResult`.
-- [x] Command Waydroid yang berpotensi lama sudah non-blocking; install/remove
-  APK bisa dibatalkan.
+- [x] Command Waydroid yang berpotensi lama sudah non-blocking. Install/remove
+  APK bisa dibatalkan **di backend** (`waydroid_cancel`), tetapi sejak P0-4.2
+  UI tidak lagi memanggil `waydroid_cancel`, jadi belum ada tombol Cancel
+  untuk APK (lihat P1-1).
 - [x] P0-3.1: command privileged menunggu proses selesai dan mengembalikan
   hasil final; marker instalasi hanya ditulis setelah exit 0.
 - [x] P0-3.2: `cmd-finished` mengirim objek
@@ -33,6 +38,13 @@
   pada sukses, gagal, panic, atau future pemanggil yang dibatalkan.
   `cmd-output` mengirim `{ task_id, line }`; `cmd-finished` mengirim
   `task_id` nyata.
+- [x] P0-3.4: single-flight mencakup semua operasi yang mengubah state.
+  `waydroid_start`, `waydroid_stop`, `waydroid_install_apk`,
+  `waydroid_uninstall_app`, `waydroid_prop_set`, dan
+  `waydroid_launch_app` berjalan lewat `run_exclusive()`, yang memegang
+  `TaskGuard` sampai child selesai; pemanggil kedua ditolak dengan code
+  `busy`. UI menonaktifkan tombol engine, install/launch/uninstall APK,
+  toggle config, apply prop, dan apply resolusi selama `installing`.
 - [x] P0-4.1: semua script privileged/user punya deadline. Timeout mengirim
   SIGTERM ke **process group** (agar trap `EXIT` sempat menghapus
   `$ARCHDROID_WORK`), lalu SIGKILL setelah 5 detik. Hasilnya
@@ -44,10 +56,17 @@
   process group, dan menghasilkan `AppError::CancelRequested` (code
   `cancelled`) tanpa fallback sudo. UI menyimpan `task_id` aktif, memfilter
   `cmd-output`/`cmd-finished`, dan kembali idle setelah event task itu.
+- [x] P0-4.3: failure path punya test: exit 1, polkit 126, sudo gagal,
+  hang/timeout, cancel, cleanup workdir, dan marker “installed” tidak pernah
+  ditulis untuk hasil gagal.
 - [x] `cargo fmt --check` lulus.
-- [x] `cargo test` lulus: **96 test**.
-- [x] `cargo clippy --all-targets -- -D warnings` lulus.
-- [x] `npm test` lulus: **4 test** isolasi event task (Node test runner).
+- [x] `cargo test` lulus: **92 test** pada build default dan **112 test** dengan
+  `--features dev-commands` (termasuk 12 test failure path P0-4.3; 20 test
+  untuk modul yang di-gate hanya berjalan dengan feature itu).
+- [x] `cargo clippy --all-targets -- -D warnings` lulus, baik default maupun
+  `--features dev-commands`.
+- [x] `npm test` lulus: **15 test** (4 isolasi event task, 4 CSP/font config,
+  4 audit permukaan webview, 3 cakupan IPC command) di Node test runner.
 - [x] `npm run build` lulus.
 - [x] `.deb` berhasil dibangun ulang:
   `src-tauri/target/release/bundle/deb/ArchDroid_0.1.0_amd64.deb`
@@ -56,12 +75,28 @@
 - [x] P0-6.1: dependency Python `waydroid_script` di-hash-pin di
   `src-tauri/resources/waydroid_script-requirements.lock`, di-embed ke binary,
   dan dipasang dengan `pip install --require-hashes --only-binary=:all:`.
+- [x] P0-5.1: `app.security.csp` terisi (bukan `null`) dan `devCsp` terpisah
+  untuk Vite/HMR; tidak ada remote script/style/font di `dist/`.
+- [x] P0-5.2: `@import` Google Fonts dihapus; aplikasi memakai font sistem
+  (stack fallback yang sudah ada), jadi tidak ada request ke host remote.
+- [x] P0-5.3: audit permukaan webview selesai. Tidak ada sink HTML
+  (`dangerouslySetInnerHTML`, `innerHTML`, `eval`, `document.write`,
+  `srcdoc`, `javascript:`) di `src/`; tidak ada plugin shell/FS/HTTP/process;
+  capability dipangkas dari `core:default` menjadi
+  `core:event:allow-listen`, `core:event:allow-unlisten`, dan
+  `dialog:allow-open` saja.
+- [x] P0-5.4: 12 command tanpa UI dikeluarkan dari `generate_handler!` dan
+  di-gate di balik feature `dev-commands` (off secara default), termasuk
+  `waydroid_adb_cmd`, `profile_apply`, dan `waydroid_reboot`. Build produksi
+  tidak lagi mengompilasi shell Android arbitrer maupun jalur tulis root itu.
 
 ### Belum selesai / belum diverifikasi
 
 - [ ] Uji live Waydroid, polkit/sudo, installer root, dan wipe di mesin/VM
   bersih. Waydroid tidak tersedia/berjalan di environment pengembangan ini.
-- [ ] CSP produksi masih `null`; font masih diambil dari Google Fonts.
+- [ ] Verifikasi CSP di DevTools runtime (tidak ada pelanggaran saat start,
+  IPC, dialog, dan operasi panjang) belum dilakukan karena butuh sesi GUI;
+  masuk P0-8. Pemeriksaan statis `dist/` sudah bersih.
 - [ ] Uji live pkexec/sudo untuk hasil P0-3.1 (sukses, batal, exit non-zero,
   sudo gagal) tetap harus dilakukan di P0-8.
 - [ ] Timeout dan Cancel per task sudah diimplementasikan, tetapi eksekusi
@@ -70,13 +105,15 @@
 - [ ] Dukungan distro masih ambigu: script memakai `pacman`, tetapi artefak
   yang dibangun adalah `.deb`.
 - [ ] CI belum pernah berjalan di remote/PR.
-- [ ] Belum ada lint frontend, test komponen, dan E2E; baru ada 4 unit test
-  murni untuk isolasi event task.
+- [ ] Belum ada lint frontend, test komponen, dan E2E; baru ada 15 unit test
+  murni (isolasi event task, CSP/font config, audit webview, dan cakupan IPC).
 - [ ] Hanya `.deb` yang dibangun; target bundle lain belum, dan instalasi
   `.deb` belum diuji di VM bersih.
 - [ ] README, LICENSE, SECURITY, PRIVACY, dan CHANGELOG belum ada.
 - [ ] `npm audit` penuh masih melaporkan **7 vulnerability dev-only**
   (4 high), terutama dari rantai Vite 5.4.21.
+- [ ] `cargo audit`/`cargo deny` belum pernah dijalankan (tool belum terpasang
+  di mesin pengembangan maupun di CI).
 
 **Kesimpulan:** build dan test backend sudah sehat, tetapi aplikasi belum layak
 disebut production-ready sampai seluruh **P0** di bawah selesai dan diverifikasi
@@ -140,6 +177,34 @@ isolasi UI, lalu validasi rilis.
     P0-3.3 hanya menjamin tidak ada task lain yang bisa menerima Cancel;
     penghubungan tombol Cancel ke `task_id` diselesaikan di P0-4.2.
 
+- [x] **P0-3.4 — Perluas single-flight ke semua operasi yang mengubah state.**
+  - **Bukti:** hanya `stream_privileged_script`, `stream_user_script`, dan
+    `profile_apply` yang memegang `TaskGuard`. `waydroid_start`,
+    `waydroid_stop`, `waydroid_install_apk`, `waydroid_uninstall_app`,
+    `waydroid_prop_set`, dan `waydroid_launch_app` tidak. Di UI, tombol
+    Start/Stop/Restart di `Header.jsx` hanya di-`disabled` oleh `isOperating`,
+    bukan oleh `installing`.
+  - **Dampak:** pengguna bisa menekan Start atau memasang APK saat wipe sedang
+    menjalankan `rm -rf /var/lib/waydroid`, atau saat `waydroid init` /
+    installer GApps sedang memodifikasi image. Hasilnya image/data rusak atau
+    status yang tidak konsisten.
+  - **Kerjakan:** command yang mengubah state memakai `TaskGuard` (atau minimal
+    menolak dengan code `busy` saat ada task privileged aktif); UI menonaktifkan
+    tombol engine/APK/prop selama `installing`.
+  - **DoD:** test backend membuktikan `waydroid_start`/install APK ditolak
+    `busy` selama task privileged aktif; tombol terkait disabled di UI.
+  - **Status:** implementasi selesai. `run_exclusive(label, work)` memegang
+    `TaskGuard` di dalam closure `spawn_blocking`, jadi slot tetap terpakai
+    sampai child keluar (dan tetap terpakai walau future Tauri dijatuhkan).
+    Keenam command di atas memakai helper ini; label yang muncul di pesan
+    `busy` menyebut operasi yang sedang berjalan. Test
+    `state_changing_commands_are_rejected_while_a_privileged_task_runs`
+    memverifikasi keenam label ditolak dengan code `busy` dan slot kembali
+    bebas setelah task privileged selesai. Di UI, `busy={installing}` mematikan
+    tombol Start/Stop/Restart, tombol dan kartu Install APK, launch/uninstall
+    app (kartu dan context menu), toggle config, apply property, serta apply
+    resolusi; drag-and-drop APK juga diabaikan selama operasi streaming aktif.
+
 ### P0-4 — Timeout, cancel, dan pembersihan script privileged
 
 - [x] **P0-4.1 — Tambahkan deadline untuk semua script privileged/user.**
@@ -189,13 +254,29 @@ isolasi UI, lalu validasi rilis.
     filter event per `task_id`. Eksekusi live polkit/Waydroid tetap
     diverifikasi di P0-8.
 
-- [ ] **P0-4.3 — Uji failure path, bukan hanya happy path.**
+- [x] **P0-4.3 — Uji failure path, bukan hanya happy path.**
   - **DoD:** ada test/stub untuk exit 1, polkit 126, sudo gagal, hang, cancel,
     dan cleanup workdir; tidak ada marker “installed” palsu.
+  - **Status:** implementasi selesai. Logika keputusan elevasi diekstrak agar
+    bisa diuji tanpa `AppHandle` dan tanpa memanggil pkexec/sudo sungguhan:
+    `stream_outcome()` memetakan `WaitOutcome` (exit 1 nyata dari `bash`,
+    timeout, cancel) ke `StreamResult`/code; `pkexec_step()` memutuskan
+    terminal-vs-fallback (cancel, exit 126, timeout, body yang sudah mulai,
+    `ARCHDROID_ELEVATE=pkexec`); `sudo_failure()` mengubah “sudo tidak pernah
+    elevasi” menjadi `elevation_denied` tetapi membiarkan exit script yang
+    sudah berjalan. Test baru mencakup exit 1 (code `exit`, pesan memuat
+    “exit code 1”), exit setelah sentinel elevated, polkit 126 →
+    `elevation_denied` tanpa fallback, kegagalan pkexec yang belum mulai →
+    fallback, `pkexec` paksa → terminal, body yang sudah mulai tidak memicu
+    prompt kedua, hang/cancel → terminal, sudo gagal → `elevation_denied`,
+    sudo yang sudah mulai tetap `exit`, serta marker tidak ditulis untuk exit
+    non-zero dan elevasi ditolak (cancel/timeout sudah ada sebelumnya).
+    Cleanup workdir dan pembunuhan process group tetap divalidasi oleh test
+    deadline/cancel yang sudah ada.
 
 ### P0-5 — CSP produksi dan aset offline
 
-- [ ] **P0-5.1 — Isi `app.security.csp`; jangan biarkan `null`.**
+- [x] **P0-5.1 — Isi `app.security.csp`; jangan biarkan `null`.**
   - **Bukti:** `src-tauri/tauri.conf.json` masih `"csp": null`.
   - **Kerjakan:** CSP produksi minimal: `default-src 'self'`,
     `script-src 'self'`, `style-src 'self' 'unsafe-inline'` bila memang
@@ -205,8 +286,21 @@ isolasi UI, lalu validasi rilis.
     Vite/WebSocket, jangan melemahkan CSP produksi.
   - **DoD:** tidak ada pelanggaran CSP di DevTools; aplikasi tetap berfungsi
     saat offline; tidak ada script/gaya dari host remote.
+  - **Status:** implementasi selesai. `csp` produksi:
+    `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';
+    img-src 'self' data:; font-src 'self'; connect-src ipc:
+    http://ipc.localhost; object-src 'none'; frame-src 'none'`.
+    `style-src` perlu `'unsafe-inline'` karena `ContextMenu`/`MyAppsView`
+    memakai React inline style; `connect-src` hanya berisi dua endpoint IPC
+    Tauri (`ipc:` untuk Linux/macOS, `http://ipc.localhost` untuk Windows),
+    bukan host internet. `devCsp` terpisah menambah `'unsafe-inline'`/
+    `'unsafe-eval'` dan `http://localhost:5173` + `ws://localhost:5173` untuk
+    Vite/HMR; CSP produksi tidak ikut dilonggarkan. Pemeriksaan statis:
+    `npm run build` lulus dan `dist/` tidak memuat URL remote (hanya namespace
+    XML/React di string, tanpa request). Verifikasi DevTools runtime tetap
+    masuk P0-8 karena butuh sesi GUI.
 
-- [ ] **P0-5.2 — Hapus Google Fonts remote atau self-host.**
+- [x] **P0-5.2 — Hapus Google Fonts remote atau self-host.**
   - **Bukti:** baris pertama `src/index.css` memuat
     `https://fonts.googleapis.com/...`.
   - **Dampak:** aplikasi bergantung pada jaringan, membocorkan request ke
@@ -215,13 +309,77 @@ isolasi UI, lalu validasi rilis.
     JetBrains Mono) ke `src/assets/fonts/` dengan lisensi yang sesuai.
   - **DoD:** aplikasi terlihat benar tanpa internet; tidak ada request ke
     Google; lisensi font dicatat.
+  - **Status:** implementasi selesai dengan opsi font sistem. `@import`
+    Google Fonts dihapus (wajib agar `style-src 'self'`/`font-src 'self'`
+    tidak melanggar); stack `'Outfit', ...sans-serif` dan
+    `'JetBrains Mono', monospace` tetap memakai font tersebut bila terpasang
+    lokal, selain itu jatuh ke font sistem. Tidak ada file font pihak ketiga
+    yang dibundel, jadi tidak ada lisensi tambahan yang perlu dicatat.
+    Verifikasi visual akhir masuk P0-8.
 
-- [ ] **P0-5.3 — Audit permukaan webview.**
+- [x] **P0-5.3 — Audit permukaan webview.**
   - **Kerjakan:** pastikan tidak ada `dangerouslySetInnerHTML`/HTML dari input
     pengguna; tinjau `src-tauri/capabilities/default.json`; jangan menambah
     plugin shell/FS tanpa kebutuhan.
   - **DoD:** capability minimum, CSP aktif, dan daftar permission ditinjau di
     PR rilis.
+  - **Status:** audit selesai. **Sink HTML:** tidak ada
+    `dangerouslySetInnerHTML`, `innerHTML`/`outerHTML`,
+    `insertAdjacentHTML`, `document.write`, `createContextualFragment`, `eval`,
+    `new Function`, `srcdoc`, atau `javascript:` di `src/`. Semua data dinamis
+    (log terminal, nama/package app, nilai prop, diagnostik) dirender sebagai
+    text node React, jadi di-escape. Satu-satunya atribut yang membawa data
+    eksternal adalah `AppCard` `src={app.icon}`; backend selalu
+    memformatnya sebagai `data:image/png;base64,...` dan CSP membatasi
+    `img-src 'self' data:`. Validasi tipe/ukuran file ikon tetap ada di P1-5.
+    **API webview:** hanya `invoke` (custom command), `listen`/`unlisten`
+    (`cmd-*` + drag-and-drop webview target), `getCurrentWebview`
+    (metadata-only, tanpa IPC), dan `dialog.open`. **Plugin:** `Cargo.toml`
+    dan `package.json` hanya memuat `tauri-plugin-dialog` + `tauri-plugin-log`
+    (Rust-only); tidak ada shell, fs, http, atau process. **Capability:**
+    `core:default` (9 set, termasuk create/print webview, menu/tray, path,
+    image) diganti menjadi `core:event:allow-listen`,
+    `core:event:allow-unlisten`, dan `dialog:allow-open`; `windows` tetap
+    hanya `main`. `cargo check` menerima capability hasil resolve. Audit ini
+    dijadikan regresi otomatis lewat
+    `src/lib/webview-security.test.js` (permission allowlist, larangan plugin,
+    pemindaian sink HTML, dan larangan URL remote).
+
+- [x] **P0-5.4 — Hapus/gate command IPC yang tidak dipakai UI.**
+  - **Bukti:** `generate_handler!` di `src-tauri/src/lib.rs` mendaftarkan
+    `waydroid_adb_cmd`, `profile_apply`, `profile_get`, `profile_capabilities`,
+    `waydroid_reboot`, `waydroid_kill_app`, `waydroid_getprop_all`,
+    `waydroid_status_json`, `waydroid_is_running`, `waydroid_list_instances`,
+    `waydroid_version`, dan `waydroid_cancel`, padahal tidak satu pun dipanggil
+    dari `src/`. `waydroid_adb_cmd` menjalankan baris shell Android arbitrer
+    tanpa validasi; `profile_apply` dan `waydroid_reboot` meminta root.
+  - **Dampak:** selama CSP masih `null` (P0-5.1), XSS atau script asing di
+    webview mendapat shell Android dan jalur prompt root gratis. Permukaan ini
+    juga belum pernah diuji dari UI.
+  - **Kerjakan:** keluarkan command yang belum punya UI dari
+    `generate_handler!` (atau aktifkan via feature flag/build dev), dan baru
+    daftarkan lagi bersamaan dengan UI + test-nya.
+  - **DoD:** setiap command yang terdaftar punya pemanggil di UI dan test;
+    tidak ada command shell arbitrer di build produksi tanpa keputusan
+    eksplisit yang terdokumentasi di `SECURITY.md`.
+  - **Status:** implementasi selesai. Cargo feature `dev-commands` (off secara
+    default) di `src-tauri/Cargo.toml` meng-gate kedua belas command itu
+    beserta helper yang hanya dipakai mereka: `mod device`, `StatusSnapshot`/
+    `status_snapshot`, `InstanceInfo`/`single_instance`/`parse_memory_mb`/
+    `host_memory_mb`, `json_result`, `waydroid::argv_version`/`version`,
+    `adb::booted`/`shell_active`/`shell_line_active`/`is_valid_package`, dan
+    `waydroid::request_cancel` (dipakai test internal). `generate_handler!`
+    memakai `#[cfg(feature = "dev-commands")]` per entri, jadi build default
+    hanya mendaftarkan 23 command yang benar-benar dipanggil `src/`; kode
+    shell Android arbitrer dan jalur tulis root juga tidak ikut dikompilasi.
+    `waydroid_cancel` tetap tersedia lewat feature sampai P1-1 menghapus
+    mekanisme cancel lama. Regresi dijaga `src/lib/ipc-surface.test.js`:
+    daftar command terdaftar harus sama persis dengan `invoke()`/
+    `runStreamingTask()` di UI, kedua belas command harus tetap di-gate, dan
+    `waydroid_adb_cmd` tidak boleh muncul di build default. Clippy dan test
+    dijalankan untuk default dan `--features dev-commands` (92 vs 112 test);
+    CI diperbarui untuk menjalankan keduanya. `SECURITY.md` (P0-11.3) akan
+    mencatat keputusan "command tanpa UI hanya ada di feature dev".
 
 ### P0-6 — Supply chain installer yang berjalan sebagai root
 
@@ -248,13 +406,29 @@ isolasi UI, lalu validasi rilis.
     Python 3.10 dan 3.15; lock dengan hash yang diubah ditolak pip. Bumping
     `WAYDROID_SCRIPT_REV` wajib meregenerasi lock dalam review yang sama.
 
-- [ ] **P0-6.2 — Audit ulang installer upstream dan izinnya.**
+- [x] **P0-6.2 — Audit ulang installer upstream dan izinnya.**
   - **Kerjakan:** tinjau `install.sh`/`main.py` pada commit yang di-pin,
     pastikan hanya menulis ke path yang diharapkan, tidak mengambil script
     tambahan dari URL yang tidak terverifikasi, dan tidak membaca environment
     user yang sensitif.
   - **DoD:** daftar file/path yang disentuh terdokumentasi; tidak ada eksekusi
     kode arbitrer di luar source yang di-pin.
+  - **Status:** selesai. Audit menyeluruh terhadap checkout `waydroid_script`
+    (`48dbfaf`) dan `phantom` (`1a6b7ed`) mendokumentasikan setiap path dan
+    izin di `docs/THIRD-PARTY.md`. Temuan penting ditutup langsung:
+    (1) `elevate_env` sebelumnya meng-unset `XDG_CACHE_HOME` tanpa nilai privat,
+    sehingga `helper.py` jatuh ke `/home/$SUDO_USER/.cache/` dan menulis file
+    unduhan root di cache user; sekarang `SUDO_USER`/`SUDO_UID`/`SUDO_GID`
+    di-unset dan `XDG_CACHE_HOME`/`XDG_DATA_HOME`/`XDG_CONFIG_HOME` diarahkan ke
+    subdirektori privat `$ARCHDROID_WORK`;
+    (2) unpack path hardcoded `/tmp/gapps` dan `/tmp/houdiniunpack` kini
+    dibersihkan sebelum dan sesudah eksekusi serta terikat pada trap exit shell;
+    (3) binary `resetprop` diverifikasi sebagai Android Bionic ELF (bukan host glibc)
+    yang hanya dijalankan container Android saat boot via `resetprop.rc`;
+    (4) semua unduhan eksternal (OpenGApps/MindTheGapps/Houdini) menggunakan URL
+    dengan commit/versi ter-pin dan diverifikasi hash MD5 sebelum diekstraksi;
+    tidak ada eksekusi skrip dinamis arbitrer di luar source yang di-pin.
+    Phantom berjalan 100% sebagai user biasa tanpa root (`INSTALL_SYSTEM_WRAPPER=0`).
 
 - [ ] **P0-6.3 — Jangan biarkan installer root menjadi jalur default tanpa
   persetujuan eksplisit.**
@@ -350,13 +524,20 @@ isolasi UI, lalu validasi rilis.
 - [ ] **P0-10.2 — Tambahkan pemeriksaan backend/build yang hilang.**
   - **Kerjakan:** frontend build (`npm ci` + `npm run build`), `cargo fmt
     --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`,
-    bundle build, `cargo audit`/`cargo deny`, `npm audit --omit=dev`, dan
-    pengecekan lockfile. Pemeriksaan lint/test frontend ditambahkan bersama
-    P1-2.
+    `cargo clippy`/`cargo test` dengan `--features dev-commands` (kode yang
+    di-gate P0-5.4), bundle build, `cargo audit`/`cargo deny`,
+    `npm audit --omit=dev`, dan pengecekan lockfile. Pemeriksaan lint/test
+    frontend ditambahkan bersama P1-2.
   - **DoD:** dependency rentan dan bundle yang gagal build memblokir PR rilis.
 
 - [ ] **P0-10.3 — Pin GitHub Actions ke commit SHA.**
-  - **DoD:** action pihak ketiga tidak bisa berubah tanpa review.
+  - **Bukti:** `ci.yml` memakai tag bergerak (`actions/checkout@v4`,
+    `actions/setup-node@v4`, `dtolnay/rust-toolchain@stable`) dan tidak
+    mendeklarasikan blok `permissions:`.
+  - **Kerjakan:** pin ke SHA dan set `permissions: contents: read` di level
+    workflow.
+  - **DoD:** action pihak ketiga tidak bisa berubah tanpa review; token CI
+    hanya punya izin baca.
 
 ### P0-11 — Dokumentasi rilis, lisensi, dan privasi
 
@@ -370,6 +551,13 @@ isolasi UI, lalu validasi rilis.
     tidak ada telemetri, dan cara melaporkan masalah keamanan.
 - [ ] **P0-11.4 — Tambahkan `CHANGELOG.md` dan third-party notices.**
   - Catat `waydroid_script` GPL-3.0, Phantom MIT, dan lisensi font/aset.
+- [ ] **P0-11.5 — Tinjau penggunaan merek pihak ketiga.**
+  - **Bukti:** judul window di `index.html` adalah “ArchDroid - LDPlayer for
+    Linux”, dan `longDescription`/`package.json` menyebut “LDPlayer-style”.
+    Identifier `io.github.archdroid` mengklaim namespace GitHub `archdroid`.
+  - **Kerjakan:** hapus nama LDPlayer dari judul/metadata paket (boleh tetap
+    sebagai perbandingan di README dengan disclaimer), dan pakai identifier
+    dari domain/akun yang benar-benar dimiliki.
 - **DoD:** pengguna baru dapat memasang, memahami risiko root, dan melakukan
   troubleshooting tanpa membaca source code.
 
@@ -384,6 +572,23 @@ P1 tidak boleh menunda P0, tetapi sebaiknya selesai sebelum rilis publik.
 - [ ] Gunakan `CommandResult.code` (`not_found`, `not_initialized`,
   `elevation_denied`, `timeout`, `cancelled`, dan seterusnya) di
   `src/App.jsx`; hapus pencocokan pesan string seperti `includes("No such file")`.
+- [ ] Periksa `status` hasil `invoke` untuk command non-streaming. `invoke`
+  tidak melempar exception untuk `CommandResult` berstatus `error`, sehingga
+  saat ini kegagalan diabaikan: `handleStart`/`handleStop`/`handleRestart`
+  (Restart selalu menampilkan toast “Engine Restarted”), `handleLaunchApp`,
+  `toggleConfig` (toggle UI berubah walau `prop_set` gagal),
+  `handleRunPhantom`, dan `open_shared_folder`.
+- [ ] Turunkan status `ProcessStepper`/`stepConfigs.js` dari payload
+  `cmd-finished` (`success`/`code`), bukan dari pencocokan teks log
+  (`includes("failed")`, `"Wipe complete!"`); output pihak ketiga yang memuat
+  kata “failed” saat ini bisa membuat stepper menampilkan error palsu.
+- [ ] Kembalikan Cancel untuk install/remove APK: masukkan operasi itu ke
+  `TaskGuard` + `cancel_task`, lalu hapus flag global `waydroid::CANCEL` dan
+  command `waydroid_cancel` agar hanya ada satu mekanisme cancel.
+- [ ] Bila `profile_apply` dihubungkan ke UI: command ini memegang
+  `TaskGuard` dan mengirim `cmd-output`/`cmd-finished`, tetapi tidak mengirim
+  `cmd-started`, sehingga frontend membuang semua event-nya dan Cancel tidak
+  punya `task_id`. Kirim `cmd-started` seperti `stream_privileged_script`.
 - [ ] Perbaiki `checkStatus()`: saat command error karena Waydroid tidak ada,
   jangan otomatis menyetel `isInitialized = true`; bedakan “belum terpasang”,
   “belum init”, dan “offline”.
@@ -393,8 +598,10 @@ P1 tidak boleh menunda P0, tetapi sebaiknya selesai sebelum rilis publik.
   jangan biarkan respons lama menimpa state baru.
 - [ ] Jadikan `run_phantom()` async/detached dan verifikasi terminal benar-benar
   ditemukan; saat ini `.output()` dapat menunggu terminal ditutup.
-- [ ] Pindahkan `check_host_diagnostics()` dan `open_shared_folder()` dari main
-  thread; beri timeout pada `systemctl`/`xdg-open`.
+- [ ] Pindahkan `check_host_diagnostics()`, `open_shared_folder()`,
+  `get_waydroid_apps()`, dan `run_phantom()` dari main thread (semuanya
+  `fn` sinkron, jadi dijalankan Tauri di main thread); beri timeout pada
+  `systemctl`/`xdg-open`.
 - [ ] Tangani `dirs::data_local_dir() == None` di `open_shared_folder()`; jangan
   membuat path relatif di current directory.
 - [ ] Sinkronkan `src/components/terminal/stepConfigs.js` dengan output aktual;
@@ -453,7 +660,8 @@ P1 tidak boleh menunda P0, tetapi sebaiknya selesai sebelum rilis publik.
 - [ ] Tinjau `core:default` di `capabilities/default.json`; pertahankan hanya
   permission yang dipakai.
 - [ ] Batasi pembacaan icon dari file `.desktop`: validasi path, tipe file,
-  ukuran maksimum; jangan membaca file arbitrer tanpa batas.
+  ukuran maksimum; jangan membaca file arbitrer tanpa batas. Saat ini semua
+  ikon diberi MIME `image/png` secara hardcode, jadi ikon SVG/XPM rusak.
 - [ ] Dokumentasikan ADB auto-authorization dan batasi command ke serial
   Waydroid (sudah ada upaya di `adb.rs`, tetapi perlu test/regresi).
 - **DoD:** tidak ada temuan high/critical yang tidak tercatat dan diterima
@@ -463,6 +671,9 @@ P1 tidak boleh menunda P0, tetapi sebaiknya selesai sebelum rilis publik.
 
 - [ ] Redaksi data sensitif dari log: path home, argumen `adb shell` arbitrer,
   identitas device/profil, dan output yang mungkin berisi token.
+  `run_privileged_script_for_task` saat ini menulis seluruh isi script root
+  ke log file (`log::info!("root script requested:\n{script}")`), termasuk
+  isi `waydroid.cfg`/`waydroid_base.prop` dari `profile_apply`.
 - [ ] Batasi ukuran log UI (log terminal tidak boleh tumbuh tanpa batas) dan
   batasi output `waydroid_log`.
 - [ ] Sediakan UI untuk melihat, mengekspor, dan menghapus log; dokumentasikan
@@ -474,7 +685,11 @@ P1 tidak boleh menunda P0, tetapi sebaiknya selesai sebelum rilis publik.
 
 - [ ] Beri versi/skema pada config profil dan migrasi aman; file rusak harus
   fallback tanpa panic.
-- [ ] Pastikan penulisan config atomik dan permission benar.
+- [ ] Pastikan penulisan config atomik dan permission benar. Bukti:
+  `device::save_to` memakai `fs::write` langsung (tidak tulis-temp-lalu-
+  rename), dan `config_path()` jatuh ke `./` bila `dirs::config_dir()` kosong.
+- [ ] `write_marker` mengabaikan error (`let _ = fs::write(...)`); kegagalan
+  menulis marker harus dilaporkan agar status tidak diam-diam salah.
 - [ ] Dokumentasikan path config/cache/log, data Waydroid, dan cara uninstall
   bersih.
 - [ ] Uji marker install saat image di-wipe/di-init ulang; jangan percaya marker
@@ -538,11 +753,14 @@ Tidak menjadi blocker rilis; kerjakan setelah P0/P1 stabil.
 | Risiko | Status | Mitigasi |
 |---|---|---|
 | Waydroid hanya satu container | Diterima | Dokumentasikan; jangan janjikan multi-instance. |
-| `waydroid_script` berjalan sebagai root | Terbuka | P0-6.1: dependency Python sudah hash-pinned; P0-6.2/P0-6.3 (audit + consent) tetap terbuka. |
+| `waydroid_script` berjalan sebagai root | Terbuka | P0-6.1 (dependency hash-pinned) & P0-6.2 (audit path, isolasi XDG_CACHE, dan pembersihan /tmp) selesai; P0-6.3 (persetujuan eksplisit UI) tetap terbuka. |
 | Distro target belum jelas | Terbuka | P0-7: pilih Arch-only atau multi-distro secara eksplisit. |
 | Belum ada uji live Waydroid/polkit | Terbuka | P0-8: VM disposable + bukti uji. |
-| CSP masih `null` dan font remote | Terbuka | P0-5. |
+| CSP `null` dan font remote | Tertutup | P0-5.1/P0-5.2: CSP produksi aktif, `@import` Google Fonts dihapus; verifikasi DevTools di P0-8. |
+| Permission webview terlalu luas | Tertutup | P0-5.3: `core:default` diganti event listen/unlisten + `dialog:allow-open`, tanpa plugin shell/FS. |
 | Log dapat memuat argumen sensitif | Terbuka | P1-6. |
+| Command IPC tanpa UI (shell Android arbitrer, tulis root) | Tertutup | P0-5.4: command tanpa UI di-gate di feature `dev-commands` dan tidak ada di build default. |
+| Operasi non-streaming bisa bentrok dengan wipe/init | Tertutup | P0-3.4: semua operasi state-changing memakai `TaskGuard` dan ditolak `busy`. |
 | Vite 5 dev dependency rentan | Terbuka | P1-5; tidak masuk runtime bundle, tetapi build tooling. |
 | Tanpa telemetry | Diterima | Support mengandalkan log yang diekspor pengguna. |
 
@@ -551,12 +769,11 @@ Tidak menjadi blocker rilis; kerjakan setelah P0/P1 stabil.
 ## 6. Urutan eksekusi yang disarankan
 
 1. **Tentukan scope platform** (Arch-only vs multi-distro) dan siapkan VM uji.
-2. **P0-3 + P0-4**: hasil privileged, timeout, cancel, task isolation.
-3. **P0-5 + P0-6**: CSP/offline dan supply chain installer root.
-4. **P0-7 + P0-8**: preflight dependency dan validasi live end-to-end.
-5. **P0-9 + P0-10 + P0-11**: artefak, CI remote, dokumentasi/legal.
-6. **P1**: frontend reliability, test/lint/E2E, a11y, logging, data lifecycle.
-7. **P2**: fitur dan polish.
+2. **P0-6**: supply chain installer root (seluruh P0-5 sudah selesai).
+3. **P0-7 + P0-8**: preflight dependency dan validasi live end-to-end.
+4. **P0-9 + P0-10 + P0-11**: artefak, CI remote, dokumentasi/legal.
+5. **P1**: frontend reliability, test/lint/E2E, a11y, logging, data lifecycle.
+6. **P2**: fitur dan polish.
 
 ---
 

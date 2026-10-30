@@ -12,6 +12,7 @@ use tauri::{AppHandle, Emitter};
 
 mod adb;
 mod capabilities;
+#[cfg(feature = "dev-commands")]
 mod device;
 mod error;
 mod waydroid;
@@ -317,6 +318,7 @@ export PYTHONUNBUFFERED=1
 unset BASH_ENV ENV CDPATH IFS GLOBIGNORE SHELL \
     PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONINSPECT \
     LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT \
+    SUDO_USER SUDO_UID SUDO_GID \
     GIT_DIR GIT_WORK_TREE GIT_CONFIG GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS \
     GIT_EXEC_PATH GIT_TEMPLATE_DIR GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES \
     GIT_INDEX_FILE GIT_NAMESPACE GIT_CEILING_DIRECTORIES \
@@ -338,18 +340,22 @@ chmod 700 "$ARCHDROID_WORK" || {{
     echo "[ERROR] Could not secure the privileged work directory." >&2
     exit 1
 }}
-mkdir -p "$ARCHDROID_WORK/home" || {{
-    echo "[ERROR] Could not create a private root home." >&2
+mkdir -p "$ARCHDROID_WORK/home" "$ARCHDROID_WORK/cache" "$ARCHDROID_WORK/data" "$ARCHDROID_WORK/config" || {{
+    echo "[ERROR] Could not create private root work directories." >&2
     exit 1
 }}
-chmod 700 "$ARCHDROID_WORK/home" || {{
-    echo "[ERROR] Could not secure the private root home." >&2
+chmod 700 "$ARCHDROID_WORK/home" "$ARCHDROID_WORK/cache" "$ARCHDROID_WORK/data" "$ARCHDROID_WORK/config" || {{
+    echo "[ERROR] Could not secure the private root work directories." >&2
     exit 1
 }}
 export HOME="$ARCHDROID_WORK/home"
 export ARCHDROID_WORK
 export TMPDIR="$ARCHDROID_WORK"
-trap 'rm -rf "$ARCHDROID_WORK"' EXIT HUP INT TERM
+export XDG_CACHE_HOME="$ARCHDROID_WORK/cache"
+export XDG_DATA_HOME="$ARCHDROID_WORK/data"
+export XDG_CONFIG_HOME="$ARCHDROID_WORK/config"
+export WAYDROID_CONFIG=/var/lib/waydroid/waydroid.cfg
+trap 'rm -rf "$ARCHDROID_WORK" /tmp/gapps /tmp/houdiniunpack /tmp/waydroid' EXIT HUP INT TERM
 {script}
 "#,
         home = home,
@@ -447,6 +453,27 @@ async fn off_main_thread(work: impl FnOnce() -> CommandResult + Send + 'static) 
         .unwrap_or_else(|error| AppError::Io(std::io::Error::other(error.to_string())).into())
 }
 
+/// Run a state-changing command while holding the single-flight slot.
+///
+/// These commands do not stream, so they never emit `cmd-started`/`cmd-finished`;
+/// the guard is moved into the blocking closure, so the slot stays taken until
+/// the child exits. A state change that would race a wipe, `waydroid init` or an
+/// installer is rejected with `busy` instead of corrupting the image.
+async fn run_exclusive<F>(label: &'static str, work: F) -> CommandResult
+where
+    F: FnOnce() -> CommandResult + Send + 'static,
+{
+    let task = match TaskGuard::start(label) {
+        Ok(task) => task,
+        Err(error) => return error.into(),
+    };
+    off_main_thread(move || {
+        let _task = task;
+        work()
+    })
+    .await
+}
+
 #[tauri::command]
 async fn waydroid_status() -> CommandResult {
     off_main_thread(
@@ -459,6 +486,7 @@ async fn waydroid_status() -> CommandResult {
 }
 
 /// Cheap preflight: is waydroid on PATH at all, and which version does it report.
+#[cfg(feature = "dev-commands")]
 #[tauri::command]
 async fn waydroid_version() -> CommandResult {
     off_main_thread(
@@ -503,7 +531,7 @@ fn live_shell(args: &[&str]) -> Option<String> {
 #[tauri::command]
 async fn waydroid_start() -> CommandResult {
     // Start the Waydroid session; an optional scheduler hint (e.g. ananicy-cpp) can be added later
-    off_main_thread(|| {
+    run_exclusive("session start", || {
         match waydroid::Waydroid::detect()
             .and_then(|waydroid| waydroid.session_start(waydroid::SESSION_START_GRACE_SECS))
         {
@@ -518,7 +546,7 @@ async fn waydroid_start() -> CommandResult {
 async fn waydroid_stop() -> CommandResult {
     // A failed exit is a failure again: this used to report success for any
     // spawn, so a refused stop looked like a stopped session.
-    off_main_thread(|| {
+    run_exclusive("session stop", || {
         match waydroid::Waydroid::detect().and_then(|waydroid| waydroid.session_stop()) {
             Ok(_) => CommandResult::success(),
             Err(error) => error.into(),
@@ -530,6 +558,7 @@ async fn waydroid_stop() -> CommandResult {
 /// Best effort kill of a cancellable long operation (`app install|remove`).
 /// Succeeds even when there was nothing running, so a Cancel button can stay
 /// simple.
+#[cfg(feature = "dev-commands")]
 #[tauri::command]
 fn waydroid_cancel() -> CommandResult {
     waydroid::request_cancel();
@@ -596,7 +625,7 @@ fn get_waydroid_apps() -> Vec<AppInfo> {
 
 #[tauri::command]
 async fn waydroid_install_apk(path: String) -> CommandResult {
-    off_main_thread(move || {
+    run_exclusive("APK install", move || {
         match waydroid::Waydroid::detect().and_then(|waydroid| waydroid.app_install(&path)) {
             Ok(_) => CommandResult::success(),
             Err(error) => error.into(),
@@ -607,7 +636,7 @@ async fn waydroid_install_apk(path: String) -> CommandResult {
 
 #[tauri::command]
 async fn waydroid_uninstall_app(package: String) -> CommandResult {
-    off_main_thread(move || {
+    run_exclusive("app uninstall", move || {
         match waydroid::Waydroid::detect().and_then(|waydroid| waydroid.app_remove(&package)) {
             Ok(_) => CommandResult::success(),
             Err(error) => error.into(),
@@ -618,7 +647,7 @@ async fn waydroid_uninstall_app(package: String) -> CommandResult {
 
 #[tauri::command]
 async fn waydroid_launch_app(package: String) -> CommandResult {
-    off_main_thread(move || {
+    run_exclusive("app launch", move || {
         match waydroid::Waydroid::detect().and_then(|waydroid| waydroid.app_launch(&package)) {
             Ok(_) => CommandResult::success(),
             Err(error) => error.into(),
@@ -629,12 +658,15 @@ async fn waydroid_launch_app(package: String) -> CommandResult {
 
 #[tauri::command]
 async fn waydroid_prop_set(key: String, value: String) -> CommandResult {
-    off_main_thread(move || {
-        match waydroid::Waydroid::detect().and_then(|waydroid| waydroid.prop_set(&key, &value)) {
+    run_exclusive(
+        "property update",
+        move || match waydroid::Waydroid::detect()
+            .and_then(|waydroid| waydroid.prop_set(&key, &value))
+        {
             Ok(_) => CommandResult::success(),
             Err(error) => error.into(),
-        }
-    })
+        },
+    )
     .await
 }
 
@@ -1028,6 +1060,7 @@ async fn install_multitouch(app: AppHandle) -> CommandResult {
 /// One dashboard object, assembled from `waydroid status` plus the cheapest
 /// probes. Values that need a running container degrade instead of failing:
 /// this is a read-only overview, not an action.
+#[cfg(feature = "dev-commands")]
 #[derive(Serialize, Deserialize)]
 pub struct StatusSnapshot {
     pub available: bool,
@@ -1045,6 +1078,7 @@ pub struct StatusSnapshot {
     pub phantom: bool,
 }
 
+#[cfg(feature = "dev-commands")]
 fn status_snapshot() -> StatusSnapshot {
     let mut snapshot = StatusSnapshot {
         available: false,
@@ -1082,6 +1116,7 @@ fn status_snapshot() -> StatusSnapshot {
     snapshot
 }
 
+#[cfg(feature = "dev-commands")]
 fn json_result<T: Serialize>(value: &T) -> CommandResult {
     match serde_json::to_string(value) {
         Ok(json) => CommandResult::with_data(json),
@@ -1089,6 +1124,7 @@ fn json_result<T: Serialize>(value: &T) -> CommandResult {
     }
 }
 
+#[cfg(feature = "dev-commands")]
 #[tauri::command]
 async fn waydroid_is_running() -> CommandResult {
     off_main_thread(
@@ -1104,6 +1140,7 @@ async fn waydroid_is_running() -> CommandResult {
     .await
 }
 
+#[cfg(feature = "dev-commands")]
 #[tauri::command]
 async fn waydroid_status_json() -> CommandResult {
     off_main_thread(|| json_result(&status_snapshot())).await
@@ -1111,6 +1148,7 @@ async fn waydroid_status_json() -> CommandResult {
 
 /// LDPlayer `list3` shape. Waydroid is a single container, so the list always
 /// has zero or one entry.
+#[cfg(feature = "dev-commands")]
 #[derive(Serialize, Deserialize)]
 pub struct InstanceInfo {
     pub playerid: u32,
@@ -1125,6 +1163,7 @@ pub struct InstanceInfo {
     pub dpi: u32,
 }
 
+#[cfg(feature = "dev-commands")]
 fn parse_memory_mb(meminfo: &str) -> u32 {
     meminfo
         .lines()
@@ -1135,6 +1174,7 @@ fn parse_memory_mb(meminfo: &str) -> u32 {
         .unwrap_or(0)
 }
 
+#[cfg(feature = "dev-commands")]
 fn host_memory_mb() -> u32 {
     parse_memory_mb(&std::fs::read_to_string("/proc/meminfo").unwrap_or_default())
 }
@@ -1142,6 +1182,7 @@ fn host_memory_mb() -> u32 {
 // ponytail: Waydroid is one container that inherits host CPU/RAM. `root` is
 // true by design (`waydroid shell` is root), and resolution/DPI mirror the
 // saved device profile.
+#[cfg(feature = "dev-commands")]
 fn single_instance(snapshot: &StatusSnapshot, profile: &device::DeviceProfile) -> InstanceInfo {
     InstanceInfo {
         playerid: 0,
@@ -1159,6 +1200,7 @@ fn single_instance(snapshot: &StatusSnapshot, profile: &device::DeviceProfile) -
     }
 }
 
+#[cfg(feature = "dev-commands")]
 #[tauri::command]
 async fn waydroid_list_instances() -> CommandResult {
     off_main_thread(|| {
@@ -1169,6 +1211,7 @@ async fn waydroid_list_instances() -> CommandResult {
     .await
 }
 
+#[cfg(feature = "dev-commands")]
 #[tauri::command]
 fn profile_capabilities() -> CommandResult {
     json_result(&device::FIELDS)
@@ -1176,6 +1219,7 @@ fn profile_capabilities() -> CommandResult {
 
 /// Saved profile overlaid with the values Android actually uses right now
 /// (waydroid.cfg on disk, plus `wm size`/`wm density` when the session is up).
+#[cfg(feature = "dev-commands")]
 #[tauri::command]
 async fn profile_get() -> CommandResult {
     off_main_thread(|| {
@@ -1202,6 +1246,7 @@ async fn profile_get() -> CommandResult {
 /// privileged INI write before replying. The root part is streamed through
 /// `cmd-output`/`cmd-finished`; a failed write is returned as an error instead
 /// of claiming the identity was applied.
+#[cfg(feature = "dev-commands")]
 #[tauri::command]
 async fn profile_apply(app: AppHandle, profile: device::DeviceProfile) -> CommandResult {
     off_main_thread(move || {
@@ -1341,6 +1386,7 @@ async fn profile_apply(app: AppHandle, profile: device::DeviceProfile) -> Comman
 
 /// `waydroid container restart` needs root, so it goes through the elevation
 /// helper and reports through `cmd-output`/`cmd-finished` like the installers.
+#[cfg(feature = "dev-commands")]
 #[tauri::command]
 async fn waydroid_reboot(app: AppHandle) -> CommandResult {
     stream_privileged_script(
@@ -1353,6 +1399,7 @@ async fn waydroid_reboot(app: AppHandle) -> CommandResult {
     .into_command_result()
 }
 
+#[cfg(feature = "dev-commands")]
 #[tauri::command]
 async fn waydroid_kill_app(package: String) -> CommandResult {
     off_main_thread(move || {
@@ -1370,6 +1417,7 @@ async fn waydroid_kill_app(package: String) -> CommandResult {
     .await
 }
 
+#[cfg(feature = "dev-commands")]
 #[tauri::command]
 async fn waydroid_getprop_all() -> CommandResult {
     off_main_thread(|| match adb::shell_active(&["getprop"]) {
@@ -1381,6 +1429,7 @@ async fn waydroid_getprop_all() -> CommandResult {
 
 /// Arbitrary device shell line (LDPlayer `adb --command` parity). There is no
 /// input validation on purpose: running the caller's command is the feature.
+#[cfg(feature = "dev-commands")]
 #[tauri::command]
 async fn waydroid_adb_cmd(command: String) -> CommandResult {
     off_main_thread(move || match adb::shell_line_active(&command) {
@@ -1476,15 +1525,18 @@ if ! command -v unsquashfs > /dev/null || ! command -v lzip > /dev/null; then
     echo "[SYSTEM] Installing required dependencies (squashfs-tools, lzip)..."
     pacman -S --noconfirm squashfs-tools lzip
 fi
+rm -rf /tmp/gapps /tmp/waydroid
 repo="$ARCHDROID_WORK/waydroid_script"
 {checkout}
 {setup}
 cd "$repo"
 echo "[SYSTEM] Injecting GApps into Android Image (this will take a while)..."
 if ! PYTHONUNBUFFERED=1 "$repo/venv/bin/python3" main.py install gapps; then
+    rm -rf /tmp/gapps /tmp/waydroid
     echo "[ERROR] Failed to install GApps." >&2
     exit 1
 fi
+rm -rf /tmp/gapps /tmp/waydroid
 echo "[SUCCESS] GApps installation complete! Please Start Waydroid."
 "#,
         checkout = pinned_git_checkout("\"$repo\"", WAYDROID_SCRIPT_URL, WAYDROID_SCRIPT_REV),
@@ -1503,15 +1555,18 @@ if ! command -v unsquashfs > /dev/null || ! command -v lzip > /dev/null; then
     echo "[SYSTEM] Installing required dependencies (squashfs-tools, lzip)..."
     pacman -S --noconfirm squashfs-tools lzip
 fi
+rm -rf /tmp/houdiniunpack /tmp/waydroid
 repo="$ARCHDROID_WORK/waydroid_script"
 {checkout}
 {setup}
 cd "$repo"
 echo "[SYSTEM] Installing ARM Translation / libhoudini (this may take several minutes)..."
 if ! PYTHONUNBUFFERED=1 "$repo/venv/bin/python3" main.py install libhoudini; then
+    rm -rf /tmp/houdiniunpack /tmp/waydroid
     echo "[ERROR] ARM Translation installation failed!" >&2
     exit 1
 fi
+rm -rf /tmp/houdiniunpack /tmp/waydroid
 echo "[SUCCESS] ARM Translation installation complete!"
 "#,
         checkout = pinned_git_checkout("\"$repo\"", WAYDROID_SCRIPT_URL, WAYDROID_SCRIPT_REV),
@@ -1917,6 +1972,53 @@ fn wait_with_deadline(
     }
 }
 
+/// Map a finished wait onto the typed result the UI sees.
+///
+/// `started` comes from the sentinel line the elevated shell prints first, so
+/// "elevation failed" and "the script ran and failed" stay distinguishable
+/// without parsing pkexec/sudo messages.
+fn stream_outcome(
+    program: &str,
+    wait: std::io::Result<WaitOutcome>,
+    captured_text: String,
+    timeout_secs: u64,
+    emit_error: impl FnOnce(String),
+) -> StreamResult {
+    let started = captured_text.contains(ELEVATED_SENTINEL);
+    match wait {
+        Ok(WaitOutcome::Exited(status)) if status.success() => StreamResult::success(started),
+        Ok(WaitOutcome::Exited(status)) => StreamResult::failure(
+            AppError::Exit {
+                program: program.to_string(),
+                code: status.code(),
+                output: captured_text,
+            },
+            started,
+        ),
+        Ok(WaitOutcome::TimedOut) => {
+            let error = AppError::Timeout {
+                program: program.to_string(),
+                seconds: timeout_secs,
+            };
+            emit_error(format!("[ERROR] {error}"));
+            StreamResult::failure(error, started)
+        }
+        Ok(WaitOutcome::Cancelled) => {
+            let error = AppError::CancelRequested {
+                program: program.to_string(),
+            };
+            emit_error(format!("[ERROR] {error}"));
+            StreamResult::failure(error, started)
+        }
+        Err(error) => {
+            emit_error(format!(
+                "[ERROR] Lost track of the running command: {error}"
+            ));
+            StreamResult::failure(AppError::Io(error), started)
+        }
+    }
+}
+
 /// Spawn a command, stream both of its pipes to the UI and report how it went.
 fn run_and_stream(
     app: &AppHandle,
@@ -1965,42 +2067,9 @@ fn run_and_stream(
     let _ = stderr_reader.join();
 
     let captured_text = captured.lock().map(|text| text.clone()).unwrap_or_default();
-    let started = captured_text.contains(ELEVATED_SENTINEL);
-
-    let outcome = match wait {
-        Ok(WaitOutcome::Exited(status)) if status.success() => StreamResult::success(started),
-        Ok(WaitOutcome::Exited(status)) => StreamResult::failure(
-            AppError::Exit {
-                program: program.clone(),
-                code: status.code(),
-                output: captured_text,
-            },
-            started,
-        ),
-        Ok(WaitOutcome::TimedOut) => {
-            let error = AppError::Timeout {
-                program: program.clone(),
-                seconds: timeout_secs,
-            };
-            emit_output(app, task_id, format!("[ERROR] {error}"));
-            StreamResult::failure(error, started)
-        }
-        Ok(WaitOutcome::Cancelled) => {
-            let error = AppError::CancelRequested {
-                program: program.clone(),
-            };
-            emit_output(app, task_id, format!("[ERROR] {error}"));
-            StreamResult::failure(error, started)
-        }
-        Err(e) => {
-            emit_output(
-                app,
-                task_id,
-                format!("[ERROR] Lost track of the running command: {}", e),
-            );
-            StreamResult::failure(AppError::Io(e), started)
-        }
-    };
+    let outcome = stream_outcome(&program, wait, captured_text, timeout_secs, |line| {
+        emit_output(app, task_id, line)
+    });
     if outcome.is_success() {
         log::info!("{program} finished");
     } else if let Err(error) = &outcome.outcome {
@@ -2112,6 +2181,68 @@ async fn stream_user_script(app: AppHandle, script: String, timeout_secs: u64) -
     }
 }
 
+/// What to do after the polkit attempt.
+#[derive(Debug, PartialEq, Eq)]
+enum ElevationStep {
+    /// The attempt is final: report it and never open a sudo prompt.
+    Stop,
+    /// Elevation never started, so sudo may still work.
+    FallBackToSudo,
+}
+
+/// Decide whether a failed polkit attempt may still try sudo.
+///
+/// Cancel, a dismissed dialog (exit 126) and a deadline are terminal. A script
+/// that actually started keeps its own exit result. Only an attempt that never
+/// started is allowed to fall back.
+fn pkexec_step(attempt: &mut StreamResult, forced: &str) -> ElevationStep {
+    if attempt.cancelled() {
+        return ElevationStep::Stop;
+    }
+
+    if attempt.exit_code() == Some(126) {
+        let started = attempt.started;
+        *attempt = StreamResult::failure(
+            AppError::elevation_denied(
+                "The polkit authentication dialog was dismissed; nothing was changed.",
+            ),
+            started,
+        );
+        return ElevationStep::Stop;
+    }
+
+    if attempt.timed_out() {
+        return ElevationStep::Stop;
+    }
+
+    if attempt.started || forced == "pkexec" {
+        if !attempt.started && !attempt.is_success() {
+            *attempt = StreamResult::failure(
+                AppError::elevation_denied(
+                    "polkit could not elevate here; no privileged shell was started.",
+                ),
+                false,
+            );
+        }
+        return ElevationStep::Stop;
+    }
+
+    ElevationStep::FallBackToSudo
+}
+
+/// Replace "sudo never elevated" with a typed elevation error.
+///
+/// A script that started and exited non-zero keeps its exit result, so a failed
+/// installer is not misreported as a failed password prompt.
+fn sudo_failure(attempt: StreamResult) -> Result<StreamResult, AppError> {
+    if attempt.is_success() || attempt.started || attempt.timed_out() || attempt.cancelled() {
+        return Ok(attempt);
+    }
+    Err(AppError::elevation_denied(
+        "sudo could not elevate or the privileged shell never started. Install a polkit authentication agent (for example hyprpolkitagent or polkit-gnome), or start ArchDroid from a terminal so sudo can ask for the password.",
+    ))
+}
+
 /// Run a script that needs root and wait for it to exit.
 ///
 /// The script body is written as if it were already root: there are no `sudo`
@@ -2152,55 +2283,20 @@ fn run_privileged_script_for_task(
                 "[SYSTEM] Requesting root access via polkit...",
             );
             let mut attempt = run_and_stream(app, task_id, command, timeout_secs, cancel);
-
-            // Cancel is terminal: never open a sudo prompt for a task the user
-            // already stopped.
-            if attempt.cancelled() {
-                finish_stream(app, task_id, &attempt, completion);
-                return attempt;
-            }
-
-            // Exit code 126 means the user dismissed the polkit dialog, so do
-            // not nag with a second prompt.
-            if attempt.exit_code() == Some(126) {
-                attempt = StreamResult::failure(
-                    AppError::elevation_denied(
-                        "The polkit authentication dialog was dismissed; nothing was changed.",
-                    ),
-                    attempt.started,
-                );
-                finish_stream(app, task_id, &attempt, completion);
-                return attempt;
-            }
-
-            // A deadline is terminal too: the prompt already hung, so starting
-            // a sudo prompt would just hang for another full timeout.
-            if attempt.timed_out() {
-                finish_stream(app, task_id, &attempt, completion);
-                return attempt;
-            }
-
-            // If the shell started, the script itself failed; only fall back to
-            // sudo when elevation never got as far as running the body.
-            if attempt.started || forced == "pkexec" {
-                if !attempt.started && !attempt.is_success() {
-                    attempt = StreamResult::failure(
-                        AppError::elevation_denied(
-                            "polkit could not elevate here; no privileged shell was started.",
-                        ),
-                        false,
+            match pkexec_step(&mut attempt, &forced) {
+                ElevationStep::Stop => {
+                    finish_stream(app, task_id, &attempt, completion);
+                    return attempt;
+                }
+                ElevationStep::FallBackToSudo => {
+                    pkexec_failed = true;
+                    emit_output(
+                        app,
+                        task_id,
+                        "[SYSTEM] polkit could not elevate here, falling back to sudo...",
                     );
                 }
-                finish_stream(app, task_id, &attempt, completion);
-                return attempt;
             }
-
-            pkexec_failed = true;
-            emit_output(
-                app,
-                task_id,
-                "[SYSTEM] polkit could not elevate here, falling back to sudo...",
-            );
         } else if forced == "pkexec" {
             let error = AppError::elevation_denied(
                 "ARCHDROID_ELEVATE=pkexec but pkexec is not available, so root access cannot be requested.",
@@ -2228,17 +2324,15 @@ fn run_privileged_script_for_task(
     };
 
     emit_output(app, task_id, "[SYSTEM] Requesting root access via sudo...");
-    let mut attempt = run_and_stream(app, task_id, command, timeout_secs, cancel);
+    let attempt = run_and_stream(app, task_id, command, timeout_secs, cancel);
 
-    if !attempt.is_success() && !attempt.started && !attempt.timed_out() && !attempt.cancelled() {
-        emit_output(app, task_id, "[SYSTEM] Root access failed. Install a polkit authentication agent (for example hyprpolkitagent or polkit-gnome), or start ArchDroid from a terminal so sudo can ask for the password.");
-        attempt = StreamResult::failure(
-            AppError::elevation_denied(
-                "sudo could not elevate or the privileged shell never started. Install a polkit authentication agent (for example hyprpolkitagent or polkit-gnome), or start ArchDroid from a terminal so sudo can ask for the password.",
-            ),
-            false,
-        );
-    }
+    let attempt = match sudo_failure(attempt) {
+        Ok(attempt) => attempt,
+        Err(error) => {
+            emit_output(app, task_id, "[SYSTEM] Root access failed. Install a polkit authentication agent (for example hyprpolkitagent or polkit-gnome), or start ArchDroid from a terminal so sudo can ask for the password.");
+            StreamResult::failure(error, false)
+        }
+    };
 
     finish_stream(app, task_id, &attempt, completion);
     attempt
@@ -2296,18 +2390,33 @@ pub fn run() {
                 .level(log::LevelFilter::Info)
                 .build(),
         )
+        // Only commands the UI actually calls are registered. Backend commands
+        // without a UI live behind `dev-commands` so a production build cannot
+        // reach arbitrary Android shell or root-writing IPC; re-register one
+        // unconditionally only together with its UI and test.
         .invoke_handler(tauri::generate_handler![
             waydroid_status,
+            #[cfg(feature = "dev-commands")]
             waydroid_status_json,
+            #[cfg(feature = "dev-commands")]
             waydroid_is_running,
+            #[cfg(feature = "dev-commands")]
             waydroid_list_instances,
+            #[cfg(feature = "dev-commands")]
             profile_capabilities,
+            #[cfg(feature = "dev-commands")]
             profile_get,
+            #[cfg(feature = "dev-commands")]
             profile_apply,
+            #[cfg(feature = "dev-commands")]
             waydroid_reboot,
+            #[cfg(feature = "dev-commands")]
             waydroid_kill_app,
+            #[cfg(feature = "dev-commands")]
             waydroid_getprop_all,
+            #[cfg(feature = "dev-commands")]
             waydroid_adb_cmd,
+            #[cfg(feature = "dev-commands")]
             waydroid_version,
             waydroid_start,
             waydroid_stop,
@@ -2319,6 +2428,7 @@ pub fn run() {
             waydroid_launch_app,
             waydroid_prop_set,
             waydroid_prop_get,
+            #[cfg(feature = "dev-commands")]
             waydroid_cancel,
             cancel_task,
             waydroid_log,
@@ -2347,6 +2457,7 @@ mod tests {
         assert_eq!(sh_quote("it's"), r"'it'\''s'");
     }
 
+    #[cfg(feature = "dev-commands")]
     #[test]
     fn meminfo_total_becomes_megabytes() {
         assert_eq!(
@@ -2384,9 +2495,14 @@ mod tests {
         assert!(body.contains("GIT_CONFIG_SYSTEM=/dev/null"));
         assert!(body.contains("PIP_CONFIG_FILE=/dev/null"));
         assert!(body.contains("PYTHONNOUSERSITE=1"));
+        assert!(body.contains("SUDO_USER"));
+        assert!(body.contains("export XDG_CACHE_HOME=\"$ARCHDROID_WORK/cache\""));
+        assert!(body.contains("export XDG_DATA_HOME=\"$ARCHDROID_WORK/data\""));
+        assert!(body.contains("export XDG_CONFIG_HOME=\"$ARCHDROID_WORK/config\""));
+        assert!(body.contains("export WAYDROID_CONFIG=/var/lib/waydroid/waydroid.cfg"));
         assert!(body.contains("mktemp -d /var/tmp/archdroid."));
         assert!(body.contains("chmod 700 \"$ARCHDROID_WORK\""));
-        assert!(body.contains("trap 'rm -rf \"$ARCHDROID_WORK\"'"));
+        assert!(body.contains("trap 'rm -rf \"$ARCHDROID_WORK\" /tmp/gapps /tmp/houdiniunpack /tmp/waydroid'"));
         assert!(body.contains(ELEVATED_SENTINEL));
         assert!(body.trim_end().ends_with("echo body"));
     }
@@ -2476,6 +2592,8 @@ mod tests {
     fn third_party_installers_are_pinned_and_use_private_workdirs() {
         let gapps = gapps_install_script();
         let houdini = houdini_install_script();
+        assert!(gapps.contains("rm -rf /tmp/gapps /tmp/waydroid"));
+        assert!(houdini.contains("rm -rf /tmp/houdiniunpack /tmp/waydroid"));
         for script in [&gapps, &houdini] {
             assert!(script.contains(WAYDROID_SCRIPT_REV));
             assert!(script.contains("$ARCHDROID_WORK"));
@@ -2746,6 +2864,48 @@ mod tests {
         assert_ne!(first_id, next.id());
     }
 
+    /// Every non-streaming command that changes Waydroid state goes through
+    /// `run_exclusive`, so a wipe/init/installer holding the slot makes them
+    /// fail with `busy` instead of racing the image.
+    #[test]
+    fn state_changing_commands_are_rejected_while_a_privileged_task_runs() {
+        let _slot = lock_task_slot_for_test();
+        let privileged =
+            TaskGuard::start("privileged operation").expect("the slot must start empty");
+
+        for label in [
+            "session start",
+            "session stop",
+            "APK install",
+            "app uninstall",
+            "property update",
+            "app launch",
+        ] {
+            let result =
+                tauri::async_runtime::block_on(run_exclusive(label, CommandResult::success));
+            assert_eq!(result.status, "error", "{label} must be rejected");
+            assert_eq!(
+                result.code.as_deref(),
+                Some(error::code::BUSY),
+                "{label} must report busy"
+            );
+            assert!(
+                result
+                    .message
+                    .as_deref()
+                    .unwrap_or("")
+                    .contains("privileged operation"),
+                "{label} must name the operation that owns the slot"
+            );
+        }
+
+        drop(privileged);
+        let result =
+            tauri::async_runtime::block_on(run_exclusive("session start", CommandResult::success));
+        assert_eq!(result.status, "success", "the slot must be free again");
+        assert_eq!(result.code, None);
+    }
+
     #[test]
     fn cancel_only_matches_the_task_that_owns_the_slot() {
         let _slot = lock_task_slot_for_test();
@@ -2938,6 +3098,191 @@ wait
         }
     }
 
+    /// Run a script for real so the mapping is tested against a genuine
+    /// `ExitStatus`, not a hand-written one.
+    fn run_bash(script: &str) -> ExitStatus {
+        Command::new("bash")
+            .args(["--noprofile", "--norc", "-c", script])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .expect("bash must start")
+    }
+
+    fn exit_failure(program: &str, code: i32, started: bool) -> StreamResult {
+        StreamResult::failure(
+            AppError::Exit {
+                program: program.to_string(),
+                code: Some(code),
+                output: String::new(),
+            },
+            started,
+        )
+    }
+
+    #[test]
+    fn an_installer_that_exits_1_becomes_an_exit_error_not_a_success() {
+        let status = run_bash("echo 'installer exploded' >&2; exit 1");
+        let attempt = stream_outcome(
+            "bash",
+            Ok(WaitOutcome::Exited(status)),
+            "installer exploded".to_string(),
+            30,
+            |_| panic!("an exit code is already visible; no extra error line is needed"),
+        );
+
+        assert!(!attempt.is_success());
+        assert!(!attempt.started);
+        assert_eq!(attempt.exit_code(), Some(1));
+        let event = attempt.finished_event("task-exit");
+        assert_eq!(event.code, Some(error::code::EXIT));
+        assert!(
+            event.message.unwrap_or_default().contains("exit code 1"),
+            "the exit code must be in the message"
+        );
+    }
+
+    #[test]
+    fn an_exit_after_the_privileged_shell_started_is_still_an_exit() {
+        let status = run_bash("exit 1");
+        let attempt = stream_outcome(
+            "bash",
+            Ok(WaitOutcome::Exited(status)),
+            format!("{ELEVATED_SENTINEL}\nsomething failed\n"),
+            30,
+            |_| {},
+        );
+
+        assert!(attempt.started, "the sentinel proves the body ran as root");
+        assert_eq!(attempt.exit_code(), Some(1));
+        assert_eq!(
+            attempt.finished_event("task-root").code,
+            Some(error::code::EXIT)
+        );
+    }
+
+    #[test]
+    fn a_dismissed_polkit_dialog_is_terminal_and_never_falls_back_to_sudo() {
+        let mut attempt = exit_failure("pkexec", 126, false);
+
+        assert_eq!(pkexec_step(&mut attempt, ""), ElevationStep::Stop);
+        let event = attempt.finished_event("task-126");
+        assert_eq!(event.code, Some(error::code::ELEVATION_DENIED));
+        assert!(
+            event.message.unwrap_or_default().contains("dismissed"),
+            "the user must be told the dialog was dismissed"
+        );
+        assert_eq!(attempt.exit_code(), None, "126 is no longer an exit code");
+    }
+
+    #[test]
+    fn a_polkit_failure_that_never_started_may_fall_back_to_sudo() {
+        let mut attempt = exit_failure("pkexec", 1, false);
+
+        assert_eq!(pkexec_step(&mut attempt, ""), ElevationStep::FallBackToSudo);
+        assert_eq!(
+            attempt.exit_code(),
+            Some(1),
+            "the attempt must stay untouched for the next step"
+        );
+    }
+
+    #[test]
+    fn forcing_pkexec_never_falls_back_even_when_it_never_started() {
+        let mut attempt = exit_failure("pkexec", 1, false);
+
+        assert_eq!(pkexec_step(&mut attempt, "pkexec"), ElevationStep::Stop);
+        assert_eq!(
+            attempt.finished_event("task-forced").code,
+            Some(error::code::ELEVATION_DENIED)
+        );
+    }
+
+    #[test]
+    fn a_script_that_started_and_failed_does_not_open_a_second_prompt() {
+        let mut attempt = exit_failure("bash", 1, true);
+
+        assert_eq!(pkexec_step(&mut attempt, ""), ElevationStep::Stop);
+        assert_eq!(
+            attempt.finished_event("task-body").code,
+            Some(error::code::EXIT)
+        );
+    }
+
+    #[test]
+    fn a_hung_or_cancelled_polkit_prompt_never_opens_a_sudo_prompt() {
+        let mut timed_out = StreamResult::failure(
+            AppError::Timeout {
+                program: "pkexec".to_string(),
+                seconds: 1,
+            },
+            false,
+        );
+        assert_eq!(pkexec_step(&mut timed_out, ""), ElevationStep::Stop);
+        assert_eq!(
+            timed_out.finished_event("task-hang").code,
+            Some(error::code::TIMEOUT)
+        );
+
+        let mut cancelled = StreamResult::failure(
+            AppError::CancelRequested {
+                program: "pkexec".to_string(),
+            },
+            false,
+        );
+        assert_eq!(pkexec_step(&mut cancelled, ""), ElevationStep::Stop);
+        assert_eq!(
+            cancelled.finished_event("task-cancel").code,
+            Some(error::code::CANCELLED)
+        );
+    }
+
+    #[test]
+    fn a_sudo_that_never_elevated_becomes_elevation_denied() {
+        let error = match sudo_failure(exit_failure("sudo", 1, false)) {
+            Ok(_) => panic!("a sudo failure that never started must be replaced"),
+            Err(error) => error,
+        };
+        assert_eq!(error.code(), error::code::ELEVATION_DENIED);
+        assert!(
+            error.to_string().contains("polkit authentication agent"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn a_sudo_script_that_started_and_failed_keeps_its_exit_code() {
+        let attempt = sudo_failure(exit_failure("bash", 2, true))
+            .expect("a script that ran as root keeps its result");
+        assert_eq!(attempt.exit_code(), Some(2));
+        assert_eq!(
+            attempt.finished_event("task-sudo").code,
+            Some(error::code::EXIT)
+        );
+    }
+
+    #[test]
+    fn a_hanging_command_reports_timeout_and_streams_the_reason() {
+        let mut emitted = None;
+        let attempt = stream_outcome(
+            "bash",
+            Ok(WaitOutcome::TimedOut),
+            String::new(),
+            5,
+            |line| emitted = Some(line),
+        );
+
+        assert_eq!(
+            attempt.finished_event("task-timeout").code,
+            Some(error::code::TIMEOUT)
+        );
+        assert!(
+            emitted.unwrap_or_default().contains("within 5s"),
+            "the timeout line must tell the user the deadline"
+        );
+    }
+
     #[test]
     fn a_timeout_after_elevation_stays_started_and_is_terminal() {
         let attempt = StreamResult::failure(
@@ -3021,6 +3366,36 @@ wait
         );
         assert!(marker.exists(), "the gate must still apply a real success");
         let _ = std::fs::remove_file(&marker);
+    }
+
+    #[test]
+    fn a_failed_installer_never_writes_an_installed_marker() {
+        let marker = marker_file("exit_test_marker");
+        let _ = std::fs::remove_file(&marker);
+
+        apply_completion(
+            &exit_failure("installer", 1, true),
+            Completion::WriteMarker("exit_test_marker"),
+        );
+        assert!(
+            !marker.exists(),
+            "a non-zero exit must not look like a completed install"
+        );
+    }
+
+    #[test]
+    fn a_denied_elevation_never_writes_an_installed_marker() {
+        let marker = marker_file("elevation_test_marker");
+        let _ = std::fs::remove_file(&marker);
+
+        apply_completion(
+            &StreamResult::failure(AppError::elevation_denied("dismissed"), false),
+            Completion::WriteMarker("elevation_test_marker"),
+        );
+        assert!(
+            !marker.exists(),
+            "a refused password prompt must not look like a completed install"
+        );
     }
 
     #[test]
