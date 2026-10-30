@@ -1,4 +1,5 @@
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+/* No remote font @import: the app must work offline and under
+   `font-src 'self'`. The stacks below fall back to locally installed fonts. */
 
 :root {
   --bg-base: #080B10;
@@ -1637,6 +1638,7 @@ body {
   font-size: 14px;
   color: var(--text-secondary);
   line-height: 1.55;
+  white-space: pre-line;
 }
 
 .confirm-modal-actions {

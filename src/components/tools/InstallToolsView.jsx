@@ -59,18 +59,18 @@ export default function InstallToolsView({
             </div>
             <div className="tool-header-text">
               <div className="tool-title-row">
-                <h3>Google Play Services (OpenGApps)</h3>
+                <h3>Google Play Services (GApps)</h3>
                 {renderStatusBadge(gappsStatus)}
               </div>
               <p>
-                Injects the official Google Play Store, Play Services, and Google Services Framework
+                Injects Google Play Store, Play Services, and Google Services Framework
                 into the Android container to allow downloading apps directly.
               </p>
             </div>
           </div>
 
           <div className="tool-card-footer">
-            <span className="tool-requirement-hint">Source: waydroid_script • OpenGApps</span>
+            <span className="tool-requirement-hint">Root required • waydroid_script (48dbfaf)</span>
             <button
               className={gappsStatus === "installed" ? "btn btn-outline" : "btn btn-primary"}
               onClick={onInstallGApps}
@@ -109,7 +109,7 @@ export default function InstallToolsView({
           </div>
 
           <div className="tool-card-footer">
-            <span className="tool-requirement-hint">Native Intel/AMD x86_64 Bridge</span>
+            <span className="tool-requirement-hint">Root required • waydroid_script (48dbfaf)</span>
             <button
               className={houdiniStatus === "installed" ? "btn btn-outline" : "btn btn-primary"}
               onClick={onInstallHoudini}
@@ -156,7 +156,7 @@ export default function InstallToolsView({
             <span className="tool-requirement-hint">
               {multitouchStatus === "partial"
                 ? "Written to disk — restart Waydroid to activate"
-                : "Same declaration LDPlayer 9 ships"}
+                : "Root required • Vendor overlay"}
             </span>
             <button
               className={multitouchStatus === "installed" ? "btn btn-outline" : "btn btn-primary"}

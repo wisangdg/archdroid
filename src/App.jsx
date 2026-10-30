@@ -341,6 +341,16 @@ export default function App() {
   const installApkFile = useCallback(
     async (filePath) => {
       if (!filePath) return;
+      // The backend would reject this with `busy`, but dropping a file must not
+      // even look like it was accepted while a wipe/installer owns the slot.
+      if (operationInFlight.current) {
+        addToast({
+          type: "warning",
+          title: "Operation In Progress",
+          message: "Wait for the current operation to finish before installing an APK.",
+        });
+        return;
+      }
       const fileName = filePath.split("/").pop() || "APK";
       try {
         addToast({
@@ -541,7 +551,7 @@ export default function App() {
     });
   };
 
-  const handleInstallGApps = async () => {
+  const executeInstallGApps = async () => {
     try {
       await runStreamingTask("install_gapps", {
         taskType: "gapps",
@@ -557,7 +567,27 @@ export default function App() {
     }
   };
 
-  const handleInstallHoudini = async () => {
+  const handleInstallGApps = () => {
+    setConfirmModal({
+      isOpen: true,
+      title: "Install Google Play Services (Root Required)",
+      description:
+        "This installer modifies the Waydroid Android system image (/var/lib/waydroid/overlay/system) to inject Google Play Store and Services framework.\n\n" +
+        "• Source: waydroid_script (pinned commit 48dbfaf) • MindTheGapps / OpenGApps\n" +
+        "• Privilege: Requires Administrator (Root) access via Polkit or sudo\n" +
+        "• Consequence: Adds Google proprietary services to Android rootfs. Waydroid must be restarted after completion.\n\n" +
+        "Do you want to proceed with root installation?",
+      confirmText: "Proceed & Authorize Root",
+      confirmVariant: "primary",
+      iconType: "shield",
+      onConfirm: async () => {
+        setConfirmModal((prev) => ({ ...prev, isOpen: false }));
+        await executeInstallGApps();
+      },
+    });
+  };
+
+  const executeInstallHoudini = async () => {
     try {
       await runStreamingTask("install_houdini", {
         taskType: "houdini",
@@ -573,7 +603,27 @@ export default function App() {
     }
   };
 
-  const handleInstallMultitouch = async () => {
+  const handleInstallHoudini = () => {
+    setConfirmModal({
+      isOpen: true,
+      title: "Install ARM Translation Layer (Root Required)",
+      description:
+        "This installer modifies the Waydroid Android system image (/var/lib/waydroid/overlay/system) and waydroid.cfg to inject Intel libhoudini ARM translation libraries.\n\n" +
+        "• Source: waydroid_script (pinned commit 48dbfaf) • Intel proprietary prebuilts\n" +
+        "• Privilege: Requires Administrator (Root) access via Polkit or sudo\n" +
+        "• Consequence: Injects binary translation bridge (binfmt_misc) to execute ARM/ARM64 games on x86_64 CPUs.\n\n" +
+        "Do you want to proceed with root installation?",
+      confirmText: "Proceed & Authorize Root",
+      confirmVariant: "primary",
+      iconType: "shield",
+      onConfirm: async () => {
+        setConfirmModal((prev) => ({ ...prev, isOpen: false }));
+        await executeInstallHoudini();
+      },
+    });
+  };
+
+  const executeInstallMultitouch = async () => {
     try {
       const result = await runStreamingTask("install_multitouch", {
         taskType: "multitouch",
@@ -595,6 +645,26 @@ export default function App() {
         message: String(e),
       });
     }
+  };
+
+  const handleInstallMultitouch = () => {
+    setConfirmModal({
+      isOpen: true,
+      title: "Declare Touch Features (Root Required)",
+      description:
+        "This operation writes Android touchscreen hardware capability declarations to the Waydroid vendor overlay (/var/lib/waydroid/overlay).\n\n" +
+        "• Source: ArchDroid internal hardware profile\n" +
+        "• Privilege: Requires Administrator (Root) access via Polkit or sudo\n" +
+        "• Consequence: Declares multitouch hardware features so Google Play Store permits downloading touch-dependent games. Requires restarting Waydroid.\n\n" +
+        "Do you want to proceed with root installation?",
+      confirmText: "Proceed & Authorize Root",
+      confirmVariant: "primary",
+      iconType: "shield",
+      onConfirm: async () => {
+        setConfirmModal((prev) => ({ ...prev, isOpen: false }));
+        await executeInstallMultitouch();
+      },
+    });
   };
 
   const handleViewLogs = async () => {
@@ -808,7 +878,7 @@ export default function App() {
     }
   };
 
-  const handleInitWaydroid = async () => {
+  const executeInitWaydroid = async () => {
     try {
       await runStreamingTask("waydroid_init", {
         taskType: "init",
@@ -822,6 +892,26 @@ export default function App() {
         message: String(e),
       });
     }
+  };
+
+  const handleInitWaydroid = () => {
+    setConfirmModal({
+      isOpen: true,
+      title: "Initialize Waydroid Container (Root Required)",
+      description:
+        "Initializing Waydroid will download the official LineageOS container images (~1.2 GB) and configure the LXC Android container under /var/lib/waydroid.\n\n" +
+        "• Source: Official Waydroid / LineageOS system images\n" +
+        "• Privilege: Requires Administrator (Root) access via Polkit or sudo\n" +
+        "• Consequence: Sets up root container files and system partitions on disk.\n\n" +
+        "Do you want to proceed?",
+      confirmText: "Initialize & Authorize Root",
+      confirmVariant: "primary",
+      iconType: "shield",
+      onConfirm: async () => {
+        setConfirmModal((prev) => ({ ...prev, isOpen: false }));
+        await executeInitWaydroid();
+      },
+    });
   };
 
   const handleWipeData = () => {
@@ -855,13 +945,16 @@ export default function App() {
   const handleRetryTask = () => {
     switch (terminalTaskType) {
       case "gapps":
-        handleInstallGApps();
+        executeInstallGApps();
         break;
       case "houdini":
-        handleInstallHoudini();
+        executeInstallHoudini();
+        break;
+      case "multitouch":
+        executeInstallMultitouch();
         break;
       case "init":
-        handleInitWaydroid();
+        executeInitWaydroid();
         break;
       case "phantom":
         handleInstallPhantom();
@@ -923,6 +1016,7 @@ export default function App() {
           onStop={handleStop}
           onRestart={handleRestart}
           isOperating={isOperating}
+          busy={installing}
         />
 
         <div className="content-scrollable">
@@ -940,6 +1034,7 @@ export default function App() {
                   onInstallApk={handleInstallApk}
                   onUninstallApp={handleUninstallApp}
                   onCopyPackage={handleCopyPackage}
+                  busy={installing}
                 />
               )}
 
@@ -993,6 +1088,7 @@ export default function App() {
                   onApplyResolution={handleApplyResolution}
                   engineRunning={status === "online"}
                   onRestartEngine={handleRestart}
+                  busy={installing}
                 />
               )}
             </>

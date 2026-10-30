@@ -1,5 +1,5 @@
 import React, { useEffect } from "react";
-import { AlertTriangle, AlertOctagon, Trash2, X } from "lucide-react";
+import { AlertTriangle, AlertOctagon, Trash2, ShieldAlert, X } from "lucide-react";
 
 export default function ConfirmModal({
   isOpen,
@@ -33,6 +33,8 @@ export default function ConfirmModal({
         return <Trash2 size={24} className="confirm-icon danger" />;
       case "danger":
         return <AlertOctagon size={24} className="confirm-icon danger" />;
+      case "shield":
+        return <ShieldAlert size={24} className="confirm-icon warning" />;
       case "warning":
       default:
         return <AlertTriangle size={24} className="confirm-icon warning" />;

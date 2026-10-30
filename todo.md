@@ -430,11 +430,21 @@ isolasi UI, lalu validasi rilis.
     tidak ada eksekusi skrip dinamis arbitrer di luar source yang di-pin.
     Phantom berjalan 100% sebagai user biasa tanpa root (`INSTALL_SYSTEM_WRAPPER=0`).
 
-- [ ] **P0-6.3 — Jangan biarkan installer root menjadi jalur default tanpa
+- [x] **P0-6.3 — Jangan biarkan installer root menjadi jalur default tanpa
   persetujuan eksplisit.**
   - **Kerjakan:** tampilkan peringatan bahwa installer mengubah image Waydroid
     dan meminta root; jelaskan sumber, versi, dan konsekuensinya.
   - **DoD:** pengguna melihat konfirmasi sebelum prompt polkit/sudo.
+  - **Status:** selesai. Semua aksi yang meminta root (`install_gapps`,
+    `install_houdini`, `install_multitouch`, `waydroid_init`, `waydroid_wipe`)
+    kini di-gate di balik `ConfirmModal` di UI sebelum task streaming / prompt
+    polkit/sudo dipanggil. Modal menampilkan peringatan eksplisit dengan ikon
+    `shield`: (1) modifikasi partisi sistem/vendor Waydroid; (2) sumber & versi
+    commit yang di-pin (`waydroid_script 48dbfaf`, MindTheGapps/OpenGApps,
+    prebuilt Intel Houdini); (3) konsekuensi operasional (perlu restart Waydroid);
+    (4) tombol konfirmasi eksplisit (`Proceed & Authorize Root`). Jika pengguna
+    menekan Cancel / Escape, tidak ada prompt polkit/sudo yang dibuka.
+    Regresi dijaga oleh `src/lib/ipc-surface.test.js`.
 
 ### P0-7 — Kontrak platform dan preflight dependency
 
@@ -753,7 +763,7 @@ Tidak menjadi blocker rilis; kerjakan setelah P0/P1 stabil.
 | Risiko | Status | Mitigasi |
 |---|---|---|
 | Waydroid hanya satu container | Diterima | Dokumentasikan; jangan janjikan multi-instance. |
-| `waydroid_script` berjalan sebagai root | Terbuka | P0-6.1 (dependency hash-pinned) & P0-6.2 (audit path, isolasi XDG_CACHE, dan pembersihan /tmp) selesai; P0-6.3 (persetujuan eksplisit UI) tetap terbuka. |
+| `waydroid_script` berjalan sebagai root | Tertutup | P0-6.1 (dependency hash-pinned), P0-6.2 (audit path, isolasi XDG_CACHE, dan pembersihan /tmp), dan P0-6.3 (dialog konfirmasi eksplisit UI sebelum prompt polkit/sudo) selesai. |
 | Distro target belum jelas | Terbuka | P0-7: pilih Arch-only atau multi-distro secara eksplisit. |
 | Belum ada uji live Waydroid/polkit | Terbuka | P0-8: VM disposable + bukti uji. |
 | CSP `null` dan font remote | Tertutup | P0-5.1/P0-5.2: CSP produksi aktif, `@import` Google Fonts dihapus; verifikasi DevTools di P0-8. |
