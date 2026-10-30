@@ -1423,6 +1423,31 @@ const WAYDROID_SCRIPT_REV: &str = "48dbfaf34a6ddbe78688c530f9ba1c26522aafb2";
 const PHANTOM_URL: &str = "https://github.com/oliviermugishak/phantom.git";
 const PHANTOM_REV: &str = "1a6b7edb423462c1bc546031ed86d9bf2cc1cffd";
 
+/// Python dependencies for the pinned `waydroid_script` revision. The lockfile
+/// is embedded at compile time, so the upstream checkout cannot replace it, and
+/// `pip --require-hashes` rejects any wheel that does not match a reviewed
+/// SHA-256. Updating it is a reviewed change because this code runs as root.
+const WAYDROID_SCRIPT_LOCK: &str = include_str!("../resources/waydroid_script-requirements.lock");
+
+/// Write the embedded lock into the private checkout and install exactly that
+/// set of wheels. Both installers call this so their pip flags cannot drift.
+fn waydroid_script_python_setup() -> String {
+    format!(
+        r#"echo "[SYSTEM] Setting up Python environment..."
+python3 -m venv "$repo/venv"
+requirements_lock="$repo/archdroid-requirements.lock"
+printf '%s\n' {lock} > "$requirements_lock"
+if ! grep -q -- '--hash=sha256:' "$requirements_lock"; then
+    echo "[ERROR] The embedded Python dependency lock has no hashes." >&2
+    exit 1
+fi
+"$repo/venv/bin/pip" install --no-cache-dir --disable-pip-version-check --no-input -q \
+    --require-hashes --only-binary=:all: -r "$requirements_lock"
+"#,
+        lock = sh_quote(WAYDROID_SCRIPT_LOCK),
+    )
+}
+
 /// Fetch exactly `rev` into a fresh repository. `repo` is a shell expansion such
 /// as `"$repo"`, not a Rust path. The final `test` catches a server or checkout
 /// that silently resolved a different object.
@@ -1453,9 +1478,7 @@ if ! command -v unsquashfs > /dev/null || ! command -v lzip > /dev/null; then
 fi
 repo="$ARCHDROID_WORK/waydroid_script"
 {checkout}
-echo "[SYSTEM] Setting up Python environment..."
-python3 -m venv "$repo/venv"
-"$repo/venv/bin/pip" install --no-cache-dir --disable-pip-version-check --no-input -q -r "$repo/requirements.txt"
+{setup}
 cd "$repo"
 echo "[SYSTEM] Injecting GApps into Android Image (this will take a while)..."
 if ! PYTHONUNBUFFERED=1 "$repo/venv/bin/python3" main.py install gapps; then
@@ -1465,6 +1488,7 @@ fi
 echo "[SUCCESS] GApps installation complete! Please Start Waydroid."
 "#,
         checkout = pinned_git_checkout("\"$repo\"", WAYDROID_SCRIPT_URL, WAYDROID_SCRIPT_REV),
+        setup = waydroid_script_python_setup(),
     )
 }
 
@@ -1481,9 +1505,7 @@ if ! command -v unsquashfs > /dev/null || ! command -v lzip > /dev/null; then
 fi
 repo="$ARCHDROID_WORK/waydroid_script"
 {checkout}
-echo "[SYSTEM] Setting up Python environment..."
-python3 -m venv "$repo/venv"
-"$repo/venv/bin/pip" install --no-cache-dir --disable-pip-version-check --no-input -q -r "$repo/requirements.txt"
+{setup}
 cd "$repo"
 echo "[SYSTEM] Installing ARM Translation / libhoudini (this may take several minutes)..."
 if ! PYTHONUNBUFFERED=1 "$repo/venv/bin/python3" main.py install libhoudini; then
@@ -1493,6 +1515,7 @@ fi
 echo "[SUCCESS] ARM Translation installation complete!"
 "#,
         checkout = pinned_git_checkout("\"$repo\"", WAYDROID_SCRIPT_URL, WAYDROID_SCRIPT_REV),
+        setup = waydroid_script_python_setup(),
     )
 }
 
@@ -2452,24 +2475,148 @@ mod tests {
     #[test]
     fn third_party_installers_are_pinned_and_use_private_workdirs() {
         let gapps = gapps_install_script();
-        assert!(gapps.contains(WAYDROID_SCRIPT_REV));
-        assert!(gapps.contains("$ARCHDROID_WORK"));
-        assert!(!gapps.contains("cd /tmp"));
-        assert!(!gapps.contains("git pull"));
-        assert!(!gapps.contains("archdroid_marker"));
-
         let houdini = houdini_install_script();
-        assert!(houdini.contains(WAYDROID_SCRIPT_REV));
-        assert!(houdini.contains("$ARCHDROID_WORK"));
-        assert!(!houdini.contains("cd /tmp"));
-        assert!(!houdini.contains("git pull"));
-        assert!(!houdini.contains("archdroid_marker"));
+        for script in [&gapps, &houdini] {
+            assert!(script.contains(WAYDROID_SCRIPT_REV));
+            assert!(script.contains("$ARCHDROID_WORK"));
+            assert!(!script.contains("cd /tmp"));
+            assert!(!script.contains("git pull"));
+            assert!(!script.contains("archdroid_marker"));
+            assert!(script.contains("--require-hashes"));
+            assert!(script.contains("--only-binary=:all:"));
+            assert!(script.contains(r#"-r "$requirements_lock""#));
+            assert!(!script.contains(r#"-r "$repo/requirements.txt""#));
+        }
 
         let phantom = phantom_install_script();
         assert!(phantom.contains(PHANTOM_REV));
         assert!(phantom.contains("INSTALL_SYSTEM_WRAPPER=0"));
         assert!(phantom.contains("mktemp -d"));
         assert!(!phantom.contains("git pull"));
+    }
+
+    #[test]
+    fn waydroid_script_lock_pins_every_requirement_with_hashes() {
+        assert!(WAYDROID_SCRIPT_LOCK.contains(WAYDROID_SCRIPT_REV));
+        assert!(WAYDROID_SCRIPT_LOCK.contains("--only-binary :all:"));
+
+        let mut packages = 0;
+        let mut current: Option<&str> = None;
+        let mut current_has_hash = false;
+        for line in WAYDROID_SCRIPT_LOCK.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
+            if trimmed.starts_with("--hash=sha256:") {
+                let hash = trimmed
+                    .trim_end_matches('\\')
+                    .trim()
+                    .strip_prefix("--hash=sha256:")
+                    .expect("checked prefix");
+                assert_eq!(hash.len(), 64, "not a SHA-256 digest: {hash}");
+                assert!(
+                    hash.chars().all(|c| c.is_ascii_hexdigit()),
+                    "not a hex digest: {hash}"
+                );
+                current_has_hash = true;
+                continue;
+            }
+            if line.starts_with(char::is_whitespace) || trimmed.starts_with('-') {
+                continue;
+            }
+            if let Some(name) = current {
+                assert!(current_has_hash, "{name} has no --hash=sha256 entry");
+            }
+            current = Some(trimmed);
+            current_has_hash = false;
+            packages += 1;
+        }
+        if let Some(name) = current {
+            assert!(current_has_hash, "{name} has no --hash=sha256 entry");
+        }
+        assert!(
+            packages >= 10,
+            "unexpectedly small lock: {packages} packages"
+        );
+
+        for line in WAYDROID_SCRIPT_LOCK
+            .lines()
+            .filter(|line| !line.trim_start().starts_with('#'))
+        {
+            for forbidden in [
+                "--index-url",
+                "--extra-index-url",
+                "--find-links",
+                "--trusted-host",
+                "-e ",
+                "http://",
+                "https://",
+            ] {
+                assert!(
+                    !line.contains(forbidden),
+                    "lock contains forbidden source {forbidden}: {line}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn waydroid_script_setup_writes_the_embedded_lock_and_requires_hashes() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = std::env::temp_dir().join(format!("archdroid-lock-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let repo = dir.join("waydroid_script");
+        let bin = dir.join("bin");
+        std::fs::create_dir_all(repo.join("venv/bin")).unwrap();
+        std::fs::create_dir_all(&bin).unwrap();
+
+        // Stub out the venv creation so this test never touches PyPI; the
+        // pre-created pip only records the argv the installer would use.
+        let python = bin.join("python3");
+        std::fs::write(&python, "#!/bin/sh\nexit 0\n").unwrap();
+        let pip = repo.join("venv/bin/pip");
+        std::fs::write(
+            &pip,
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$ARCHDROID_TEST_PIP_ARGS\"\n",
+        )
+        .unwrap();
+        for path in [&python, &pip] {
+            let mut perms = std::fs::metadata(path).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(path, perms).unwrap();
+        }
+
+        let script = format!(
+            "set -eu\nrepo={}\n{}",
+            sh_quote(&repo.to_string_lossy()),
+            waydroid_script_python_setup()
+        );
+        let args_file = dir.join("pip-args");
+        let output = Command::new("bash")
+            .args(["-c", &script])
+            .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+            .env("ARCHDROID_TEST_PIP_ARGS", &args_file)
+            .output()
+            .expect("failed to run bash");
+        assert!(
+            output.status.success(),
+            "setup failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let written = std::fs::read_to_string(repo.join("archdroid-requirements.lock")).unwrap();
+        assert_eq!(written, format!("{WAYDROID_SCRIPT_LOCK}\n"));
+
+        let args = std::fs::read_to_string(&args_file).unwrap();
+        assert!(args.contains("--require-hashes"));
+        assert!(args.contains("--only-binary=:all:"));
+        assert!(args.contains("-r"));
+        assert!(args.contains("archdroid-requirements.lock"));
+        assert!(!args.contains("requirements.txt"));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -27,12 +27,34 @@ their source and license remain with the upstream projects.
 Updating either revision is a reviewed change: a commit changes the complete
 source tree that will run with the corresponding privilege.
 
+## Python dependencies
+
+`waydroid_script` runs from a private venv whose dependency set is embedded in
+the ArchDroid binary as
+`src-tauri/resources/waydroid_script-requirements.lock`. The checkout's own
+`requirements.txt` is not read. Every direct and transitive package is pinned to
+a version and SHA-256, and the installer runs
+`pip install --require-hashes --only-binary=:all:` so PyPI cannot substitute a
+different artifact for a pinned version. The direct requirements are tracked in
+`src-tauri/resources/waydroid_script-requirements.in` and the lock is resolved
+for Python 3.10+ from that directory with:
+
+```sh
+uv pip compile waydroid_script-requirements.in --universal \
+    --python-version 3.10 --generate-hashes --only-binary :all: \
+    --emit-build-options -o waydroid_script-requirements.lock
+```
+
+Updating the `waydroid_script` revision requires regenerating and reviewing the
+lock in the same change. A dependency update is a change to code that runs as
+root, so it follows the same review as a revision bump.
+
 ## Residual risk
 
 `waydroid_script` still runs as root because it mounts and modifies the Waydroid
-image. Its Python requirements are installed from PyPI and are not hash-pinned,
-so pinning the repository does not sandbox that code. Treat upstream updates and
-the Python dependency chain as part of the root attack surface.
+image. Its Python dependency set is hash-pinned, but the pinned upstream source
+itself is not sandboxed. Treat upstream updates as part of the root attack
+surface.
 
 Phantom builds and runs with the desktop user's toolchain and configuration.
 That is intentionally user-level: a compromised user toolchain can affect that

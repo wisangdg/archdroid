@@ -1,0 +1,6 @@
+# Direct requirements from waydroid_script@48dbfaf34a6ddbe78688c530f9ba1c26522aafb2
+# (https://github.com/casualsnek/waydroid_script/blob/48dbfaf34a6ddbe78688c530f9ba1c26522aafb2/requirements.txt).
+# Keep this in sync when the pinned revision changes, then regenerate the lock.
+tqdm
+requests
+InquirerPy

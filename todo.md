@@ -53,6 +53,9 @@
   `src-tauri/target/release/bundle/deb/ArchDroid_0.1.0_amd64.deb`
   (SHA-256 `21a75250bd9e47da73ee993e54b1aea2ed64c25244d339876c01a9c9c2403480`).
 - [x] `npm audit --omit=dev`: **0 vulnerability** pada dependency runtime.
+- [x] P0-6.1: dependency Python `waydroid_script` di-hash-pin di
+  `src-tauri/resources/waydroid_script-requirements.lock`, di-embed ke binary,
+  dan dipasang dengan `pip install --require-hashes --only-binary=:all:`.
 
 ### Belum selesai / belum diverifikasi
 
@@ -64,7 +67,6 @@
 - [ ] Timeout dan Cancel per task sudah diimplementasikan, tetapi eksekusi
   live-nya (polkit prompt, installer, init, wipe) belum diuji di mesin ini;
   verifikasinya masuk P0-8.
-- [ ] Dependency Python `waydroid_script` belum di-hash-pin.
 - [ ] Dukungan distro masih ambigu: script memakai `pacman`, tetapi artefak
   yang dibangun adalah `.deb`.
 - [ ] CI belum pernah berjalan di remote/PR.
@@ -223,7 +225,7 @@ isolasi UI, lalu validasi rilis.
 
 ### P0-6 — Supply chain installer yang berjalan sebagai root
 
-- [ ] **P0-6.1 — Hash-pin dependency Python `waydroid_script`.**
+- [x] **P0-6.1 — Hash-pin dependency Python `waydroid_script`.**
   - **Bukti:** `gapps_install_script()` dan `houdini_install_script()` membuat
     venv lalu menjalankan
     `pip install -r requirements.txt` sebagai root tanpa hash. Commit repo
@@ -235,6 +237,16 @@ isolasi UI, lalu validasi rilis.
     ini dari build produksi dan arahkan pengguna ke upstream.
   - **DoD:** instalasi GApps/Houdini dapat direproduksi; tidak ada dependency
     yang berubah tanpa review; `docs/THIRD-PARTY.md` diperbarui.
+  - **Status:** selesai. Lock hasil `uv pip compile --universal
+    --python-version 3.10 --generate-hashes --only-binary :all:` disimpan di
+    `src-tauri/resources/waydroid_script-requirements.lock` dan di-embed ke
+    binary dengan `include_str!`. Kedua installer menulis lock itu ke checkout
+    privat lalu menjalankan `pip install --require-hashes
+    --only-binary=:all: -r <lock>`; `requirements.txt` upstream tidak dibaca.
+    Test memverifikasi setiap paket punya hash SHA-256, tidak ada index/URL
+    alternatif, dan argumen pip yang dijalankan. Lock diuji terpasang pada
+    Python 3.10 dan 3.15; lock dengan hash yang diubah ditolak pip. Bumping
+    `WAYDROID_SCRIPT_REV` wajib meregenerasi lock dalam review yang sama.
 
 - [ ] **P0-6.2 — Audit ulang installer upstream dan izinnya.**
   - **Kerjakan:** tinjau `install.sh`/`main.py` pada commit yang di-pin,
@@ -526,7 +538,7 @@ Tidak menjadi blocker rilis; kerjakan setelah P0/P1 stabil.
 | Risiko | Status | Mitigasi |
 |---|---|---|
 | Waydroid hanya satu container | Diterima | Dokumentasikan; jangan janjikan multi-instance. |
-| `waydroid_script` berjalan sebagai root | Terbuka | P0-6: hash-pin dependency, audit, atau keluarkan dari build produksi. |
+| `waydroid_script` berjalan sebagai root | Terbuka | P0-6.1: dependency Python sudah hash-pinned; P0-6.2/P0-6.3 (audit + consent) tetap terbuka. |
 | Distro target belum jelas | Terbuka | P0-7: pilih Arch-only atau multi-distro secara eksplisit. |
 | Belum ada uji live Waydroid/polkit | Terbuka | P0-8: VM disposable + bukti uji. |
 | CSP masih `null` dan font remote | Terbuka | P0-5. |

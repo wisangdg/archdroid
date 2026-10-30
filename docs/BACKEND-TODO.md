@@ -58,7 +58,11 @@ Sumber fitur: hasil RE LDPlayer 9 (`~/Downloads/ldplayer-re/ANALYSIS-LDPlayer-CL
 
 - [x] **P0 M — Batas privilege dan supply-chain installer**
   Home user untuk jalur root dibaca dari `/proc/self/status` + `/etc/passwd`/`getent`, bukan `HOME`/`PATH`/XDG/cache dari proses GUI. `pkexec`, `sudo`, `bash`, dan `getent` di-resolve dari direktori sistem absolut; root memakai `PATH` tetap, private `HOME`/`TMPDIR` di `$ARCHDROID_WORK`, serta konfigurasi Git/Python/pip user dinull-kan. Installer pihak ketiga di-pin ke commit immutable, di-fetch ke direktori `mktemp -d`, dan diverifikasi dengan `git rev-parse HEAD`; tidak ada lagi `/tmp/waydroid_script`, `/tmp/phantom`, atau `git pull` reuse. Phantom berjalan sebagai user dengan `INSTALL_SYSTEM_WRAPPER=0`, dan marker install ditulis/dihapus oleh proses app setelah root sukses — bukan oleh root ke cache user.
-  *DoD:* test environment tersanitasi, resolver helper absolut, repo ter-pin, workdir privat, marker app-thread, dan semua script installer valid bash. → **selesai**; lihat `docs/THIRD-PARTY.md`. Sisa risiko: `waydroid_script` tetap root dan dependency PyPI-nya belum hash-pinned.
+  *DoD:* test environment tersanitasi, resolver helper absolut, repo ter-pin, workdir privat, marker app-thread, dan semua script installer valid bash. → **selesai**; lihat `docs/THIRD-PARTY.md`. Sisa risiko: `waydroid_script` tetap berjalan sebagai root; dependency PyPI-nya sudah hash-pinned (P0-6.1).
+
+- [x] **P0 S — Hash-pin dependency Python installer**
+  `gapps_install_script()` dan `houdini_install_script()` tidak lagi membaca `requirements.txt` dari checkout upstream. Lock hasil `uv pip compile --universal --python-version 3.10 --generate-hashes --only-binary :all:` disimpan di `src-tauri/resources/waydroid_script-requirements.lock` dan di-embed ke binary dengan `include_str!`, sehingga checkout tidak bisa menggantinya. Installer menulis lock itu ke workdir privat lalu menjalankan `pip install --require-hashes --only-binary=:all: -r <lock>`.
+  *DoD:* setiap paket direct/transitif punya versi + hash SHA-256; tidak ada index/URL alternatif; test menjalankan setup dengan pip stub dan memeriksa argumen; lock terpasang pada Python 3.10 dan 3.15. → **selesai**; lihat `docs/THIRD-PARTY.md`.
 
 - [x] **P1 M — Aktifkan logging terstruktur**
   `tauri-plugin-log` sudah jadi dependency tapi belum di-`init()`. Catat setiap command + durasi.
