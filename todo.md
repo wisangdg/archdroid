@@ -990,6 +990,9 @@ Tidak menjadi blocker rilis; kerjakan setelah P0/P1 stabil.
   `container freeze/unfreeze`.
 - [ ] Dukungan multi-distro penuh jika rilis awal Arch-only.
 - [ ] Auto-update, crash report opt-in, dan diagnostic bundle.
+  Diagnostic bundle selesai (Settings → Diagnostic Bundle; diuji live di VM).
+  Auto-update sengaja tidak dibuat (lihat `docs/RELEASE-AND-UPDATES.md`);
+  crash report opt-in belum.
 - [ ] Paket distribusi tambahan (AUR/Flathub) dan tanda tangan repository.
 - [ ] i18n (UI saat ini Inggris), tema, onboarding, dan dokumentasi screenshot.
 - [ ] Optimasi daftar app besar, cache ikon, dan virtualisasi log.

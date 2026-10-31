@@ -9,6 +9,11 @@ Format ini mengacu pada [Keep a Changelog](https://keepachangelog.com/id/1.0.0/)
 
 ### Ditambahkan
 - `archdroid --version` (atau `-V`) mencetak versi tanpa membuka jendela, sesuai panduan upgrade di `docs/RELEASE-AND-UPDATES.md`.
+- Diagnostic bundle (Settings → Diagnostic Bundle): satu file teks untuk laporan bug berisi versi OS/kernel/Waydroid, diagnostik host, status add-on, dan log terakhir. Dikumpulkan tanpa root, disamarkan, disimpan dengan mode `0600` di `~/Downloads`, dan tidak pernah diunggah.
+
+### Diperbaiki
+- Baris log yang panjang di Settings (Application Log, Diagnostic Bundle) kini terbungkus dan tidak lagi melebarkan kartu.
+- `PRIVACY.md` menyebut lokasi preferensi dan log aplikasi yang sebenarnya.
 
 ### Diperbaiki
 - Setelah Cancel, stepper tetap menandai tahap yang sudah selesai dan berhenti berputar, bukan kembali ke tahap 1.

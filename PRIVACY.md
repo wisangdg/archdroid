@@ -21,9 +21,10 @@ Semua data konfigurasi, preferensi, dan runtime disimpan secara eksklusif di pen
 
 | Jenis Data | Lokasi Penyimpanan | Tujuan |
 |---|---|---|
-| **Preferensi Aplikasi** | `~/.config/archdroid/` | Menyimpan profil tampilan, preset resolusi, DPI, dan konfigurasi keymapper Phantom. |
+| **Preferensi Aplikasi** | `~/.config/io.github.archdroid/` | Menyimpan profil tampilan, preset resolusi, DPI, dan konfigurasi keymapper Phantom. |
 | **Marker & State Cache** | `~/.cache/archdroid/` | Menyimpan marker status task unprivileged dan cache file sementara. |
-| **File Log Diagnostik** | `~/.cache/archdroid/logs/` (atau stdout terminal) | Menyimpan log eksekusi proses lokal. Log ini hanya dibaca oleh pengguna dan tidak pernah diunggah secara otomatis. |
+| **File Log Aplikasi** | `~/.local/share/io.github.wisangdg.archdroid/logs/` (lokasi persisnya tampil di Settings → Application Log) | Menyimpan log eksekusi proses lokal. Log ini hanya dibaca oleh pengguna dan tidak pernah diunggah secara otomatis. |
+| **Diagnostic Bundle** | `~/Downloads/archdroid-diagnostics-*.txt` (atau `~`), mode `0600` | Dibuat **hanya** saat pengguna menekan Settings → Diagnostic Bundle → Create Bundle. Berisi versi OS/kernel/Waydroid, hasil diagnostik host, status add-on, dan potongan log terakhir; path home dan nilai token/password disamarkan. Dikumpulkan tanpa root dan tidak pernah diunggah; pengguna yang memutuskan untuk membagikannya. |
 | **Data Sistem Waydroid** | `/var/lib/waydroid/` | File image Android sistem dan vendor milik container Waydroid (dikelola oleh root). |
 | **Data Pengguna Android** | `~/.local/share/waydroid/` | Penyimpanan internal container Android, aplikasi APK yang terpasang, dan data aplikasi Android milik pengguna. |
 
