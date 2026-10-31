@@ -4,8 +4,8 @@ version = "0.1.0"
 description = "Android emulator manager (Waydroid) for Linux"
 authors = ["Wisang Drillian Geni <gwisang45@gmail.com>"]
 license = "MIT"
-repository = "https://github.com/archdroid/archdroid"
-homepage = "https://github.com/archdroid/archdroid"
+repository = "https://github.com/wisangdg/archdroid"
+homepage = "https://github.com/wisangdg/archdroid"
 edition = "2021"
 rust-version = "1.77.2"
 

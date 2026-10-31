@@ -2,7 +2,7 @@
 
 **Berkas ini untuk kerja di `src-tauri/src/`.** Prioritas: `P0` (fondasi/blocker) → `P1` (nilai tinggi) → `P2` (pelengkap). Effort: `S` ≤ sehari · `M` beberapa hari · `L` ~1 minggu · `XL` butuh komponen Android baru.
 
-Sumber fitur: hasil RE LDPlayer 9 (`~/Downloads/ldplayer-re/ANALYSIS-LDPlayer-CLI-config-keymapping.md`) dan `~Downloads/ldplayer-re/BLUEPRINT-DroidDeck.md`. Nama fungsi sengaja dibuat mirip `ldconsole` agar familiar.
+Sumber fitur: hasil analisis emulator desktop Android dan blueprint DroidDeck. Nama fungsi dibuat mudah dipahami.
 
 ---
 
@@ -28,7 +28,7 @@ Sumber fitur: hasil RE LDPlayer 9 (`~/Downloads/ldplayer-re/ANALYSIS-LDPlayer-CL
 2. **Semua yang butuh root** lewat `stream_privileged_script` (jangan `sudo` di dalam script).
 3. **Tidak ada string yang di-`format!` ke shell tanpa `sh_quote`** — input pengguna (nama paket, path, prop) wajib di-quote.
 4. Setiap fungsi murni (argv builder, parser, konversi koordinat) **wajib punya unit test** — tidak butuh root.
-5. Jangan tiru telemetri LDPlayer (`UA-156094621-*`, `middledata.ldmnq.com`).
+5. Jangan tiru telemetri emulator komersial (`UA-156094621-*`, domain analytics eksternal).
 
 ---
 
@@ -89,7 +89,7 @@ Sumber fitur: hasil RE LDPlayer 9 (`~/Downloads/ldplayer-re/ANALYSIS-LDPlayer-CL
 
 ## 2. Paritas CLI inti (P0–P1, murah, langsung terasa)
 
-| LDPlayer | Fungsi ArchDroid | Padanan | Prio |
+| Format Emulator Standar | Fungsi ArchDroid | Padanan | Prio |
 |---|---|---|---|
 | `list3` | `list_instances()` → `Vec<InstanceInfo>` | agregasi status+profil | **P0 S** |
 | `isrunning` | `is_running() -> bool` | parse `waydroid status` | **P0 S** |
@@ -104,7 +104,7 @@ Sumber fitur: hasil RE LDPlayer 9 (`~/Downloads/ldplayer-re/ANALYSIS-LDPlayer-CL
 | `launch --hide/--mini` | `show_full_ui()` / headless | mode sesi (bukan window player) | **P1 S** |
 | `--directlink` | `open_uri(uri)` | `am start -a VIEW -d <uri>` | **P2 S** |
 
-- [x] **P0 S — `InstanceInfo` (mirror skema `list3` LDPlayer)**
+- [x] **P0 S — `InstanceInfo` (skema instance info emulator)**
   ```rust
   struct InstanceInfo { playerid: u32, name: String, running: bool,
       android_started: bool, cpu: u32, memory: u32, root: bool,
@@ -141,9 +141,9 @@ Catatan:
 
 ---
 
-## 3. Device profile & config (P0–P1, inti "rasa LDPlayer")
+## 3. Device profile & config (P0–P1)
 
-Kelompok key LDPlayer sudah terekstrak (lihat blueprint §3). Ini yang dipetakan ke Waydroid.
+Kelompok key konfigurasi sudah terekstrak (lihat blueprint §3). Ini yang dipetakan ke Waydroid.
 
 - [x] **P0 M — `DeviceProfile` + persistensi**
   Struct + simpan/muat JSON di config dir app. Field: `width,height,dpi,cpu,memory,root,mac,imei,imsi,androidid,manufacturer,model,phone,locale`.
@@ -242,16 +242,16 @@ Catatan penting: CachyDroid tidak memiliki surface render Waydroid, jadi injeksi
   *DoD:* test bahwa argv tidak bisa di-inject lewat `s`/angka.
 
 - [ ] **P1 M — Model mapping + simpan/muat**
-  `MappingLayout { keys: Vec<MappingKey> }`, `MappingKey { id, kind: Point|Disc|Drag|Macros, x, y, radius, key, raw }` — meniru 7 kelas `ClassJoystick*` dan 17 template `xml_mapping_*` LDPlayer. Simpan JSON, dukung import/export.
+  `MappingLayout { keys: Vec<MappingKey> }`, `MappingKey { id, kind: Point|Disc|Drag|Macros, x, y, radius, key, raw }` — meniru kelas joystick dan template keymap standar. Simpan JSON, dukung import/export.
   *DoD:* skema bertest; file contoh valid ditulis ke `docs/`.
 
 - [ ] **P1 L — Penangkapan input host + konversi koordinat**
   Overlay/hotkey global → hitung koordinat device dari posisi kursor, lalu injeksi (`input` atau `ydotool`/uinput).
   *DoD:* fungsi konversi koordinat punya test tabel (termasuk letterbox/aspect mismatch).
 
-- [ ] **P2 S — 25 hotkey default** (daftar `hotkeySettings.*` LDPlayer): screenshot, rotate, volume +/−, back/home/menu, fullscreen, dll → bind ke aksi.
+- [ ] **P2 S — 25 hotkey default** (daftar hotkey emulator): screenshot, rotate, volume +/−, back/home/menu, fullscreen, dll → bind ke aksi.
 - [ ] **P2 XL — Helper APK guest untuk multitouch**
-  `waydroid shell input` **tidak mendukung multitouch**; untuk paritas LDPlayer penuh butuh APK helper (AccessibilityService/`sendevent`) — persis pola `ldmnq.apk` LDPlayer. Spike + dokumen desain dulu.
+  `waydroid shell input` **tidak mendukung multitouch**; untuk paritas multitouch penuh butuh APK helper (AccessibilityService/`sendevent`). Spike + dokumen desain dulu.
 
 ---
 
@@ -278,7 +278,7 @@ Catatan penting: CachyDroid tidak memiliki surface render Waydroid, jadi injeksi
 
 - **Multi-instance VM** (`add/copy/remove/rename/list2`) — Waydroid satu container. Dokumentasikan sebagai tidak didukung.
 - **IPC window-message Windows**, registry Windows — spesifik platform.
-- **Telemetri/store LDPlayer** — tidak ditiru.
+- **Telemetri/store eksternal** — tidak ditiru.
 
 ---
 

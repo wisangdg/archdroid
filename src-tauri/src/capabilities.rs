@@ -5,8 +5,8 @@
 //!
 //! - Waydroid's vendor image declares only `android.hardware.faketouch` and
 //!   `android.hardware.touchscreen` under `/vendor/etc/permissions`.
-//! - LDPlayer 9 ships `android.hardware.touchscreen.multitouch.jazzhand.xml` in
-//!   that same directory (read out of its `system.vmdk`), declaring the three
+//! - Standard Android emulator images ship `android.hardware.touchscreen.multitouch.jazzhand.xml` in
+//!   that same directory (read out of its system image), declaring the three
 //!   multitouch features.
 //! - Plants vs Zombies 2 (`com.ea.game.pvz2_row` 13.5.1) requires
 //!   `android.hardware.touchscreen.multitouch` with `required="true"`, while
@@ -26,7 +26,7 @@ use std::path::PathBuf;
 /// over `/vendor` (helpers/images.py, `mount_rootfs`).
 pub const PERMISSIONS_DIR: &str = "/var/lib/waydroid/overlay/vendor/etc/permissions";
 
-/// Kept identical to LDPlayer's file name so the two are easy to compare.
+/// Kept identical to standard Android emulator file name so comparisons are straightforward.
 pub const PERMISSIONS_FILE: &str = "android.hardware.touchscreen.multitouch.xml";
 
 /// The declaration itself. `touchscreen` and `faketouch` are already declared

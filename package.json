@@ -2,13 +2,13 @@
   "name": "archdroid",
   "private": true,
   "version": "0.1.0",
-  "description": "ArchDroid - an LDPlayer-style Android emulator manager for Linux, powered by Waydroid",
+  "description": "ArchDroid - Modern Android emulator manager for Linux, powered by Waydroid",
   "license": "MIT",
   "author": "Wisang Drillian Geni <gwisang45@gmail.com>",
-  "homepage": "https://github.com/archdroid/archdroid",
+  "homepage": "https://github.com/wisangdg/archdroid",
   "repository": {
     "type": "git",
-    "url": "https://github.com/archdroid/archdroid.git"
+    "url": "https://github.com/wisangdg/archdroid.git"
   },
   "type": "module",
   "scripts": {

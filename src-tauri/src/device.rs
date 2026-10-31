@@ -1,4 +1,4 @@
-//! Device profile: LDPlayer-style per-device settings mapped onto the knobs
+//! Device profile: Per-device settings mapped onto the knobs
 //! Waydroid actually has (verified against waydroid 1.6.3).
 //! - resolution/DPI -> `wm size` / `wm density` through adb (runtime, survives
 //!   reboots because Android stores it as a display override)

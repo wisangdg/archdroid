@@ -319,3 +319,6 @@ Hasil paket rilis (`.deb`, `.AppImage`) akan dibuat di folder `src-tauri/target/
 - **waydroid_script**: [casualsnek/waydroid_script](https://github.com/casualsnek/waydroid_script) (GPL-3.0) — Pinned commit `48dbfaf`. Script ini diunduh saat instalasi add-on dan tidak di-vendor di dalam binary ArchDroid.
 - **Phantom Keymapper**: [oliviermugishak/phantom](https://github.com/oliviermugishak/phantom) (MIT) — Pinned commit `1a6b7ed`.
 - Rincian pihak ketiga dan audit lisensi tersedia di [`docs/THIRD-PARTY.md`](docs/THIRD-PARTY.md).
+
+> [!NOTE]
+> **Pernyataan Merek Dagang (Trademark Disclaimer)**: LDPlayer dan NoxPlayer adalah merek dagang atau merek dagang terdaftar milik pemiliknya masing-masing. Penggunaan nama tersebut di dalam dokumentasi semata-mata bertujuan sebagai referensi perbandingan antarmuka pengguna. ArchDroid adalah proyek independen dan tidak berafiliasi, disponsori, atau didukung oleh pemegang merek dagang tersebut.

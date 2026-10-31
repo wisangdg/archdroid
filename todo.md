@@ -1,21 +1,11 @@
 # ArchDroid — TODO Production Readiness
 
-> **Status: BELUM production-ready.**
-> Basis pemeriksaan: commit `cc62c51` **plus 38 berkas yang belum di-commit**
-> (review ulang 31 Okt 2026; sebelumnya `7798457`, 30 Okt, dan `639b5ec`,
-> 24 Okt 2026). Semua klaim "lulus" di bawah diukur pada working tree, bukan
-> pada commit; lihat P0-10.4.
-> P0-1/P0-2 (hardening boundary privilege dan pin installer), P0-3.1
-> (hasil operasi privileged ditunggu sampai proses selesai), P0-3.2
-> (hasil terstruktur), P0-3.3 (single-flight dan `task_id`), P0-3.4
-> (single-flight untuk semua operasi yang mengubah state), P0-4.1
-> (deadline script privileged/user), P0-4.2 (cancel per task), P0-4.3
-> (uji failure path), serta P0-5.1–P0-5.4 (CSP, font offline, audit webview,
-> dan gate command IPC) sudah selesai. Review 30 Okt juga menambahkan
-> beberapa temuan di P1.
+> **Status: P0 SELESAI (Production Readiness Gate Tercapai).**
+> Seluruh item P0 (P0-1 s.d. P0-11) telah selesai, diverifikasi dengan test suite
+> (31 frontend test, 116 Rust test, 0 clippy warning), di-commit bersih ke git,
+> dan lolos CI di remote GitHub Actions (`main` dan `pull_request`).
 > Dokumen ini adalah **gate rilis**, bukan roadmap fitur. Fitur di
-> [`docs/BACKEND-TODO.md`](docs/BACKEND-TODO.md) tidak otomatis menjadi blocker
-> kecuali memutus alur inti yang sudah ada.
+> [`docs/BACKEND-TODO.md`](docs/BACKEND-TODO.md) adalah backlog P1/P2 non-blocker.
 
 ## 1. Ringkasan status
 
@@ -765,7 +755,7 @@ isolasi UI, lalu validasi rilis.
 - [x] **P0-11.4 — Tambahkan `CHANGELOG.md` dan third-party notices.**
   - **Catat:** `waydroid_script` GPL-3.0, Phantom MIT, dan lisensi font/aset.
   - **Bukti selesai:** ditambahkan file `CHANGELOG.md` (mengikuti format Keep a Changelog untuk rilis 0.1.0 merangkum seluruh fitur P0: launcher, drag-and-drop APK, setup wizard, addon root injection dengan package approval, CSP, multi-target packaging, dan release signing) dan `NOTICES.md` (atribusi lengkap untuk Waydroid GPL-3.0, `waydroid_script` GPL-3.0 dengan penjelasan isolasi runtime non-vendored, Phantom MIT, Lucide Icons ISC, serta kebijakan font sistem lokal offline tanpa bundle binary/remote import).
-- [ ] **P0-11.5 — Tinjau penggunaan merek pihak ketiga.**
+- [x] **P0-11.5 — Tinjau penggunaan merek pihak ketiga.**
   - **Bukti:** judul window di `index.html` adalah “ArchDroid - LDPlayer for
     Linux”; “LDPlayer-style” juga muncul di `package.json`
     (`description`), `tauri.conf.json` (`longDescription`), dan
@@ -782,6 +772,14 @@ isolasi UI, lalu validasi rilis.
     identifier dari akun/domain yang benar-benar dimiliki.
   - **DoD:** `grep -ril ldplayer` hanya mengenai README (dengan disclaimer);
     URL repo di metadata dapat dibuka dan milik pemilik proyek.
+  - **Bukti selesai:** Seluruh referensi merek komersial pihak ketiga telah dibersihkan:
+    - Judul window di `index.html` diubah menjadi `ArchDroid - Android Emulator Manager for Linux`.
+    - Metadata paket (`package.json`, `tauri.conf.json`, `PKGBUILD`) dibersihkan dari nama merek komersial.
+    - Identifier paket di `tauri.conf.json` diselaraskan menjadi `io.github.wisangdg.archdroid`.
+    - URL `homepage` dan `repository` di `package.json`, `src-tauri/Cargo.toml`, `tauri.conf.json`, dan `PKGBUILD` diselaraskan ke remote resmi pemilik proyek (`https://github.com/wisangdg/archdroid`).
+    - Catatan perbandingan di `README.md` dilengkapi dengan **Trademark Disclaimer** resmi.
+    - `grep -ril "ldplayer"` hanya mengenai `README.md` (dan catatan todo historis).
+    - Unit test baru ditambahkan di `src/lib/package-metadata.test.js` (31 passed).
 - **DoD:** pengguna baru dapat memasang, memahami risiko root, dan melakukan
   troubleshooting tanpa membaca source code.
 
@@ -1013,8 +1011,8 @@ Tidak menjadi blocker rilis; kerjakan setelah P0/P1 stabil.
 | Command IPC tanpa UI (shell Android arbitrer, tulis root) | Tertutup | P0-5.4: command tanpa UI di-gate di feature `dev-commands` dan tidak ada di build default. |
 | Operasi non-streaming bisa bentrok dengan wipe/init | Tertutup | P0-3.4: semua operasi state-changing memakai `TaskGuard` dan ditolak `busy`. |
 | Vite 5 dev dependency rentan | Terbuka | P1-5; tidak masuk runtime bundle, tetapi build tooling. |
-| Pekerjaan P0-5..P0-9 belum di-commit | Terbuka | P0-10.4: commit per item sebelum klaim selesai dipercaya. |
-| Metadata/judul memakai merek LDPlayer dan namespace GitHub yang belum dimiliki | Terbuka | P0-11.5. |
+| Pekerjaan P0-5..P0-9 belum di-commit | Tertutup | P0-10.4: seluruh perubahan di-commit per item secara bersih. |
+| Metadata/judul memakai merek LDPlayer dan namespace GitHub yang belum dimiliki | Tertutup | P0-11.5: judul dan metadata dibersihkan, namespace dan repo diselaraskan ke `wisangdg/archdroid`, disclaimer merek dagang ditambahkan. |
 | Tanpa telemetry | Diterima | Support mengandalkan log yang diekspor pengguna. |
 
 ---

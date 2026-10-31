@@ -36,12 +36,37 @@ test('package.json and LICENSE file declare matching licensing and repo metadata
 
   assert.equal(pkg.license, 'MIT');
   assert.ok(pkg.author.includes('Wisang Drillian Geni'));
-  assert.ok(pkg.homepage.startsWith('https://github.com/'));
-  assert.ok(pkg.repository?.url.includes('archdroid'));
+  assert.equal(pkg.homepage, 'https://github.com/wisangdg/archdroid');
+  assert.equal(pkg.repository?.url, 'https://github.com/wisangdg/archdroid.git');
 
   const licensePath = path.join(repoRoot, 'LICENSE');
   assert.ok(fs.existsSync(licensePath));
   const licenseText = fs.readFileSync(licensePath, 'utf8');
   assert.ok(licenseText.includes('MIT License'));
   assert.ok(licenseText.includes('Wisang Drillian Geni'));
+});
+
+test('third-party brand names are audited and metadata points to legitimate repository', () => {
+  const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
+  const conf = JSON.parse(fs.readFileSync(path.join(repoRoot, 'src-tauri/tauri.conf.json'), 'utf8'));
+  const indexHtml = fs.readFileSync(path.join(repoRoot, 'index.html'), 'utf8');
+  const pkgbuild = fs.readFileSync(path.join(repoRoot, 'packaging/arch/PKGBUILD'), 'utf8');
+  const readme = fs.readFileSync(path.join(repoRoot, 'README.md'), 'utf8');
+
+  // Legit owner identifier and repo URLs
+  assert.equal(conf.identifier, 'io.github.wisangdg.archdroid');
+  assert.equal(conf.bundle.homepage, 'https://github.com/wisangdg/archdroid');
+  assert.ok(pkgbuild.includes('url="https://github.com/wisangdg/archdroid"'));
+
+  // No commercial emulator branding in package metadata and window title
+  assert.ok(!pkg.description.toLowerCase().includes('ldplayer'));
+  assert.ok(!pkg.description.toLowerCase().includes('nox'));
+  assert.ok(!conf.bundle.longDescription.toLowerCase().includes('ldplayer'));
+  assert.ok(!conf.bundle.shortDescription.toLowerCase().includes('ldplayer'));
+  assert.ok(!indexHtml.toLowerCase().includes('ldplayer'));
+  assert.ok(!indexHtml.toLowerCase().includes('nox'));
+  assert.ok(!pkgbuild.toLowerCase().includes('ldplayer-style'));
+
+  // README contains explicit trademark disclaimer
+  assert.ok(readme.includes('Trademark Disclaimer') || readme.includes('Pernyataan Merek Dagang'));
 });

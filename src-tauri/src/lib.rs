@@ -2200,7 +2200,7 @@ async fn waydroid_status_json() -> CommandResult {
     off_main_thread(|| json_result(&status_snapshot())).await
 }
 
-/// LDPlayer `list3` shape. Waydroid is a single container, so the list always
+/// Emulator instance info shape. Waydroid is a single container, so the list always
 /// has zero or one entry.
 #[cfg(feature = "dev-commands")]
 #[derive(Serialize, Deserialize)]
@@ -2481,7 +2481,7 @@ async fn waydroid_getprop_all() -> CommandResult {
     .await
 }
 
-/// Arbitrary device shell line (LDPlayer `adb --command` parity). There is no
+/// Arbitrary device shell line (`adb --command` parity). There is no
 /// input validation on purpose: running the caller's command is the feature.
 #[cfg(feature = "dev-commands")]
 #[tauri::command]

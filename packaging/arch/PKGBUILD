@@ -1,10 +1,10 @@
-# Maintainer: ArchDroid Team <https://github.com/archdroid/archdroid>
+# Maintainer: Wisang Drillian Geni <https://github.com/wisangdg/archdroid>
 pkgname=archdroid-bin
 pkgver=0.1.0
 pkgrel=1
-pkgdesc="LDPlayer-style desktop front-end for Waydroid"
+pkgdesc="Modern desktop front-end for Waydroid"
 arch=('x86_64')
-url="https://github.com/archdroid/archdroid"
+url="https://github.com/wisangdg/archdroid"
 license=('MIT')
 depends=(
     'gtk3'
