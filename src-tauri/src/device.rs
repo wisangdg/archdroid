@@ -551,7 +551,12 @@ mod tests {
     #[test]
     fn legacy_unversioned_file_migrates_and_save_is_private_and_atomic() {
         use std::os::unix::fs::PermissionsExt;
-        let path = temp_path("legacy");
+        // A private directory: the leftover check below must not see temp files
+        // from other tests (or other programs) sharing the system temp dir.
+        let dir = temp_path("legacy-dir").with_extension("");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("profile.json");
         fs::write(&path, r#"{"width":1080,"height":1920}"#).unwrap();
         let loaded = load_from(&path);
         assert_eq!(loaded.version, PROFILE_VERSION);
@@ -563,13 +568,13 @@ mod tests {
         assert!(fs::read_to_string(&path)
             .unwrap()
             .contains("\"version\": 1"));
-        let leftovers = fs::read_dir(path.parent().unwrap())
+        let leftovers = fs::read_dir(&dir)
             .unwrap()
             .flatten()
             .filter(|e| e.file_name().to_string_lossy().contains(".tmp"))
             .count();
         assert_eq!(leftovers, 0);
-        let _ = fs::remove_file(path);
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
