@@ -733,16 +733,18 @@ isolasi UI, lalu validasi rilis.
 
 ### P0-11 — Dokumentasi rilis, lisensi, dan privasi
 
-- [ ] **P0-11.1 — Lengkapi `README.md`.**
-  - Isi minimum: target distro/desktop, dependency, instalasi, first run,
+- [x] **P0-11.1 — Lengkapi `README.md`.**
+  - **Isi minimum:** target distro/desktop, dependency, instalasi, first run,
     setup root, uninstall, troubleshooting, dan known limitations.
-  - **Status 31 Okt:** README sudah ada dengan target distro, prasyarat,
-    fitur, keamanan, build, dan lisensi. **Belum ada:** cara instal dari
-    artefak rilis, first run/setup wizard, penjelasan prompt root, uninstall
-    bersih (termasuk `/var/lib/waydroid`, marker, config), troubleshooting
-    (polkit agent, `/dev/kvm`, binder, X11), dan known limitations (satu
-    container, tanpa multi-instance, hanya Wayland). Bagian Tier 1 harus
-    mengikuti P0-9.4.
+  - **Bukti selesai:** `README.md` telah dilengkapi mencakup seluruh aspek yang dipersyaratkan:
+    - Target distro Tier 1 (Arch Linux teruji live) vs Tier 2 (Debian/Ubuntu/Fedora/openSUSE best-effort) dan target yang eksplisit tidak didukung (Pure X11, non-systemd/non-standard pm).
+    - Panduan instalasi dari artefak rilis (`PKGBUILD` lokal / `makepkg -si`, `archdroid-bin-*.pkg.tar.zst`, `ArchDroid_*.AppImage`, dan preview `.deb`/`.rpm`).
+    - Panduan first run & Setup Wizard interaktif (deteksi status Waydroid, host health preflight, pilihan image VANILLA vs GAPPS).
+    - Model hak akses & prompt root (kapan root dibutuhkan, kapan root tidak pernah diminta, dialog konfirmasi persetujuan paket eksplisit).
+    - Panduan troubleshooting komprehensif (polkit agent di Hyprland/Sway, modul kernel binder missing, Wayland requirement, izin `/dev/kvm`, kompatibilitas GPU Nvidia vs AMD/Intel, pembersihan variabel AppImage).
+    - Panduan uninstall bersih (penghapusan binary aplikasi paket/AppImage, data user config & cache `~/.config/archdroid` dan `~/.cache/archdroid`, serta data sistem/image Waydroid `/var/lib/waydroid` dan `~/.local/share/waydroid`).
+    - Batasan yang diketahui (single instance container, Wayland dependency, ketersediaan image Google upstream untuk Houdini, status Tier 1 vs Tier 2).
+    - Semua tautan relatif, tanpa kebocoran path lokal `file:///`. Validasi lolos di `src/lib/artifact-verification.test.js`.
 - [x] **P0-11.2 — Tambahkan `LICENSE`.**
   - MIT, atas nama pemilik repo. `waydroid_script` (GPL-3.0) tidak di-vendor
     dan hanya diunduh saat instalasi, jadi tidak memengaruhi lisensi proyek;
