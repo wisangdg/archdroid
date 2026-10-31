@@ -5,6 +5,7 @@ export default function ProcessStepper({
   steps,
   activeStepIndex,
   isFailed,
+  isCancelled,
   isCompleted,
 }) {
   if (!steps || steps.length === 0) return null;
@@ -18,7 +19,7 @@ export default function ProcessStepper({
             stepStatus = "failed";
           } else if (idx < activeStepIndex || isCompleted) {
             stepStatus = "completed";
-          } else if (idx === activeStepIndex) {
+          } else if (idx === activeStepIndex && !isCancelled) {
             stepStatus = "active";
           }
 

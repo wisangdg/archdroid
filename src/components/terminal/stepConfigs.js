@@ -153,11 +153,11 @@ export function detectStepProgress(taskType, logs = [], taskResult = null) {
       taskResult?.message || errorLine || "The process terminated with errors.";
   }
 
+  // A cancelled task still reports the stage it reached, so the stepper keeps
+  // the finished stages instead of jumping back to stage 1.
   if (isCompleted) {
     activeIndex = steps.length - 1;
     currentMessage = "Task finished successfully!";
-  } else if (isCancelled) {
-    currentMessage = "Operation was cancelled by user.";
   } else if (lastStepMarker(logs, steps)) {
     // Scripts announce each phase with "[STEP] <id>"; trust that over guessing.
     const marker = lastStepMarker(logs, steps);
@@ -279,6 +279,10 @@ export function detectStepProgress(taskType, logs = [], taskResult = null) {
         }
       }
     }
+  }
+
+  if (isCancelled) {
+    currentMessage = "Operation was cancelled by user.";
   }
 
   return {

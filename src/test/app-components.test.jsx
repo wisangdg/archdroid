@@ -183,6 +183,24 @@ describe("TerminalModal and ProcessStepper", () => {
     expect(screen.getByText("Wiping Storage")).toBeTruthy();
     expect(screen.getByText("Wipe Complete")).toBeTruthy();
   });
+
+  it("stepper keeps reached stages and stops spinning after a cancel", () => {
+    const { container } = render(
+      <ProcessStepper
+        steps={TASK_STEP_CONFIGS.wipe}
+        activeStepIndex={2}
+        isFailed={false}
+        isCancelled={true}
+        isCompleted={false}
+      />
+    );
+
+    expect(container.querySelectorAll(".stepper-node-completed")).toHaveLength(
+      2
+    );
+    expect(container.querySelector(".stepper-node-active")).toBeNull();
+    expect(container.querySelector(".stepper-icon-spinner")).toBeNull();
+  });
 });
 
 describe("SetupWizard preflight and diagnostic blocking", () => {

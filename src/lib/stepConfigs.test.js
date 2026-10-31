@@ -49,6 +49,28 @@ test("detectStepProgress derives cancellation strictly from taskResult.code (F6 
   assert.equal(result.currentMessage, "Operation was cancelled by user.");
 });
 
+test("a cancelled task keeps the stage it reached (release smoke 0.1.1)", () => {
+  // Live: cancelling Houdini during "inject" made the stepper jump back to a
+  // spinning "Root Access" stage.
+  const logs = [
+    "[SYSTEM] Elevated shell started (uid=0, caller=1000)",
+    "[STEP] deps",
+    "[STEP] env",
+    "[STEP] inject",
+    " 19%|██        | 14.3M/75.2M",
+    '[ERROR] "/usr/sbin/sudo" was cancelled',
+  ];
+  const result = detectStepProgress("houdini", logs, {
+    success: false,
+    code: "cancelled",
+    message: '"/usr/sbin/sudo" was cancelled',
+  });
+  const inject = TASK_STEP_CONFIGS.houdini.findIndex((s) => s.id === "inject");
+  assert.equal(result.isCancelled, true);
+  assert.equal(result.activeStepIndex, inject);
+  assert.equal(result.currentMessage, "Operation was cancelled by user.");
+});
+
 test("detectStepProgress does not falsely fail on words like failed in third-party logs if task succeeded", () => {
   // E.g., harmless log line containing 'failed to find optional cache, falling back...'
   const logs = [

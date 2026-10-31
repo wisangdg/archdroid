@@ -228,6 +228,7 @@ export default function TerminalModal({
               steps={progress.steps}
               activeStepIndex={progress.activeStepIndex}
               isFailed={progress.isFailed}
+              isCancelled={progress.isCancelled}
               isCompleted={progress.isCompleted}
             />
 
