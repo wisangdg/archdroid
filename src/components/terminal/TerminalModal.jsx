@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import ProcessStepper from "./ProcessStepper";
 import { detectStepProgress } from "./stepConfigs";
+import { useFocusTrap } from "../../lib/useFocusTrap";
 
 export default function TerminalModal({
   isOpen,
@@ -28,6 +29,7 @@ export default function TerminalModal({
   onRetry,
   onCancel,
 }) {
+  const modalRef = useFocusTrap(isOpen, installing ? undefined : onClose);
   const [copied, setCopied] = useState(false);
   const [cancelling, setCancelling] = useState(false);
 
@@ -97,6 +99,10 @@ export default function TerminalModal({
   return (
     <div className="terminal-overlay">
       <div
+        ref={modalRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="terminal-modal-title"
         className={`glass-panel terminal-modal ${hasStepper ? "with-stepper" : ""}`}
       >
         {/* Modal Header */}
@@ -114,20 +120,22 @@ export default function TerminalModal({
               }`}
             >
               {installing ? (
-                <Loader2 size={18} className="spinner" />
+                <Loader2 size={18} className="spinner" aria-hidden="true" />
               ) : progress.isCancelled ? (
-                <Ban size={18} />
+                <Ban size={18} aria-hidden="true" />
               ) : progress.isFailed ? (
-                <AlertTriangle size={18} />
+                <AlertTriangle size={18} aria-hidden="true" />
               ) : progress.isCompleted ? (
-                <Check size={18} />
+                <Check size={18} aria-hidden="true" />
               ) : (
-                <Terminal size={18} />
+                <Terminal size={18} aria-hidden="true" />
               )}
             </div>
 
             <div>
-              <h3 className="terminal-title">{title}</h3>
+              <h3 id="terminal-modal-title" className="terminal-title">
+                {title}
+              </h3>
               <span className="terminal-status-text">
                 {installing
                   ? "Task running in background..."
@@ -205,8 +213,9 @@ export default function TerminalModal({
                 className="btn-icon-close"
                 onClick={onClose}
                 title="Close Window (Esc)"
+                aria-label="Close dialog"
               >
-                <X size={18} />
+                <X size={18} aria-hidden="true" />
               </button>
             )}
           </div>

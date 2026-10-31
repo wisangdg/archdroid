@@ -3133,3 +3133,28 @@ body {
   border-radius: var(--radius-full);
   padding: 4px 12px;
 }
+
+/* Accessibility: Keyboard focus indicators and reduced motion */
+:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+.app-card:focus-visible,
+.preset-card:focus-visible,
+.context-menu-item:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.25);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

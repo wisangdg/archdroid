@@ -10,17 +10,44 @@ export default function AppCard({
 }) {
   const [imgError, setImgError] = useState(false);
 
+  const handleKeyDown = (e) => {
+    if (disabled) return;
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      onLaunch(app.package);
+    } else if (
+      (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) &&
+      onContextMenu
+    ) {
+      e.preventDefault();
+      const rect = e.currentTarget.getBoundingClientRect();
+      onContextMenu(
+        {
+          clientX: rect.left + rect.width / 2,
+          clientY: rect.bottom,
+          preventDefault: () => {},
+        },
+        app
+      );
+    }
+  };
+
   return (
     <div
       className="app-card"
+      role="button"
+      tabIndex={disabled ? -1 : 0}
+      aria-disabled={disabled}
+      aria-label={`Launch ${app.name}`}
       onClick={disabled ? undefined : () => onLaunch(app.package)}
+      onKeyDown={handleKeyDown}
       onContextMenu={(e) => {
         if (onContextMenu) {
           e.preventDefault();
           onContextMenu(e, app);
         }
       }}
-      title={`Left-click to launch, right-click for options`}
+      title="Left-click to launch, right-click for options"
     >
       {/* Icon with glowing backdrop */}
       <div className="app-icon-container">
@@ -40,7 +67,7 @@ export default function AppCard({
           )}
         </div>
         <div className="app-launch-overlay">
-          <Play size={20} fill="currentColor" />
+          <Play size={20} fill="currentColor" aria-hidden="true" />
         </div>
       </div>
 
@@ -58,11 +85,15 @@ export default function AppCard({
       <button
         type="button"
         className="btn-uninstall-overlay"
-        onClick={(e) => onUninstall(e, app.package, app.name)}
+        onClick={(e) => {
+          e.stopPropagation();
+          onUninstall(e, app.package, app.name);
+        }}
         disabled={disabled}
         title={`Uninstall ${app.name}`}
+        aria-label={`Uninstall ${app.name}`}
       >
-        <Trash2 size={15} />
+        <Trash2 size={15} aria-hidden="true" />
       </button>
     </div>
   );

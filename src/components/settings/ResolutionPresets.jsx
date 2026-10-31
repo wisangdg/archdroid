@@ -198,23 +198,32 @@ export default function ResolutionPresets({
                 isActive ? "active-profile" : ""
               }`}
               onClick={() => handleSelectPreset(preset)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  handleSelectPreset(preset);
+                }
+              }}
               role="button"
               tabIndex={0}
+              aria-pressed={isSelected}
+              aria-label={`${preset.name} (${preset.width}x${preset.height})`}
             >
               <div className="preset-card-top">
                 <div className="preset-icon-wrapper">
-                  <Icon size={20} />
+                  <Icon size={20} aria-hidden="true" />
                 </div>
                 <div className="preset-badges">
                   {preset.tag && (
                     <span className="preset-badge-tag">
-                      <Sparkles size={11} />
+                      <Sparkles size={11} aria-hidden="true" />
                       {preset.tag}
                     </span>
                   )}
                   {isActive && (
                     <span className="preset-badge-active">
-                      <Check size={11} />
+                      <Check size={11} aria-hidden="true" />
+                      {/* Current */}
                       Current
                     </span>
                   )}

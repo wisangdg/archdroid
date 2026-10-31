@@ -11,8 +11,19 @@ export default function ContextMenu({
   disabled = false,
 }) {
   const menuRef = useRef(null);
+  const previousActiveElement = useRef(null);
 
   useEffect(() => {
+    previousActiveElement.current = document.activeElement;
+
+    // Focus the first menu item initially
+    const firstButton = menuRef.current?.querySelector(
+      "button:not([disabled])"
+    );
+    if (firstButton) {
+      firstButton.focus();
+    }
+
     const handleClickOutside = (e) => {
       if (menuRef.current && !menuRef.current.contains(e.target)) {
         onClose();
@@ -21,6 +32,33 @@ export default function ContextMenu({
 
     const handleKeyDown = (e) => {
       if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+        return;
+      }
+
+      const items = Array.from(
+        menuRef.current?.querySelectorAll("button:not([disabled])") || []
+      );
+      if (items.length === 0) return;
+
+      const currentIndex = items.indexOf(document.activeElement);
+
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        const nextIndex = (currentIndex + 1) % items.length;
+        items[nextIndex].focus();
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        const prevIndex = (currentIndex - 1 + items.length) % items.length;
+        items[prevIndex].focus();
+      } else if (e.key === "Home") {
+        e.preventDefault();
+        items[0].focus();
+      } else if (e.key === "End") {
+        e.preventDefault();
+        items[items.length - 1].focus();
+      } else if (e.key === "Tab") {
         onClose();
       }
     };
@@ -30,6 +68,12 @@ export default function ContextMenu({
     return () => {
       window.removeEventListener("mousedown", handleClickOutside);
       window.removeEventListener("keydown", handleKeyDown);
+      if (
+        previousActiveElement.current &&
+        typeof previousActiveElement.current.focus === "function"
+      ) {
+        previousActiveElement.current.focus();
+      }
     };
   }, [onClose]);
 
@@ -50,15 +94,19 @@ export default function ContextMenu({
       className="custom-context-menu"
       style={{ left: `${left}px`, top: `${top}px` }}
       onClick={(e) => e.stopPropagation()}
+      role="menu"
+      aria-label={`Options for ${app.name}`}
+      tabIndex={-1}
     >
-      <div className="context-menu-header">
+      <div className="context-menu-header" role="none">
         <span className="context-menu-app-name">{app.name}</span>
       </div>
 
-      <div className="context-menu-divider" />
+      <div className="context-menu-divider" role="separator" />
 
       <button
         type="button"
+        role="menuitem"
         className="context-menu-item"
         onClick={() => {
           onLaunch(app.package);
@@ -66,26 +114,28 @@ export default function ContextMenu({
         }}
         disabled={disabled}
       >
-        <Play size={15} fill="currentColor" />
+        <Play size={15} fill="currentColor" aria-hidden="true" />
         <span>Launch App</span>
       </button>
 
       <button
         type="button"
+        role="menuitem"
         className="context-menu-item"
         onClick={() => {
           onCopyPackage(app.package);
           onClose();
         }}
       >
-        <Copy size={15} />
+        <Copy size={15} aria-hidden="true" />
         <span>Copy Package ID</span>
       </button>
 
-      <div className="context-menu-divider" />
+      <div className="context-menu-divider" role="separator" />
 
       <button
         type="button"
+        role="menuitem"
         className="context-menu-item danger"
         onClick={() => {
           onUninstall(app.package, app.name);
@@ -93,7 +143,7 @@ export default function ContextMenu({
         }}
         disabled={disabled}
       >
-        <Trash2 size={15} />
+        <Trash2 size={15} aria-hidden="true" />
         <span>Uninstall App</span>
       </button>
     </div>

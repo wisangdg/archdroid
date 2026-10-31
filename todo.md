@@ -876,15 +876,17 @@ P1 tidak boleh menunda P0, tetapi sebaiknya selesai sebelum rilis publik.
 
 ### P1-3 — Aksesibilitas
 
-- [ ] `AppCard` memakai `div` dengan `onClick`; tambahkan `role`, `tabIndex`,
-  dan handler keyboard (`Enter`/`Space`).
-- [ ] Preset resolution memakai `role="button"` tanpa `onKeyDown`; lengkapi.
-- [ ] Tambahkan focus trap, initial focus, dan restore focus pada
-  `ConfirmModal`/`TerminalModal`; saat ini `role="dialog"` saja belum cukup.
-- [ ] Pastikan context menu bisa dioperasikan keyboard dan punya `role="menu"`.
-- [ ] Audit label ikon, kontras, `aria-live`, dan `prefers-reduced-motion`.
-- **DoD:** seluruh alur utama bisa diselesaikan hanya dengan keyboard dan
-  screen reader dasar.
+- [x] **`AppCard` memakai `role="button"`, `tabIndex`, dan handler keyboard (`Enter`/`Space`).**
+  - **Status:** selesai. `AppCard.jsx` menambahkan `role="button"`, `tabIndex={disabled ? -1 : 0}`, `aria-label={Launch ${app.name}}`, `aria-disabled={disabled}`, serta handler `onKeyDown` untuk aktivasi via `Enter`/`Space` dan pembukaan context menu via tombol `ContextMenu` atau `Shift+F10`.
+- [x] **Preset resolution memakai `role="button"` lengkap dengan `onKeyDown`.**
+  - **Status:** selesai. `ResolutionPresets.jsx` menambahkan `onKeyDown` (`Enter`/`Space`) dan `aria-pressed={isSelected}` pada setiap preset card.
+- [x] **Tambahkan focus trap, initial focus, dan restore focus pada `ConfirmModal`/`TerminalModal`.**
+  - **Status:** selesai. Dibuat hook native `src/lib/useFocusTrap.js` (tanpa dependensi eksternal) yang mengatur initial focus pada elemen autofocus/aksi utama, mengunci siklus `Tab` / `Shift+Tab` di dalam modal, menangani `Escape` untuk menutup/membatalkan, dan mengembalikan fokus (`restore focus`) ke elemen pemanggil saat modal ditutup atau unmount. Di `TerminalModal.jsx` ditambahkan `role="dialog"`, `aria-modal="true"`, dan `aria-labelledby="terminal-modal-title"`.
+- [x] **Pastikan context menu bisa dioperasikan keyboard dan punya `role="menu"`.**
+  - **Status:** selesai. `ContextMenu.jsx` kini memiliki `role="menu"`, items bertipe `role="menuitem"`, inisialisasi fokus otomatis pada item pertama saat dibuka, navigasi panah atas/bawah (`ArrowDown`/`ArrowUp`) dengan wrap-around, `Home`/`End`, `Escape` untuk dismiss, dan restore focus ke elemen trigger.
+- [x] **Audit label ikon, kontras, `aria-live`, dan `prefers-reduced-motion`.**
+  - **Status:** selesai. Semua ikon Lucide yang bersifat dekoratif diberi `aria-hidden="true"`, tombol tanpa teks diberi `aria-label` eksplisit, `ToastContainer.jsx` diberi `role="status"` dan `aria-live="polite"`, serta di `src/index.css` ditambahkan indikator `:focus-visible` kontras tinggi dan media query `@media (prefers-reduced-motion: reduce)`.
+- **DoD:** seluruh alur utama bisa diselesaikan hanya dengan keyboard dan screen reader dasar. Lolos 10/10 test aksesibilitas di `src/test/accessibility.test.jsx`, 26/26 vitest, 36 node unit tests, dan 7/7 WebDriver smoke E2E.
 
 ### P1-4 — Diagnostik runtime dan first-run
 

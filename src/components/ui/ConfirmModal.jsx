@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React from "react";
 import {
   AlertTriangle,
   AlertOctagon,
@@ -7,6 +7,7 @@ import {
   ShieldAlert,
   X,
 } from "lucide-react";
+import { useFocusTrap } from "../../lib/useFocusTrap";
 
 export default function ConfirmModal({
   isOpen,
@@ -20,38 +21,52 @@ export default function ConfirmModal({
   onConfirm,
   onCancel,
 }) {
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const handleKeyDown = (e) => {
-      if (e.key === "Escape") {
-        onCancel();
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, onCancel]);
+  const modalRef = useFocusTrap(isOpen, onCancel);
 
   if (!isOpen) return null;
 
   const renderIcon = () => {
     switch (iconType) {
       case "trash":
-        return <Trash2 size={24} className="confirm-icon danger" />;
+        return (
+          <Trash2
+            size={24}
+            className="confirm-icon danger"
+            aria-hidden="true"
+          />
+        );
       case "danger":
-        return <AlertOctagon size={24} className="confirm-icon danger" />;
+        return (
+          <AlertOctagon
+            size={24}
+            className="confirm-icon danger"
+            aria-hidden="true"
+          />
+        );
       case "shield":
-        return <ShieldAlert size={24} className="confirm-icon warning" />;
+        return (
+          <ShieldAlert
+            size={24}
+            className="confirm-icon warning"
+            aria-hidden="true"
+          />
+        );
       case "warning":
       default:
-        return <AlertTriangle size={24} className="confirm-icon warning" />;
+        return (
+          <AlertTriangle
+            size={24}
+            className="confirm-icon warning"
+            aria-hidden="true"
+          />
+        );
     }
   };
 
   return (
     <div className="confirm-modal-overlay" onClick={onCancel}>
       <div
+        ref={modalRef}
         className="glass-panel confirm-modal-card"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
@@ -66,7 +81,7 @@ export default function ConfirmModal({
             onClick={onCancel}
             aria-label="Close dialog"
           >
-            <X size={18} />
+            <X size={18} aria-hidden="true" />
           </button>
         </div>
 
@@ -117,7 +132,7 @@ export default function ConfirmModal({
             type="button"
             className={`btn ${confirmVariant === "danger" ? "btn-danger" : "btn-primary"}`}
             onClick={onConfirm}
-            autoFocus
+            data-autofocus="true"
           >
             {confirmText}
           </button>

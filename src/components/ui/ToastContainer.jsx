@@ -13,14 +13,34 @@ export default function ToastContainer({ toasts, onDismiss }) {
   const renderIcon = (type) => {
     switch (type) {
       case "success":
-        return <CheckCircle2 size={18} className="toast-icon success" />;
+        return (
+          <CheckCircle2
+            size={18}
+            className="toast-icon success"
+            aria-hidden="true"
+          />
+        );
       case "error":
-        return <AlertCircle size={18} className="toast-icon error" />;
+        return (
+          <AlertCircle
+            size={18}
+            className="toast-icon error"
+            aria-hidden="true"
+          />
+        );
       case "warning":
-        return <AlertTriangle size={18} className="toast-icon warning" />;
+        return (
+          <AlertTriangle
+            size={18}
+            className="toast-icon warning"
+            aria-hidden="true"
+          />
+        );
       case "info":
       default:
-        return <Info size={18} className="toast-icon info" />;
+        return (
+          <Info size={18} className="toast-icon info" aria-hidden="true" />
+        );
     }
   };
 
@@ -30,6 +50,7 @@ export default function ToastContainer({ toasts, onDismiss }) {
         <div
           key={toast.id}
           className={`toast-item toast-${toast.type || "info"}`}
+          role="status"
         >
           <div className="toast-icon-wrapper">{renderIcon(toast.type)}</div>
 
@@ -44,7 +65,7 @@ export default function ToastContainer({ toasts, onDismiss }) {
             onClick={() => onDismiss(toast.id)}
             aria-label="Dismiss notification"
           >
-            <X size={14} />
+            <X size={14} aria-hidden="true" />
           </button>
         </div>
       ))}
