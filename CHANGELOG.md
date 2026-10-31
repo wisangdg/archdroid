@@ -5,6 +5,16 @@ Format ini mengacu pada [Keep a Changelog](https://keepachangelog.com/id/1.0.0/)
 
 ---
 
+## [Unreleased]
+
+### Ditambahkan
+- `archdroid --version` (atau `-V`) mencetak versi tanpa membuka jendela, sesuai panduan upgrade di `docs/RELEASE-AND-UPDATES.md`.
+
+### Diperbaiki
+- Setelah Cancel, stepper tetap menandai tahap yang sudah selesai dan berhenti berputar, bukan kembali ke tahap 1.
+- Judul terminal wipe tidak lagi bertuliskan "in Progress..." setelah selesai.
+- Favicon WebView memakai ikon ArchDroid; sebelumnya merujuk `/vite.svg` yang tidak ada.
+
 ## [0.1.1] - 2026-11-01
 
 Rilis pertama yang dipublikasikan. Artefak 0.1.0 tidak pernah dirilis: smoke test live di VM menemukan bug pembersihan pada Cancel/timeout task root.

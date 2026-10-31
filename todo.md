@@ -993,7 +993,12 @@ Tidak menjadi blocker rilis; kerjakan setelah P0/P1 stabil.
 - [ ] Paket distribusi tambahan (AUR/Flathub) dan tanda tangan repository.
 - [ ] i18n (UI saat ini Inggris), tema, onboarding, dan dokumentasi screenshot.
 - [ ] Optimasi daftar app besar, cache ikon, dan virtualisasi log.
-- [ ] Perbaiki favicon `/vite.svg`, metadata versi, dan detail visual kecil.
+- [x] Perbaiki favicon `/vite.svg`, metadata versi, dan detail visual kecil.
+  Favicon memakai ikon aplikasi, `archdroid --version` tersedia, stepper tidak
+  lagi kembali ke tahap 1 setelah Cancel, dan judul wipe diperbaiki. Sisa:
+  tooltip "Start Waydroid Session" bisa tetap tampil saat tombol Stop
+  menggantikannya di bawah kursor yang diam; atribut `title` di `Header.jsx`
+  sudah benar, tooltip baru diperbarui setelah kursor bergerak. Tidak diperbaiki.
 - [ ] Perluas test matrix desktop (GNOME/KDE/Hyprland, Wayland/X11, GPU
   Intel/AMD/NVIDIA).
 
