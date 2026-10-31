@@ -514,3 +514,32 @@ pub(crate) fn collect_diagnostics() -> DiagnosticsReport {
         package_manager: pm.map(|p| p.name().to_string()),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn check_host_diagnostics_returns_core_items() {
+        let report = collect_diagnostics();
+        assert!(report.items.len() >= 16);
+        let keys: Vec<_> = report.items.iter().map(|i| i.key.as_str()).collect();
+        assert!(keys.contains(&"session"));
+        assert!(keys.contains(&"kvm"));
+        assert!(keys.contains(&"binder"));
+        assert!(keys.contains(&"gpu"));
+        assert!(keys.contains(&"service"));
+        assert!(keys.contains(&"waydroid"));
+        assert!(keys.contains(&"adb"));
+        assert!(keys.contains(&"elevation"));
+        assert!(keys.contains(&"git"));
+        assert!(keys.contains(&"python"));
+        assert!(keys.contains(&"squashfs"));
+        assert!(keys.contains(&"lzip"));
+        assert!(keys.contains(&"xdg_open"));
+        assert!(keys.contains(&"terminal"));
+        assert!(keys.contains(&"disk"));
+        assert!(keys.contains(&"network"));
+        assert!(keys.contains(&"waydroid_image"));
+    }
+}

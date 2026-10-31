@@ -14,7 +14,7 @@ pub(crate) const SAFE_PATH: &str = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/us
 
 /// Directories searched for programs that are invoked as root or as the
 /// privileged shell itself. User-writable directories are deliberately absent.
-pub(crate) const TRUSTED_DIRS: [&str; 6] = [
+const TRUSTED_DIRS: [&str; 6] = [
     "/usr/local/sbin",
     "/usr/local/bin",
     "/usr/sbin",
@@ -54,19 +54,19 @@ pub(crate) fn sh_quote(value: &str) -> String {
 /// rather than from HOME/USER/PATH/XDG_* environment variables.
 #[derive(Debug, Clone)]
 pub(crate) struct UserContext {
-    pub(crate) uid: u32,
-    pub(crate) home: PathBuf,
+    uid: u32,
+    home: PathBuf,
 }
 
 /// Parse the first numeric field of a `/proc/self/status` entry such as `Uid:`.
-pub(crate) fn parse_status_id(status: &str, key: &str) -> Option<u32> {
+fn parse_status_id(status: &str, key: &str) -> Option<u32> {
     status.lines().find_map(|line| {
         let rest = line.strip_prefix(key)?;
         rest.split_whitespace().next()?.parse().ok()
     })
 }
 
-pub(crate) fn current_uid() -> Option<u32> {
+fn current_uid() -> Option<u32> {
     std::fs::read_to_string("/proc/self/status")
         .ok()
         .and_then(|status| parse_status_id(&status, "Uid:"))
@@ -86,7 +86,7 @@ pub(crate) fn current_uid() -> Option<u32> {
 }
 
 /// Extract a user's home from a passwd(5)-formatted record.
-pub(crate) fn parse_passwd_home(text: &str, uid: u32) -> Option<PathBuf> {
+fn parse_passwd_home(text: &str, uid: u32) -> Option<PathBuf> {
     text.lines().find_map(|line| {
         let fields: Vec<&str> = line.split(':').collect();
         if fields.len() < 6 || fields[2].parse::<u32>().ok() != Some(uid) {
@@ -104,7 +104,7 @@ pub(crate) fn parse_passwd_home(text: &str, uid: u32) -> Option<PathBuf> {
 /// Canonicalise and sanity-check the home directory read from passwd. Rejecting
 /// `/` (and symlinks that resolve to it) matters because wipe runs `rm -rf`
 /// below this path as root.
-pub(crate) fn validated_home(home: PathBuf, uid: u32) -> Option<PathBuf> {
+fn validated_home(home: PathBuf, uid: u32) -> Option<PathBuf> {
     use std::os::unix::fs::MetadataExt;
 
     if !home.is_absolute() || home == Path::new("/") {
@@ -123,7 +123,7 @@ pub(crate) fn validated_home(home: PathBuf, uid: u32) -> Option<PathBuf> {
 
 /// Resolve a home for `uid` from /etc/passwd, falling back to getent for NSS
 /// users (LDAP/SSSD). Both sources are read as root-controlled system data.
-pub(crate) fn user_home(uid: u32) -> Option<PathBuf> {
+fn user_home(uid: u32) -> Option<PathBuf> {
     if let Ok(passwd) = std::fs::read_to_string("/etc/passwd") {
         if let Some(home) = parse_passwd_home(&passwd, uid) {
             if let Some(home) = validated_home(home, uid) {
@@ -147,7 +147,7 @@ pub(crate) fn user_home(uid: u32) -> Option<PathBuf> {
     validated_home(parse_passwd_home(&text, uid)?, uid)
 }
 
-pub(crate) fn current_user_context() -> Option<UserContext> {
+fn current_user_context() -> Option<UserContext> {
     let uid = current_uid()?;
     let home = user_home(uid)?;
     Some(UserContext { uid, home })
@@ -247,7 +247,7 @@ trap 'kill "$ARCHDROID_CANCEL_WATCH" 2>/dev/null; rm -rf "$ARCHDROID_WORK" /tmp/
 /// Environment variables that must not reach the privileged helper's shell.
 /// `BASH_ENV` is especially important: bash reads it before the script body, so
 /// unsetting it inside the body would be too late.
-pub(crate) const PRIVILEGED_ENV_REMOVE: &[&str] = &[
+const PRIVILEGED_ENV_REMOVE: &[&str] = &[
     "BASH_ENV",
     "ENV",
     "CDPATH",
@@ -319,4 +319,141 @@ pub(crate) fn elevated_command(helper: &str, body: &str) -> Option<Command> {
         command.env_remove(key);
     }
     Some(command)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::*;
+
+    #[test]
+    fn sh_quote_wraps_and_escapes_single_quotes() {
+        assert_eq!(sh_quote("/home/wdg"), "'/home/wdg'");
+        assert_eq!(sh_quote("it's"), r"'it'\''s'");
+    }
+
+    #[test]
+    fn elevated_script_uses_a_sanitized_root_environment() {
+        let context = UserContext {
+            uid: 1234,
+            home: PathBuf::from("/home/archdroid-test"),
+        };
+        let body = elevate_env_for(&context, "echo body");
+
+        assert!(body.contains(&format!("export PATH={}", sh_quote(SAFE_PATH))));
+        assert!(body.contains(&format!(
+            "export ARCHDROID_USER_HOME={}",
+            sh_quote("/home/archdroid-test")
+        )));
+        assert!(body.contains("export HOME=\"$ARCHDROID_WORK/home\""));
+        assert!(!body.contains("export HOME='/home/archdroid-test'"));
+        assert!(!body.contains("ARCHDROID_CACHE"));
+        assert!(body.contains("GIT_CONFIG_GLOBAL=/dev/null"));
+        assert!(body.contains("GIT_CONFIG_SYSTEM=/dev/null"));
+        assert!(body.contains("PIP_CONFIG_FILE=/dev/null"));
+        assert!(body.contains("PYTHONNOUSERSITE=1"));
+        assert!(body.contains("SUDO_USER"));
+        assert!(body.contains("export XDG_CACHE_HOME=\"$ARCHDROID_WORK/cache\""));
+        assert!(body.contains("export XDG_DATA_HOME=\"$ARCHDROID_WORK/data\""));
+        assert!(body.contains("export XDG_CONFIG_HOME=\"$ARCHDROID_WORK/config\""));
+        assert!(body.contains("export WAYDROID_CONFIG=/var/lib/waydroid/waydroid.cfg"));
+        assert!(body.contains("mktemp -d /var/tmp/archdroid."));
+        assert!(body.contains("chmod 700 \"$ARCHDROID_WORK\""));
+        assert!(body.contains("ARCHDROID_CANCEL_FILE"));
+        assert!(body.contains("ARCHDROID_CANCEL_WATCH=$!"));
+        assert!(body.contains("kill -TERM 0"));
+        assert!(body.contains(
+            "trap 'kill \"$ARCHDROID_CANCEL_WATCH\" 2>/dev/null; rm -rf \"$ARCHDROID_WORK\" /tmp/gapps /tmp/houdiniunpack /tmp/waydroid'"
+        ));
+        assert!(body.contains(ELEVATED_SENTINEL));
+        assert!(body.trim_end().ends_with("echo body"));
+    }
+
+    #[test]
+    fn elevated_script_is_valid_bash() {
+        let context = UserContext {
+            uid: 1234,
+            home: PathBuf::from("/home/archdroid-test"),
+        };
+        let body = elevate_env_for(
+            &context,
+            "echo body\nif waydroid init; then\n  echo ok\nfi\n",
+        );
+        let output = Command::new("bash")
+            .args(["-n", "-c", &body])
+            .output()
+            .expect("failed to run bash");
+        assert!(
+            output.status.success(),
+            "generated script is not valid bash: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    fn passwd_and_proc_status_are_parsed_without_environment_input() {
+        let passwd = "root:x:0:0:root:/root:/bin/bash\nwdg:x:1000:1000::/home/wdg:/bin/bash\n";
+        assert_eq!(
+            parse_passwd_home(passwd, 1000),
+            Some(PathBuf::from("/home/wdg"))
+        );
+        assert_eq!(parse_passwd_home(passwd, 1234), None);
+
+        let status = "Name:\tbash\nUid:\t1000\t0\t0\t0\nGid:\t1000\t0\t0\t0\n";
+        assert_eq!(parse_status_id(status, "Uid:"), Some(1000));
+        assert_eq!(parse_status_id(status, "Gid:"), Some(1000));
+    }
+
+    #[test]
+    fn home_validation_rejects_relative_root_and_foreign_owned_directories() {
+        assert!(validated_home(PathBuf::from("relative"), 1000).is_none());
+        assert!(validated_home(PathBuf::from("/"), 0).is_none());
+
+        let dir = std::env::temp_dir().join(format!("archdroid-home-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let canonical = std::fs::canonicalize(&dir).unwrap();
+        let uid = current_uid().expect("the current uid must be readable");
+        assert_eq!(validated_home(dir.clone(), uid), Some(canonical));
+        assert!(validated_home(dir.clone(), uid.wrapping_add(1)).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn trusted_program_ignores_user_path() {
+        let bash = trusted_program("bash").expect("bash should exist in a trusted directory");
+        assert!(
+            TRUSTED_DIRS
+                .iter()
+                .any(|dir| bash == Path::new(dir).join("bash")),
+            "resolved bash outside the trusted directories: {}",
+            bash.display()
+        );
+        assert!(trusted_program("archdroid-no-such-binary-12345").is_none());
+    }
+
+    #[test]
+    fn resolve_program_only_returns_existing_files() {
+        assert!(resolve_program("bash").is_some());
+        assert!(resolve_program("archdroid-no-such-binary-12345").is_none());
+    }
+
+    #[test]
+    fn elevated_command_skips_missing_helpers() {
+        assert!(elevated_command("archdroid-no-such-binary-12345", "true").is_none());
+        let command = elevated_command("bash", "true").expect("bash should be resolvable");
+        assert!(command.get_args().any(|arg| arg == "-c"));
+    }
+
+    #[test]
+    fn elevated_command_uses_a_fixed_path_and_drops_bash_env() {
+        let command = elevated_command("bash", "true").expect("bash should be resolvable");
+        let envs: Vec<_> = command.get_envs().collect();
+        assert!(envs.iter().any(|(key, value)| {
+            *key == "PATH" && *value == Some(std::ffi::OsStr::new(SAFE_PATH))
+        }));
+        assert!(envs
+            .iter()
+            .any(|(key, value)| *key == "BASH_ENV" && value.is_none()));
+    }
 }

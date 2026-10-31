@@ -6,9 +6,9 @@ use std::path::{Path, PathBuf};
 use crate::*;
 
 /// Sub directory of the user cache dir used for "this already happened" markers.
-pub(crate) const CACHE_SUBDIR: &str = "archdroid";
+const CACHE_SUBDIR: &str = "archdroid";
 
-pub(crate) fn cache_dir() -> PathBuf {
+fn cache_dir() -> PathBuf {
     let mut dir = dirs::cache_dir().unwrap_or_else(std::env::temp_dir);
     dir.push(CACHE_SUBDIR);
     dir
@@ -31,9 +31,9 @@ pub(crate) fn write_marker(marker: &Path) -> std::io::Result<()> {
 }
 
 /// An install script exited 0 but no live check has confirmed the result yet.
-pub(crate) const MARKER_PENDING: &str = "pending\n";
+const MARKER_PENDING: &str = "pending\n";
 /// A live check against the running container confirmed the add-on.
-pub(crate) const MARKER_VERIFIED: &str = "verified\n";
+const MARKER_VERIFIED: &str = "verified\n";
 
 /// Marker state as the offline status path should report it.
 #[derive(Debug, PartialEq)]
@@ -79,5 +79,35 @@ pub(crate) fn refresh_marker(marker: &Path) {
     };
     if let Err(error) = write() {
         log::warn!("could not refresh {}: {error}", marker.display());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn markers_live_in_the_app_cache_dir() {
+        let marker = marker_file("gapps_installed");
+        assert_eq!(marker.file_name().unwrap(), "gapps_installed");
+        assert_eq!(marker.parent().unwrap().file_name().unwrap(), CACHE_SUBDIR);
+    }
+
+    #[test]
+    fn markers_are_written_by_the_unprivileged_app_process() {
+        let root =
+            std::env::temp_dir().join(format!("archdroid-marker-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let marker = root.join("gapps_installed");
+
+        write_marker(&marker).unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(&marker)
+                .expect("the app must be able to read its own marker")
+                .trim(),
+            "pending"
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

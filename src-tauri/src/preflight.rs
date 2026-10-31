@@ -75,7 +75,7 @@ pub(crate) fn check_python_venv_available() -> (bool, bool) {
 
 /// Root scripts run with `SAFE_PATH`, so preflight must not accept a `python3`
 /// from a user-writable directory that disappears after elevation.
-pub(crate) fn check_trusted_python_venv() -> (bool, bool) {
+fn check_trusted_python_venv() -> (bool, bool) {
     let Some(python) = trusted_program("python3") else {
         return (false, false);
     };
@@ -141,7 +141,7 @@ pub(crate) fn polkit_agent_running() -> bool {
     })
 }
 
-pub(crate) fn is_polkit_agent_name(comm: &str) -> bool {
+fn is_polkit_agent_name(comm: &str) -> bool {
     let comm = comm.to_ascii_lowercase();
     // `polkitd` is the daemon, not an authentication agent.
     comm != "polkitd" && (comm.contains("polkit") || comm.contains("policykit"))
@@ -153,7 +153,7 @@ pub(crate) fn has_program(name: &str) -> bool {
 
 /// Android SDK root, preferring the environment variables the upstream Phantom
 /// build script already understands.
-pub(crate) fn android_sdk_root() -> Option<PathBuf> {
+fn android_sdk_root() -> Option<PathBuf> {
     for key in ["ANDROID_SDK_ROOT", "ANDROID_HOME"] {
         if let Some(value) = std::env::var_os(key) {
             let path = PathBuf::from(value);
@@ -168,7 +168,7 @@ pub(crate) fn android_sdk_root() -> Option<PathBuf> {
 }
 
 /// `android.jar` from `ANDROID_JAR` or a platform under the Android SDK.
-pub(crate) fn find_android_jar() -> Option<PathBuf> {
+fn find_android_jar() -> Option<PathBuf> {
     if let Some(value) = std::env::var_os("ANDROID_JAR") {
         let path = PathBuf::from(value);
         if path.is_file() {
@@ -187,7 +187,7 @@ pub(crate) fn find_android_jar() -> Option<PathBuf> {
 }
 
 /// `d8` from `D8`, PATH, the SDK build-tools, or cmdline-tools.
-pub(crate) fn find_d8() -> Option<PathBuf> {
+fn find_d8() -> Option<PathBuf> {
     if let Some(value) = std::env::var_os("D8") {
         let path = PathBuf::from(value);
         if path.is_file() {
@@ -263,7 +263,7 @@ impl PackageInstallAction {
         }
     }
 
-    pub(crate) fn description(self) -> &'static str {
+    fn description(self) -> &'static str {
         match self {
             Self::Init => "initializing Waydroid",
             Self::Gapps => "installing GApps",
@@ -431,7 +431,7 @@ pub(crate) fn installer_preflight(
 
 /// Phantom builds Rust binaries and an Android server jar as the desktop user.
 /// None of these can be fixed after the build starts, so collect them first.
-pub(crate) fn phantom_missing_dependencies() -> (Vec<&'static str>, Vec<&'static str>) {
+fn phantom_missing_dependencies() -> (Vec<&'static str>, Vec<&'static str>) {
     let mut packages = Vec::new();
     let mut sdk = Vec::new();
     if !has_program("git") {
@@ -458,7 +458,7 @@ pub(crate) fn phantom_missing_dependencies() -> (Vec<&'static str>, Vec<&'static
     (packages, sdk)
 }
 
-pub(crate) fn phantom_dependency_error(
+fn phantom_dependency_error(
     packages: &[&'static str],
     sdk: &[&'static str],
     pm: Option<platform::PackageManager>,
@@ -524,4 +524,169 @@ pub(crate) fn phantom_disk_preflight() -> Result<(), AppError> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::*;
+
+    #[test]
+    fn package_preview_lists_distro_names_and_the_exact_command() {
+        let missing = ["git", "python3", "python3-venv", "squashfs", "lzip"];
+        let pacman = package_install_preview(
+            PackageInstallAction::Gapps,
+            &missing,
+            Some(platform::PackageManager::Pacman),
+        );
+        assert_eq!(pacman.action, "gapps");
+        assert_eq!(pacman.package_manager.as_deref(), Some("pacman"));
+        assert_eq!(
+            pacman.packages,
+            vec!["git", "python", "squashfs-tools", "lzip"]
+        );
+        assert_eq!(
+            pacman.command.as_deref(),
+            Some("pacman -S --needed --noconfirm git python squashfs-tools lzip")
+        );
+        assert!(pacman.requires_root);
+
+        let apt = package_install_preview(
+            PackageInstallAction::Houdini,
+            &missing,
+            Some(platform::PackageManager::Apt),
+        );
+        assert_eq!(
+            apt.packages,
+            vec!["git", "python3", "python3-venv", "squashfs-tools", "lzip"]
+        );
+        assert!(apt
+            .command
+            .as_deref()
+            .unwrap()
+            .contains("apt-get install -y --no-install-recommends"));
+
+        let unsupported = package_install_preview(PackageInstallAction::Init, &["waydroid"], None);
+        assert_eq!(unsupported.packages, vec!["waydroid"]);
+        assert_eq!(unsupported.command, None);
+        assert_eq!(unsupported.package_manager, None);
+    }
+
+    #[test]
+    fn package_approval_requires_every_reviewed_package() {
+        let required = ["git", "python3", "python3-venv", "squashfs", "lzip"];
+        let pm = Some(platform::PackageManager::Pacman);
+
+        let missing = approved_install_packages(PackageInstallAction::Gapps, &required, pm, None)
+            .unwrap_err();
+        assert_eq!(missing.code(), error::code::APPROVAL_REQUIRED);
+
+        let partial = vec!["git".to_string()];
+        let partial_error =
+            approved_install_packages(PackageInstallAction::Gapps, &required, pm, Some(&partial))
+                .unwrap_err();
+        assert_eq!(partial_error.code(), error::code::APPROVAL_REQUIRED);
+        assert!(partial_error.to_string().contains("python"));
+
+        let reviewed = platform::PackageManager::Pacman.mapped_packages(&required);
+        let reviewed: Vec<String> = reviewed.iter().map(|name| name.to_string()).collect();
+        assert_eq!(
+            approved_install_packages(PackageInstallAction::Gapps, &required, pm, Some(&reviewed))
+                .unwrap(),
+            vec!["git", "python", "squashfs-tools", "lzip"]
+        );
+
+        let mut smuggled = reviewed.clone();
+        smuggled.push("bash".to_string());
+        let smuggled_error =
+            approved_install_packages(PackageInstallAction::Gapps, &required, pm, Some(&smuggled))
+                .unwrap_err();
+        assert_eq!(smuggled_error.code(), error::code::INVALID_INPUT);
+    }
+
+    #[test]
+    fn polkit_agent_names_exclude_the_daemon() {
+        assert!(is_polkit_agent_name("polkit-gnome-au"));
+        assert!(is_polkit_agent_name("hyprpolkitagent"));
+        assert!(is_polkit_agent_name("lxqt-policykit"));
+        assert!(!is_polkit_agent_name("polkitd"));
+        assert!(!is_polkit_agent_name("bash"));
+    }
+
+    #[test]
+    fn preflight_helpers_report_system_resources() {
+        // Disk probe on root must report positive available storage
+        let disk_root = check_available_disk_space_kb(Path::new("/"));
+        assert!(disk_root.is_some());
+        assert!(disk_root.unwrap() > 0);
+
+        // format_disk_space helper checks
+        assert_eq!(format_disk_space(2_097_152), "2.0 GB Free");
+        assert_eq!(format_disk_space(512_000), "500 MB Free");
+
+        // Elevation tool must return pkexec or sudo on standard Linux host
+        let elevation = has_elevation_tool();
+        assert!(elevation.is_some());
+        let elev = elevation.unwrap();
+        assert!(elev == "pkexec" || elev == "sudo");
+    }
+
+    #[test]
+    fn dependency_probes_only_report_known_names_once() {
+        let gapps = gapps_missing_dependencies();
+        let allowed_gapps = ["git", "python3", "python3-venv", "squashfs", "lzip"];
+        for name in &gapps {
+            assert!(
+                allowed_gapps.contains(name),
+                "unexpected dependency: {name}"
+            );
+        }
+        let mut unique = gapps.clone();
+        unique.sort_unstable();
+        unique.dedup();
+        assert_eq!(unique.len(), gapps.len(), "duplicate dependency reported");
+
+        let (packages, sdk) = phantom_missing_dependencies();
+        let allowed_packages = ["git", "cargo", "jdk", "sed", "coreutils"];
+        for name in &packages {
+            assert!(
+                allowed_packages.contains(name),
+                "unexpected package dependency: {name}"
+            );
+        }
+        for name in &sdk {
+            assert!(
+                ["d8", "android.jar"].contains(name),
+                "unexpected SDK dependency: {name}"
+            );
+        }
+    }
+
+    #[test]
+    fn phantom_dependency_error_includes_package_and_sdk_remediation() {
+        let error = phantom_dependency_error(
+            &["cargo", "jdk"],
+            &["d8", "android.jar"],
+            Some(platform::PackageManager::Pacman),
+        );
+        let message = error.to_string();
+        assert!(message.contains("cargo, jdk, d8, android.jar"), "{message}");
+        assert!(
+            message.contains("sudo pacman -S --needed rust jdk-openjdk"),
+            "{message}"
+        );
+        assert!(message.contains("D8=/path/to/d8"), "{message}");
+        assert!(
+            message.contains("ANDROID_JAR=/path/to/android.jar"),
+            "{message}"
+        );
+
+        let unsupported = phantom_dependency_error(&["git"], &[], None);
+        assert!(
+            unsupported
+                .to_string()
+                .contains("distribution's package manager"),
+            "{unsupported}"
+        );
+    }
 }
