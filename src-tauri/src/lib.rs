@@ -1540,26 +1540,21 @@ pub(crate) fn sanitize_appimage_env() {
     // fail immediately with "Fatal Python error: Failed to import encodings module".
     let in_appimage =
         std::env::var_os("APPDIR").is_some() || std::env::var_os("APPIMAGE").is_some();
-    if in_appimage {
-        if let Ok(pyhome) = std::env::var("PYTHONHOME") {
-            if std::env::var("APPDIR")
-                .map(|d| pyhome.starts_with(&d))
-                .unwrap_or(false)
-                || pyhome.contains("appimage")
-            {
-                std::env::remove_var("PYTHONHOME");
-            }
-        }
-        if let Ok(pypath) = std::env::var("PYTHONPATH") {
-            if std::env::var("APPDIR")
-                .map(|d| pypath.starts_with(&d))
-                .unwrap_or(false)
-                || pypath.contains("appimage")
-            {
-                std::env::remove_var("PYTHONPATH");
-            }
+    if !in_appimage {
+        return;
+    }
+    let appdir = std::env::var("APPDIR").ok();
+    for var in ["PYTHONHOME", "PYTHONPATH"] {
+        if std::env::var(var).is_ok_and(|value| points_into_bundle(&value, appdir.as_deref())) {
+            std::env::remove_var(var);
         }
     }
+}
+
+/// Whether a Python path variable points into the AppImage bundle. Kept free
+/// of env access so tests never have to mutate the process environment.
+fn points_into_bundle(value: &str, appdir: Option<&str>) -> bool {
+    appdir.is_some_and(|dir| value.starts_with(dir)) || value.contains("appimage")
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1783,20 +1778,15 @@ mod tests {
     }
 
     #[test]
-    fn sanitize_appimage_env_cleans_polluted_python_vars() {
-        std::env::set_var("APPDIR", "/tmp/appimage_extracted_12345");
-        std::env::set_var("PYTHONHOME", "/tmp/appimage_extracted_12345/usr/");
-        std::env::set_var(
-            "PYTHONPATH",
-            "/tmp/appimage_extracted_12345/usr/share/pyshared/:",
-        );
-
-        sanitize_appimage_env();
-
-        assert!(std::env::var("PYTHONHOME").is_err());
-        assert!(std::env::var("PYTHONPATH").is_err());
-
-        // Cleanup test env
-        std::env::remove_var("APPDIR");
+    fn points_into_bundle_flags_appdir_and_appimage_paths() {
+        let appdir = Some("/tmp/.mount_App12345");
+        assert!(points_into_bundle("/tmp/.mount_App12345/usr/", appdir));
+        assert!(points_into_bundle(
+            "/tmp/.mount_App12345/usr/share/pyshared/:",
+            appdir
+        ));
+        assert!(points_into_bundle("/tmp/appimage_extracted_1/usr", None));
+        assert!(!points_into_bundle("/usr/lib/python3.12", appdir));
+        assert!(!points_into_bundle("/usr/lib/python3.12", None));
     }
 }
