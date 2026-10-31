@@ -15,6 +15,14 @@ use tauri::{AppHandle, Emitter};
 use crate::error::AppError;
 use crate::*;
 
+/// Upper bound for the output kept around for inspection.
+pub(crate) const MAX_CAPTURED_OUTPUT: usize = 4096;
+
+/// How long a terminated script gets to run its `trap ... EXIT` cleanup before
+/// the whole process group is killed outright. `elevate_env_for` relies on that
+/// trap to remove `$ARCHDROID_WORK`, so SIGKILL must not be the first signal.
+pub(crate) const KILL_GRACE: Duration = Duration::from_secs(5);
+
 /// The single-flight slot. Streaming operations share one terminal, so only
 /// one of them may own the slot at a time.
 pub(crate) static ACTIVE_TASK: Mutex<Option<ActiveTask>> = Mutex::new(None);
