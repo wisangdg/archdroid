@@ -4,7 +4,29 @@ import ConfirmModal from "../components/ui/ConfirmModal";
 import TerminalModal from "../components/terminal/TerminalModal";
 import ProcessStepper from "../components/terminal/ProcessStepper";
 import SetupWizard from "../components/setup/SetupWizard";
+import InstallToolsView from "../components/tools/InstallToolsView";
 import { TASK_STEP_CONFIGS } from "../components/terminal/stepConfigs";
+
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn().mockImplementation((cmd) => {
+    if (cmd === "check_host_diagnostics") {
+      return Promise.resolve({
+        items: [
+          {
+            key: "network",
+            title: "Network Connection",
+            status: "error",
+            value: "No Route",
+            detail: "Cannot reach download mirror.",
+            remediation: "Check host network or DNS.",
+          },
+        ],
+        package_manager: "pacman",
+      });
+    }
+    return Promise.resolve({ status: "success" });
+  }),
+}));
 
 describe("ConfirmModal component", () => {
   it("renders wipe confirmation details and handles cancellation", () => {
@@ -165,27 +187,6 @@ describe("TerminalModal and ProcessStepper", () => {
 
 describe("SetupWizard preflight and diagnostic blocking", () => {
   it("renders host diagnostics and blocks initialization when network/disk fails", async () => {
-    vi.mock("@tauri-apps/api/core", () => ({
-      invoke: vi.fn().mockImplementation((cmd) => {
-        if (cmd === "check_host_diagnostics") {
-          return Promise.resolve({
-            items: [
-              {
-                key: "network",
-                title: "Network Connection",
-                status: "error",
-                value: "No Route",
-                detail: "Cannot reach download mirror.",
-                remediation: "Check host network or DNS.",
-              },
-            ],
-            package_manager: "pacman",
-          });
-        }
-        return Promise.resolve({ status: "success" });
-      }),
-    }));
-
     const handleInit = vi.fn();
     render(<SetupWizard onInitWaydroid={handleInit} installing={false} />);
 
@@ -201,5 +202,27 @@ describe("SetupWizard preflight and diagnostic blocking", () => {
       name: /Initialize Android Emulator/i,
     });
     expect(initBtn.hasAttribute("disabled")).toBe(true);
+  });
+});
+
+describe("InstallToolsView marker states", () => {
+  it("shows an unverified install as reinstallable, not as installed", () => {
+    render(
+      <InstallToolsView
+        gappsStatus="pending"
+        houdiniStatus="installed"
+        multitouchStatus="not_installed"
+        installing={false}
+        onInstallGApps={vi.fn()}
+        onInstallHoudini={vi.fn()}
+        onInstallMultitouch={vi.fn()}
+      />
+    );
+    expect(screen.getByText("Unverified")).toBeTruthy();
+    const disabled = screen
+      .getAllByRole("button")
+      .filter((button) => button.disabled);
+    // Only the verified Houdini install locks its button.
+    expect(disabled.length).toBe(1);
   });
 });

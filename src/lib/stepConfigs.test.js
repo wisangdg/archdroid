@@ -76,3 +76,18 @@ test("detectStepProgress accurately tracks phantom compilation step", () => {
   assert.equal(result.isCompleted, false);
   assert.equal(result.isFailed, false);
 });
+
+test("detectStepProgress follows [STEP] markers emitted by the scripts", () => {
+  const logs = [
+    "[STEP] deps",
+    "pacman output mentioning waydroid_script",
+    "[STEP] env",
+    "[SYSTEM] Setting up Python environment...",
+  ];
+  const result = detectStepProgress("gapps", logs);
+  assert.equal(TASK_STEP_CONFIGS.gapps[result.activeStepIndex].id, "env");
+  assert.equal(
+    result.currentMessage,
+    "[SYSTEM] Setting up Python environment..."
+  );
+});

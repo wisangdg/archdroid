@@ -20,3 +20,12 @@ test("malformed payloads are ignored instead of throwing", () => {
   assert.equal(isEventForTask(null, "task-2"), false);
   assert.equal(isEventForTask({}, "task-2"), false);
 });
+
+test("appendLogLine keeps only the newest MAX_TERMINAL_LINES", async () => {
+  const { appendLogLine, MAX_TERMINAL_LINES } = await import("./taskEvents.js");
+  let logs = [];
+  for (let i = 0; i < MAX_TERMINAL_LINES + 5; i++)
+    logs = appendLogLine(logs, `l${i}`);
+  assert.equal(logs.length, MAX_TERMINAL_LINES);
+  assert.equal(logs[0], "l5");
+});

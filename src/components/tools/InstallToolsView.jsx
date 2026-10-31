@@ -32,6 +32,15 @@ export default function InstallToolsView({
             <AlertTriangle size={14} /> Partial
           </span>
         );
+      case "pending":
+        return (
+          <span
+            className="badge-pill badge-warning"
+            title="Installed, but not verified yet. Start Waydroid to verify."
+          >
+            <AlertTriangle size={14} /> Unverified
+          </span>
+        );
       case "not_installed":
         return <span className="badge-pill badge-neutral">Not Installed</span>;
       default:

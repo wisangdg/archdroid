@@ -6,3 +6,13 @@
 export function isEventForTask(payload, activeTaskId) {
   return Boolean(activeTaskId) && payload?.task_id === activeTaskId;
 }
+
+/** Most lines the terminal keeps; older output is dropped. */
+export const MAX_TERMINAL_LINES = 2000;
+
+export function appendLogLine(logs, line) {
+  const next = [...logs, line];
+  return next.length > MAX_TERMINAL_LINES
+    ? next.slice(next.length - MAX_TERMINAL_LINES)
+    : next;
+}

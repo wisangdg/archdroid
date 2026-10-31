@@ -79,6 +79,24 @@ export const TASK_STEP_CONFIGS = {
   ],
 };
 
+const STEP_MARKER = /^\s*\[STEP\] (\S+)/;
+
+/** Newest "[STEP] <id>" line that names a known step, plus the line after it. */
+function lastStepMarker(logs, steps) {
+  for (let i = logs.length - 1; i >= 0; i--) {
+    const match = STEP_MARKER.exec(logs[i] || "");
+    if (!match) continue;
+    const index = steps.findIndex((step) => step.id === match[1]);
+    if (index < 0) continue;
+    const later = logs.slice(i + 1).filter(Boolean);
+    return {
+      index,
+      message: later[later.length - 1] || steps[index].description,
+    };
+  }
+  return null;
+}
+
 export function detectStepProgress(taskType, logs = [], taskResult = null) {
   const steps = TASK_STEP_CONFIGS[taskType] || [];
   const logText = logs.join("\n");
@@ -140,6 +158,11 @@ export function detectStepProgress(taskType, logs = [], taskResult = null) {
     currentMessage = "Task finished successfully!";
   } else if (isCancelled) {
     currentMessage = "Operation was cancelled by user.";
+  } else if (lastStepMarker(logs, steps)) {
+    // Scripts announce each phase with "[STEP] <id>"; trust that over guessing.
+    const marker = lastStepMarker(logs, steps);
+    activeIndex = marker.index;
+    currentMessage = marker.message;
   } else {
     // Scan logs backwards to find the current active step based on taskType
     for (let i = logs.length - 1; i >= 0; i--) {

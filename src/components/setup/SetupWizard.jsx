@@ -13,6 +13,7 @@ import {
   RotateCw,
   Wrench,
 } from "lucide-react";
+import { setupStage, STAGE_COPY } from "../../lib/setupStage";
 
 function statusIcon(status) {
   switch (status) {
@@ -109,6 +110,8 @@ export default function SetupWizard({ onInitWaydroid, installing }) {
     ? items.filter((item) => blocksInitialization(item, report))
     : [];
   const blocked = blocking.length > 0;
+  const stage = setupStage(report, installing);
+  const copy = STAGE_COPY[stage];
   const canInitialize = Boolean(report) && !loading && !blocked && !installing;
 
   return (
@@ -118,13 +121,8 @@ export default function SetupWizard({ onInitWaydroid, installing }) {
           <MonitorPlay size={72} className="icon-glow setup-hero-icon" />
         </div>
 
-        <h2 className="setup-title">Android System Image Required</h2>
-        <p className="setup-description">
-          Your Linux machine is ready to host Waydroid, but the base Android
-          system container has not been initialized yet. Click below to download
-          the official LineageOS image (~1 GB) and configure your emulator
-          automatically.
-        </p>
+        <h2 className="setup-title">{copy.title}</h2>
+        <p className="setup-description">{copy.description}</p>
 
         <div className="setup-specs-list">
           <div className="setup-spec-item">

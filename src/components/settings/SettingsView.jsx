@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import ResolutionPresets from "./ResolutionPresets";
 import HostDiagnostics from "./HostDiagnostics";
+import AppLogPanel from "./AppLogPanel";
 
 export default function SettingsView({
   multiWindow,
@@ -165,6 +166,8 @@ export default function SettingsView({
       {/* Linux Host System Diagnostics Checkup */}
       <HostDiagnostics />
 
+      <AppLogPanel />
+
       {/* Diagnostic Logs */}
       <div className="glass-panel settings-card">
         <div className="settings-card-content">
@@ -180,7 +183,11 @@ export default function SettingsView({
             </p>
           </div>
         </div>
-        <button className="btn btn-outline" onClick={onViewLogs}>
+        <button
+          className="btn btn-outline"
+          onClick={onViewLogs}
+          disabled={busy}
+        >
           <Terminal size={17} />
           <span>View Logs</span>
         </button>
@@ -202,6 +209,7 @@ export default function SettingsView({
         <button
           className="btn btn-danger btn-wipe"
           onClick={onWipeData}
+          disabled={busy}
           title="Factory Reset Waydroid"
         >
           <RotateCcw size={17} />

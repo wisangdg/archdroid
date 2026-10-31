@@ -15,7 +15,7 @@ import SetupWizard from "./components/setup/SetupWizard";
 import TerminalModal from "./components/terminal/TerminalModal";
 import ToastContainer from "./components/ui/ToastContainer";
 import ConfirmModal from "./components/ui/ConfirmModal";
-import { isEventForTask } from "./lib/taskEvents";
+import { isEventForTask, appendLogLine } from "./lib/taskEvents";
 
 const PROCESS_ERROR_TITLES = {
   elevation_denied: "Root Access Denied",
@@ -170,10 +170,12 @@ export default function App() {
     checkHoudiniStatus();
     loadConfigs();
 
+    // Poll only the session state. GApps/Houdini probes go through adb and are
+    // refreshed when the session comes online and after each task instead.
+    // A hidden window skips the tick; checkStatus never overlaps itself.
     const interval = setInterval(() => {
+      if (document.hidden) return;
       checkStatus();
-      checkGappsStatus();
-      checkHoudiniStatus();
     }, 5000);
 
     const unlistenStarted = listen("cmd-started", (event) => {
@@ -185,7 +187,7 @@ export default function App() {
 
     const unlistenOutput = listen("cmd-output", (event) => {
       if (!isEventForTask(event.payload, activeTaskId.current)) return;
-      setTerminalLogs((prev) => [...prev, event.payload.line]);
+      setTerminalLogs((prev) => appendLogLine(prev, event.payload.line));
       if (terminalRef.current) {
         terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
       }
@@ -1098,7 +1100,7 @@ export default function App() {
       isOpen: true,
       title: "Factory Reset Waydroid?",
       description:
-        "WARNING: This will completely destroy all Waydroid container data, installed games, GApps modules, and configurations. You will need to re-initialize the emulator from scratch. This cannot be undone!",
+        "WARNING: This will completely destroy all Waydroid container data, installed games, GApps modules, and configurations. Back up anything you need first (use Settings → Android Shared Storage to copy files out). You will need to re-initialize the emulator from scratch. This cannot be undone!",
       confirmText: "Wipe Everything",
       confirmVariant: "danger",
       iconType: "danger",

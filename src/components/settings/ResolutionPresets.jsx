@@ -10,7 +10,7 @@ import {
   Sparkles,
 } from "lucide-react";
 
-export const PRESETS = [
+const PRESETS = [
   {
     id: "tablet_1080p",
     name: "Tablet Full HD",
