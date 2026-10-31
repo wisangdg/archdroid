@@ -5,7 +5,7 @@ Format ini mengacu pada [Keep a Changelog](https://keepachangelog.com/id/1.0.0/)
 
 ---
 
-## [0.1.0] - 2026-10-31
+## [0.1.0] - 2026-11-01
 
 ### Ditambahkan
 - **App Library & Game Launcher**:
@@ -42,6 +42,16 @@ Format ini mengacu pada [Keep a Changelog](https://keepachangelog.com/id/1.0.0/)
   - Standalone executable AppImage dengan pembersihan environment `PYTHONHOME`/`PYTHONPATH` bawaan AppRun.
   - Target eksperimental Tier 2 (preview `.deb` dan `.rpm`).
   - Penandatanganan rilis resmi dengan kunci GPG Ed25519 (`18F47067ACC5BBF9`) serta skrip verifikasi otomatis `verify-release.sh`.
+- **Keandalan Operasi**:
+  - Setiap task panjang punya `task_id`, deadline, dan tombol Cancel (termasuk install/remove APK); task kedua ditolak dengan code `busy`.
+  - Install dan uninstall APK diverifikasi lewat `adb` (fallback `waydroid app`), sehingga "sukses" berarti paket benar-benar terpasang atau terhapus.
+  - Perubahan properti dan resolusi dibaca ulang dari Android; toast sukses hanya muncul jika nilainya benar-benar berubah.
+  - Profil perangkat diberi versi dan disimpan secara atomik, dengan migrasi untuk file lama.
+- **First Run & Log**:
+  - Layar setup bertahap (Waydroid belum terpasang, belum diinisialisasi, sedang inisialisasi, siap).
+  - Panel log aplikasi dengan lokasi file log dan tombol hapus; isi skrip root tidak ditulis ke log dan pesan error diredaksi.
+- **Aksesibilitas**:
+  - Navigasi keyboard penuh, focus trap pada modal, dan semantik ARIA untuk kartu aplikasi, menu, dan dialog.
 - **Dokumentasi & Standar Komunitas**:
   - `README.md` lengkap dengan panduan instalasi, model privilege root, troubleshooting, dan clean uninstall.
   - `SECURITY.md` dengan alur pelaporan celah keamanan privat.
