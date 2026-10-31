@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { PackagePlus } from "lucide-react";
@@ -15,13 +14,8 @@ import SetupWizard from "./components/setup/SetupWizard";
 import TerminalModal from "./components/terminal/TerminalModal";
 import ToastContainer from "./components/ui/ToastContainer";
 import ConfirmModal from "./components/ui/ConfirmModal";
-import { isEventForTask, appendLogLine } from "./lib/taskEvents";
-
-const PROCESS_ERROR_TITLES = {
-  elevation_denied: "Root Access Denied",
-  timeout: "Operation Timed Out",
-  cancelled: "Operation Cancelled",
-};
+import { useToasts } from "./hooks/useToasts";
+import { useStreamingTask } from "./hooks/useStreamingTask";
 
 export default function App() {
   const [status, setStatus] = useState("offline");
@@ -31,21 +25,31 @@ export default function App() {
   const [gappsStatus, setGappsStatus] = useState("unknown");
   const [houdiniStatus, setHoudiniStatus] = useState("unknown");
   const [multitouchStatus, setMultitouchStatus] = useState("unknown");
-  const [installing, setInstalling] = useState(false);
   const [isOperating, setIsOperating] = useState(false);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const prevStatusRef = useRef("offline");
-  const operationInFlight = useRef(false);
-  // ID of the streaming task currently shown in the terminal. Events from any
-  // other task (a late finish, or a non-modal background write) are ignored.
-  const activeTaskId = useRef(null);
-  // Whether the backend actually emitted `cmd-started` for the current request.
-  // A preflight error returns before any event, so the terminal must be closed
-  // and the error shown instead of leaving it stuck on "Awaiting...".
-  const taskStartedRef = useRef(false);
-
-  // In-App Toast State
-  const [toasts, setToasts] = useState([]);
+  const { toasts, addToast, removeToast } = useToasts();
+  const {
+    installing,
+    operationInFlight,
+    terminalRef,
+    terminalOpen,
+    terminalLogs,
+    terminalTitle,
+    terminalTaskType,
+    terminalTaskResult,
+    setTerminalOpen,
+    setTerminalTaskResult,
+    runStreamingTask,
+    handleCancelTask,
+  } = useStreamingTask({
+    addToast,
+    onTaskSuccess: () => {
+      checkGappsStatus();
+      checkHoudiniStatus();
+      loadApps();
+    },
+  });
 
   // Confirm Modal State
   const [confirmModal, setConfirmModal] = useState({
@@ -58,13 +62,6 @@ export default function App() {
     onConfirm: () => {},
   });
 
-  // Terminal Modal State
-  const [terminalOpen, setTerminalOpen] = useState(false);
-  const [terminalLogs, setTerminalLogs] = useState([]);
-  const [terminalTitle, setTerminalTitle] = useState("");
-  const [terminalTaskType, setTerminalTaskType] = useState("logs");
-  const [terminalTaskResult, setTerminalTaskResult] = useState(null);
-  const terminalRef = useRef(null);
   const statusCheckInFlight = useRef(false);
 
   // Config State
@@ -75,25 +72,6 @@ export default function App() {
     height: "",
     dpi: "",
   });
-
-  const addToast = useCallback(
-    ({ type = "info", title, message, duration = 4000 }) => {
-      const id =
-        Date.now().toString() + Math.random().toString(36).substring(2, 6);
-      setToasts((prev) => [...prev, { id, type, title, message }]);
-
-      if (duration > 0) {
-        setTimeout(() => {
-          setToasts((prev) => prev.filter((t) => t.id !== id));
-        }, duration);
-      }
-    },
-    []
-  );
-
-  const removeToast = useCallback((id) => {
-    setToasts((prev) => prev.filter((t) => t.id !== id));
-  }, []);
 
   // Ask the backend which distro packages the action would install. The modal
   // shows this list and the exact command; the same list is sent back as the
@@ -108,58 +86,6 @@ export default function App() {
         message: err?.message || String(err),
       });
       return null;
-    }
-  };
-
-  const runStreamingTask = async (command, { taskType, title, args } = {}) => {
-    if (operationInFlight.current) {
-      addToast({
-        type: "warning",
-        title: "Operation In Progress",
-        message:
-          "Wait for the current operation to finish before starting another.",
-      });
-      return null;
-    }
-
-    operationInFlight.current = true;
-    activeTaskId.current = null;
-    taskStartedRef.current = false;
-    setInstalling(true);
-    setTerminalTaskType(taskType);
-    setTerminalTitle(title);
-    setTerminalLogs([]);
-    setTerminalTaskResult(null);
-    setTerminalOpen(true);
-
-    try {
-      const result = await invoke(command, args);
-      if (result?.status === "error" && result.code === "busy") {
-        operationInFlight.current = false;
-        activeTaskId.current = null;
-        setInstalling(false);
-        addToast({
-          type: "warning",
-          title: "Operation In Progress",
-          message: result.message || "Another operation is already running.",
-        });
-      } else if (result?.status === "error" && !taskStartedRef.current) {
-        operationInFlight.current = false;
-        activeTaskId.current = null;
-        setInstalling(false);
-        setTerminalOpen(false);
-        addToast({
-          type: "error",
-          title: "Operation Failed",
-          message: result.message || `${title} could not start.`,
-        });
-      }
-      return result;
-    } catch (error) {
-      operationInFlight.current = false;
-      activeTaskId.current = null;
-      setInstalling(false);
-      throw error;
     }
   };
 
@@ -178,59 +104,8 @@ export default function App() {
       checkStatus();
     }, 5000);
 
-    const unlistenStarted = listen("cmd-started", (event) => {
-      if (operationInFlight.current) {
-        taskStartedRef.current = true;
-        activeTaskId.current = event.payload.task_id;
-      }
-    });
-
-    const unlistenOutput = listen("cmd-output", (event) => {
-      if (!isEventForTask(event.payload, activeTaskId.current)) return;
-      setTerminalLogs((prev) => appendLogLine(prev, event.payload.line));
-      if (terminalRef.current) {
-        terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
-      }
-    });
-
-    const unlistenFinished = listen("cmd-finished", (event) => {
-      const { success, code, message } = event.payload;
-      // A late event from the previous task must not close the terminal or
-      // clear the single-flight flag of the task that replaced it.
-      if (!isEventForTask(event.payload, activeTaskId.current)) return;
-      activeTaskId.current = null;
-      setTerminalTaskResult({ success, code, message });
-      setTerminalLogs((prev) => [
-        ...prev,
-        success
-          ? "\n[PROCESS COMPLETED SUCCESSFULLY]"
-          : `\n[PROCESS FINISHED WITH ERRORS${code ? ` (${code})` : ""}]`,
-      ]);
-      operationInFlight.current = false;
-      setInstalling(false);
-      if (success) {
-        addToast({
-          type: "success",
-          title: "Process Finished",
-          message: "Operation completed successfully.",
-        });
-        checkGappsStatus();
-        checkHoudiniStatus();
-        loadApps();
-      } else {
-        addToast({
-          type: "error",
-          title: PROCESS_ERROR_TITLES[code] || "Process Failed",
-          message: message || "Check the terminal output for details.",
-        });
-      }
-    });
-
     return () => {
       clearInterval(interval);
-      unlistenStarted.then((f) => f());
-      unlistenOutput.then((f) => f());
-      unlistenFinished.then((f) => f());
     };
   }, [addToast]);
 
@@ -917,36 +792,6 @@ export default function App() {
       addToast({
         type: "error",
         title: "Display Config Failed",
-        message: String(err),
-      });
-    }
-  };
-
-  const handleCancelTask = async () => {
-    const taskId = activeTaskId.current;
-    if (!taskId) {
-      addToast({
-        type: "warning",
-        title: "Nothing to Cancel",
-        message: "No streaming operation is active.",
-      });
-      return;
-    }
-
-    try {
-      addToast({
-        type: "warning",
-        title: "Cancelling Operation",
-        message: "Stopping the current operation...",
-      });
-      // Send the ID, not a global flag: a stale click must not stop the next
-      // task, and the backend only cancels the operation that owns this ID.
-      await invoke("cancel_task", { taskId });
-    } catch (err) {
-      console.error("Cancel task failed:", err);
-      addToast({
-        type: "error",
-        title: "Cancellation Error",
         message: String(err),
       });
     }
