@@ -271,23 +271,32 @@ fn spawn_line_reader(
 ) -> thread::JoinHandle<()> {
     let task_id = task_id.to_string();
     thread::spawn(move || {
-        let mut reader = BufReader::new(reader);
-        let mut buffer = String::new();
-        let mut byte = [0; 1];
-        loop {
-            match reader.read(&mut byte) {
-                Ok(0) | Err(_) => break,
-                Ok(_) => {}
-            }
-            let c = byte[0] as char;
-            if c == '\n' || c == '\r' {
-                flush_line(&app, &task_id, &mut buffer, &captured);
-            } else {
-                buffer.push(c);
-            }
-        }
-        flush_line(&app, &task_id, &mut buffer, &captured);
+        read_lines(reader, |mut line| {
+            flush_line(&app, &task_id, &mut line, &captured)
+        });
     })
+}
+
+/// Split a byte stream on `\n` and `\r`, decoding each line as UTF-8 only once
+/// it is complete: progress bars (tqdm, pip) draw with multi-byte characters
+/// such as `█`, which byte-by-byte decoding would turn into mojibake.
+fn read_lines(reader: impl Read, mut on_line: impl FnMut(String)) {
+    let mut reader = BufReader::new(reader);
+    let mut line = Vec::new();
+    let mut byte = [0; 1];
+    loop {
+        match reader.read(&mut byte) {
+            Ok(0) | Err(_) => break,
+            Ok(_) => {}
+        }
+        if byte[0] == b'\n' || byte[0] == b'\r' {
+            on_line(String::from_utf8_lossy(&line).into_owned());
+            line.clear();
+        } else {
+            line.push(byte[0]);
+        }
+    }
+    on_line(String::from_utf8_lossy(&line).into_owned());
 }
 
 /// Why a child is no longer being waited for.
@@ -988,6 +997,17 @@ mod tests {
 
         assert!(cancel_active_task(&task_id));
         assert!(task.is_cancelled(), "the matching task must be cancelled");
+    }
+
+    #[test]
+    fn read_lines_keeps_utf8_progress_bars_intact() {
+        let input = " 42%|████▏     | 82.5M\r 43%|████▎     | 84.1M\nlast";
+        let mut lines = Vec::new();
+        read_lines(input.as_bytes(), |line| lines.push(line));
+        assert_eq!(
+            lines,
+            [" 42%|████▏     | 82.5M", " 43%|████▎     | 84.1M", "last"]
+        );
     }
 
     #[test]
