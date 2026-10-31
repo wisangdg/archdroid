@@ -17,6 +17,7 @@ import ConfirmModal from "./components/ui/ConfirmModal";
 import { useToasts } from "./hooks/useToasts";
 import { useStreamingTask } from "./hooks/useStreamingTask";
 import { useEngineStatus } from "./hooks/useEngineStatus";
+import { useDeviceConfig } from "./hooks/useDeviceConfig";
 
 export default function App() {
   const [activeTab, setActiveTab] = useState("home");
@@ -43,6 +44,15 @@ export default function App() {
       checkMultitouchStatus();
     },
   });
+  const {
+    multiWindow,
+    invertColors,
+    displayRes,
+    toggleMultiWindow,
+    toggleInvertColors,
+    handleApplyResolution,
+    handlePropSet,
+  } = useDeviceConfig({ addToast });
   const {
     installing,
     operationInFlight,
@@ -77,13 +87,6 @@ export default function App() {
   });
 
   // Config State
-  const [multiWindow, setMultiWindow] = useState(false);
-  const [invertColors, setInvertColors] = useState(false);
-  const [displayRes, setDisplayRes] = useState({
-    width: "",
-    height: "",
-    dpi: "",
-  });
 
   // Ask the backend which distro packages the action would install. The modal
   // shows this list and the exact command; the same list is sent back as the
@@ -105,7 +108,6 @@ export default function App() {
     loadApps();
     checkGappsStatus();
     checkHoudiniStatus();
-    loadConfigs();
   }, []);
 
   const checkGappsStatus = async () => {
@@ -542,135 +544,6 @@ export default function App() {
     }
   };
 
-  const loadConfigs = async () => {
-    try {
-      const mw = await invoke("waydroid_prop_get", {
-        key: "persist.waydroid.multi_windows",
-      });
-      setMultiWindow(mw.status === "success" && mw.data === "true");
-
-      const inv = await invoke("waydroid_prop_get", {
-        key: "persist.waydroid.invert_colors",
-      });
-      setInvertColors(inv.status === "success" && inv.data === "true");
-
-      const widthRes = await invoke("waydroid_prop_get", {
-        key: "persist.waydroid.width",
-      });
-      const heightRes = await invoke("waydroid_prop_get", {
-        key: "persist.waydroid.height",
-      });
-      const dpiRes = await invoke("waydroid_prop_get", {
-        key: "ro.sf.lcd_density",
-      });
-
-      setDisplayRes({
-        width: widthRes.status === "success" ? widthRes.data || "" : "",
-        height: heightRes.status === "success" ? heightRes.data || "" : "",
-        dpi: dpiRes.status === "success" ? dpiRes.data || "" : "",
-      });
-    } catch (e) {
-      console.error("Failed to load configs:", e);
-    }
-  };
-
-  const handleApplyResolution = async ({ width, height, dpi }) => {
-    try {
-      if (width) {
-        await invoke("waydroid_prop_set", {
-          key: "persist.waydroid.width",
-          value: width,
-        });
-      }
-      if (height) {
-        await invoke("waydroid_prop_set", {
-          key: "persist.waydroid.height",
-          value: height,
-        });
-      }
-      if (dpi) {
-        await invoke("waydroid_prop_set", {
-          key: "ro.sf.lcd_density",
-          value: dpi,
-        });
-      }
-      await loadConfigs();
-      addToast({
-        type: "success",
-        title: "Display Profile Updated",
-        message: `Applied ${width} × ${height} (${dpi} DPI). Restart Waydroid session to apply changes.`,
-        duration: 5000,
-      });
-    } catch (err) {
-      console.error("Failed to apply resolution:", err);
-      addToast({
-        type: "error",
-        title: "Display Config Failed",
-        message: String(err),
-      });
-    }
-  };
-
-  const toggleConfig = async (key, currentValue, setter, label) => {
-    const newValue = currentValue ? "false" : "true";
-    try {
-      const res = await invoke("waydroid_prop_set", { key, value: newValue });
-      if (res?.status === "success") {
-        setter(!currentValue);
-        addToast({
-          type: "info",
-          title: "Config Updated",
-          message: `${label || key} set to ${!currentValue ? "ON" : "OFF"}.`,
-          duration: 2500,
-        });
-      } else {
-        addToast({
-          type: "error",
-          title: "Config Toggle Failed",
-          message: res?.message || `Failed to update ${label || key}.`,
-        });
-      }
-    } catch (e) {
-      console.error(`Failed to toggle config ${key}:`, e);
-      addToast({
-        type: "error",
-        title: "Config Toggle Failed",
-        message: String(e),
-      });
-    }
-  };
-
-  const handlePropSet = async (e) => {
-    e.preventDefault();
-    const key = e.target.elements.propKey.value;
-    const val = e.target.elements.propVal.value;
-    try {
-      const res = await invoke("waydroid_prop_set", { key: key, value: val });
-      if (res.status === "success") {
-        addToast({
-          type: "success",
-          title: "Property Applied",
-          message: `Set ${key} = ${val}`,
-        });
-        e.target.reset();
-        await loadConfigs();
-      } else {
-        addToast({
-          type: "error",
-          title: "Property Error",
-          message: res.message || "Failed to set property.",
-        });
-      }
-    } catch (err) {
-      console.error("Prop set error:", err);
-      addToast({
-        type: "error",
-        title: "Prop Set Error",
-        message: String(err),
-      });
-    }
-  };
-
   const handleInstallPhantom = async () => {
     try {
       await runStreamingTask("install_phantom", {
@@ -913,22 +786,8 @@ export default function App() {
                 <SettingsView
                   multiWindow={multiWindow}
                   invertColors={invertColors}
-                  onToggleMultiWindow={() =>
-                    toggleConfig(
-                      "persist.waydroid.multi_windows",
-                      multiWindow,
-                      setMultiWindow,
-                      "Multi-Window Mode"
-                    )
-                  }
-                  onToggleInvertColors={() =>
-                    toggleConfig(
-                      "persist.waydroid.invert_colors",
-                      invertColors,
-                      setInvertColors,
-                      "Invert Colors"
-                    )
-                  }
+                  onToggleMultiWindow={toggleMultiWindow}
+                  onToggleInvertColors={toggleInvertColors}
                   onPropSet={handlePropSet}
                   onOpenSharedFolder={handleOpenSharedFolder}
                   onViewLogs={handleViewLogs}
