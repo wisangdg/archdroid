@@ -7,7 +7,7 @@ use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager};
 
 mod adb;
@@ -1475,6 +1475,32 @@ async fn install_phantom(app: AppHandle) -> CommandResult {
         .into_command_result()
 }
 
+/// How long a launched GUI gets to fail before it counts as started.
+const LAUNCH_GRACE: Duration = Duration::from_millis(1500);
+
+/// `spawn()` succeeding only means exec worked; a GUI that cannot open its
+/// display exits within a moment. Report that exit instead of "Launched", and
+/// reap the child in the background once it is running so it never lingers as
+/// a zombie.
+fn watch_launch(
+    mut child: std::process::Child,
+    grace: Duration,
+) -> Result<(), std::process::ExitStatus> {
+    let deadline = Instant::now() + grace;
+    while Instant::now() < deadline {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => return Ok(()),
+            Ok(Some(status)) => return Err(status),
+            Ok(None) => thread::sleep(Duration::from_millis(100)),
+            Err(_) => break,
+        }
+    }
+    thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
+}
+
 #[tauri::command]
 async fn run_phantom() -> CommandResult {
     off_main_thread(run_phantom_sync).await
@@ -1492,7 +1518,13 @@ fn run_phantom_sync() -> CommandResult {
 
     if let Some(gui_path) = gui_bin {
         return match Command::new(&gui_path).spawn() {
-            Ok(_) => CommandResult::with_message("Launched Phantom Keymapper GUI."),
+            Ok(child) => match watch_launch(child, LAUNCH_GRACE) {
+                Ok(()) => CommandResult::with_message("Launched Phantom Keymapper GUI."),
+                Err(status) => AppError::command_failed(format!(
+                    "Phantom GUI exited right after launch ({status}). Run phantom-gui from a terminal to see why."
+                ))
+                .into(),
+            },
             Err(err) => {
                 AppError::from_spawn("phantom-gui", "Failed to spawn Phantom GUI.", err).into()
             }
@@ -1531,9 +1563,15 @@ fn run_phantom_sync() -> CommandResult {
         };
 
         return match result {
-            Ok(_) => {
-                CommandResult::with_message(&format!("Launched Phantom Keymapper via {term}."))
-            }
+            Ok(child) => match watch_launch(child, LAUNCH_GRACE) {
+                Ok(()) => {
+                    CommandResult::with_message(&format!("Launched Phantom Keymapper via {term}."))
+                }
+                Err(status) => AppError::command_failed(format!(
+                    "{term} exited right after launch ({status}) while starting Phantom."
+                ))
+                .into(),
+            },
             Err(err) => {
                 AppError::from_spawn(&term, "Failed to spawn terminal emulator.", err).into()
             }
@@ -1790,6 +1828,24 @@ mod tests {
         assert_eq!(
             redact_with_home("plain line", Some("/home/alice")),
             "plain line"
+        );
+    }
+
+    #[test]
+    fn a_launch_that_dies_at_once_is_reported_and_a_running_one_is_not() {
+        let failed = Command::new("sh").args(["-c", "exit 3"]).spawn().unwrap();
+        let status = watch_launch(failed, Duration::from_secs(2)).unwrap_err();
+        assert_eq!(status.code(), Some(3));
+
+        let quick_ok = Command::new("true").spawn().unwrap();
+        assert!(watch_launch(quick_ok, Duration::from_secs(2)).is_ok());
+
+        let running = Command::new("sleep").arg("5").spawn().unwrap();
+        let start = Instant::now();
+        assert!(watch_launch(running, Duration::from_millis(300)).is_ok());
+        assert!(
+            start.elapsed() < Duration::from_secs(2),
+            "must not wait for the GUI to exit"
         );
     }
 

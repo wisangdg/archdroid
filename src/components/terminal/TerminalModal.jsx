@@ -270,7 +270,9 @@ export default function TerminalModal({
                   {progress.isCancelled ? (
                     <>
                       <strong>Operation Cancelled:</strong> The process was
-                      stopped by user request. No modifications were completed.
+                      stopped by user request. Stages marked complete stay
+                      applied; the interrupted stage may be incomplete, so run
+                      the operation again to finish it.
                     </>
                   ) : (
                     <>

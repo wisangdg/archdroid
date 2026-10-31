@@ -20,6 +20,8 @@ Format ini mengacu pada [Keep a Changelog](https://keepachangelog.com/id/1.0.0/)
 - Judul terminal wipe tidak lagi bertuliskan "in Progress..." setelah selesai.
 - Favicon WebView memakai ikon ArchDroid; sebelumnya merujuk `/vite.svg` yang tidak ada.
 - Install/uninstall APK saat container Waydroid sedang beku (*frozen*) kini langsung memperbarui daftar app. Sebelumnya container dibekukan lagi sesaat setelah `adb install`, sebelum Waydroid menulis entri launcher, sehingga app yang berhasil terpasang tidak muncul sampai container aktif kembali.
+- "Launch Keymapper" kini melaporkan error bila `phantom-gui` (atau terminal fallback) langsung keluar setelah dijalankan, bukan menampilkan "Keymapper Launched". Proses yang tetap berjalan di-*reap* agar tidak menjadi zombie.
+- Pesan setelah Cancel tidak lagi menyatakan "No modifications were completed"; tahap yang sudah selesai tetap diterapkan, dan tahap yang terputus mungkin belum lengkap.
 
 ## [0.1.1] - 2026-11-01
 
