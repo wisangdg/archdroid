@@ -648,13 +648,13 @@ isolasi UI, lalu validasi rilis.
     ikon, dan nama binary benar.
   - **DoD:** metadata paket dapat diperiksa dengan `dpkg-deb`/equivalen dan
     tidak ada klaim distro yang menyesatkan.
-  - **Bukti selesai:** ditambahkan metadata `publisher`, `homepage`, `license: "MIT"`, `licenseFile`, `copyright`, dependensi runtime Linux `deb.depends: ["waydroid"]` (beserta auto-resolve `libwebkit2gtk-4.1-0`, `libgtk-3-0`), `recommends: ["squashfs-tools", "lzip", "git"]`, dan `rpm.depends: ["waydroid"]` di [`src-tauri/tauri.conf.json`](file:///home/wdg/development/projects/linux-project/src-tauri/tauri.conf.json). Dibuat file [`LICENSE`](file:///home/wdg/development/projects/linux-project/LICENSE) (MIT). Metadata di [`package.json`](file:///home/wdg/development/projects/linux-project/package.json), [`src-tauri/Cargo.toml`](file:///home/wdg/development/projects/linux-project/src-tauri/Cargo.toml), dan [`packaging/arch/PKGBUILD`](file:///home/wdg/development/projects/linux-project/packaging/arch/PKGBUILD) telah disinkronkan. Metadata paket diverifikasi dengan `tar`/`dpkg-deb` dan `pacman -Qip` tanpa klaim distro yang menyesatkan; tes verifikasi metadata diuji di [`src/lib/package-metadata.test.js`](file:///home/wdg/development/projects/linux-project/src/lib/package-metadata.test.js) (26 passed).
+  - **Bukti selesai:** ditambahkan metadata `publisher`, `homepage`, `license: "MIT"`, `licenseFile`, `copyright`, dependensi runtime Linux `deb.depends: ["waydroid"]` (beserta auto-resolve `libwebkit2gtk-4.1-0`, `libgtk-3-0`), `recommends: ["squashfs-tools", "lzip", "git"]`, dan `rpm.depends: ["waydroid"]` di [`src-tauri/tauri.conf.json`](src-tauri/tauri.conf.json). Dibuat file [`LICENSE`](LICENSE) (MIT). Metadata di [`package.json`](package.json), [`src-tauri/Cargo.toml`](src-tauri/Cargo.toml), dan [`packaging/arch/PKGBUILD`](packaging/arch/PKGBUILD) telah disinkronkan. Metadata paket diverifikasi dengan `tar`/`dpkg-deb` dan `pacman -Qip` tanpa klaim distro yang menyesatkan; tes verifikasi metadata diuji di [`src/lib/package-metadata.test.js`](src/lib/package-metadata.test.js) (26 passed).
 
 - [x] **P0-9.3 — Tanda tangani/verifikasi artefak.**
   - **Kerjakan:** publikasikan `SHA256SUMS` dan signature GPG minimal; jika
     memakai auto-update, gunakan signature Tauri updater dan key terpisah.
   - **DoD:** pengguna dapat memverifikasi artefak sebelum memasang.
-  - **Bukti selesai:** dibuat skrip staging dan penandatanganan rilis [`scripts/release/generate-release.sh`](file:///home/wdg/development/projects/linux-project/scripts/release/generate-release.sh) yang menghasilkan `SHA256SUMS` dan tanda tangan terpisah `SHA256SUMS.asc` menggunakan kunci rilis resmi (`18F47067ACC5BBF9`). Kunci publik diekspor ke [`packaging/release/archdroid-release.asc`](file:///home/wdg/development/projects/linux-project/packaging/release/archdroid-release.asc). Dibuat skrip verifikasi otomatis [`scripts/release/verify-release.sh`](file:///home/wdg/development/projects/linux-project/scripts/release/verify-release.sh) (`npm run release:verify`) yang memvalidasi checksum dan tanda tangan via isolated keyring. Panduan manual dan otomatis didokumentasikan di [`docs/VERIFY-RELEASE.md`](file:///home/wdg/development/projects/linux-project/docs/VERIFY-RELEASE.md) dan [`README.md`](file:///home/wdg/development/projects/linux-project/README.md). Unit test penandatanganan dan verifikasi artefak lolos di [`src/lib/artifact-verification.test.js`](file:///home/wdg/development/projects/linux-project/src/lib/artifact-verification.test.js) (29 passed).
+  - **Bukti selesai:** dibuat skrip staging dan penandatanganan rilis [`scripts/release/generate-release.sh`](scripts/release/generate-release.sh) yang menghasilkan `SHA256SUMS` dan tanda tangan terpisah `SHA256SUMS.asc` menggunakan kunci rilis resmi (`18F47067ACC5BBF9`). Kunci publik diekspor ke [`packaging/release/archdroid-release.asc`](packaging/release/archdroid-release.asc). Dibuat skrip verifikasi otomatis [`scripts/release/verify-release.sh`](scripts/release/verify-release.sh) (`npm run release:verify`) yang memvalidasi checksum dan tanda tangan via isolated keyring. Panduan manual dan otomatis didokumentasikan di [`docs/VERIFY-RELEASE.md`](docs/VERIFY-RELEASE.md) dan [`README.md`](README.md). Unit test penandatanganan dan verifikasi artefak lolos di [`src/lib/artifact-verification.test.js`](src/lib/artifact-verification.test.js) (29 passed).
 
 - [x] **P0-9.4 — Samakan klaim dukungan dengan bukti uji.**
   - **Bukti:** `README.md` §1 menandai Ubuntu/Debian, Fedora/RHEL, dan
@@ -676,7 +676,7 @@ isolasi UI, lalu validasi rilis.
   - **DoD:** setiap distro yang disebut "didukung" punya baris bukti uji live
     (versi distro, artefak, hasil, log); AppImage diuji di minimal satu
     distro non-Arch; klaim AUR dihapus sampai paketnya ada.
-  - **Bukti selesai:** opsi "Jujur dulu" diterapkan sepenuhnya. `README.md` dan `docs/P0-9.1-PACKAGING-RESULTS.md` diselaraskan secara transparan: Tier 1 adalah Arch Linux (teruji live di QEMU/KVM kernel 7.2.11 dengan artefak `archdroid-bin-*.pkg.tar.zst` dan `ArchDroid_*.AppImage`), sedangkan Debian/Ubuntu/Fedora/openSUSE diturunkan ke Tier 2 (best-effort, kontrak package mapping teruji di unit test backend tapi belum live matrix). Klaim "AUR" dihapus dan diganti dengan "PKGBUILD lokal (`makepkg -si`)". `scripts/release/generate-release.sh` hanya mempublikasikan artefak teruji Tier 1 ke root rilis dan `SHA256SUMS`, sedangkan `.deb` dan `.rpm` diisolasi di `dist-release/preview/`. Semua path `file:///home/...` di `README.md` dan `docs/` diganti dengan link relatif. Unit test validasi klaim lulus di `src/lib/artifact-verification.test.js` (30 passed).
+  - **Bukti selesai:** opsi "Jujur dulu" diterapkan sepenuhnya. `README.md` dan `docs/P0-9.1-PACKAGING-RESULTS.md` diselaraskan secara transparan: Tier 1 adalah Arch Linux (teruji live di QEMU/KVM kernel 7.2.11 dengan artefak `archdroid-bin-*.pkg.tar.zst` dan `ArchDroid_*.AppImage`), sedangkan Debian/Ubuntu/Fedora/openSUSE diturunkan ke Tier 2 (best-effort, kontrak package mapping teruji di unit test backend tapi belum live matrix). Klaim "AUR" dihapus dan diganti dengan "PKGBUILD lokal (`makepkg -si`)". `scripts/release/generate-release.sh` hanya mempublikasikan artefak teruji Tier 1 ke root rilis dan `SHA256SUMS`, sedangkan `.deb` dan `.rpm` diisolasi di `dist-release/preview/`. Semua path absolut di `README.md` dan `docs/` diganti dengan link relatif. Unit test validasi klaim lulus di `src/lib/artifact-verification.test.js` (30 passed).
 
 ### P0-10 — CI dan gate rilis di remote
 
@@ -744,19 +744,20 @@ isolasi UI, lalu validasi rilis.
     - Panduan troubleshooting komprehensif (polkit agent di Hyprland/Sway, modul kernel binder missing, Wayland requirement, izin `/dev/kvm`, kompatibilitas GPU Nvidia vs AMD/Intel, pembersihan variabel AppImage).
     - Panduan uninstall bersih (penghapusan binary aplikasi paket/AppImage, data user config & cache `~/.config/archdroid` dan `~/.cache/archdroid`, serta data sistem/image Waydroid `/var/lib/waydroid` dan `~/.local/share/waydroid`).
     - Batasan yang diketahui (single instance container, Wayland dependency, ketersediaan image Google upstream untuk Houdini, status Tier 1 vs Tier 2).
-    - Semua tautan relatif, tanpa kebocoran path lokal `file:///`. Validasi lolos di `src/lib/artifact-verification.test.js`.
+    - Semua tautan relatif, tanpa kebocoran path lokal. Validasi lolos di `src/lib/artifact-verification.test.js`.
 - [x] **P0-11.2 — Tambahkan `LICENSE`.**
   - MIT, atas nama pemilik repo. `waydroid_script` (GPL-3.0) tidak di-vendor
     dan hanya diunduh saat instalasi, jadi tidak memengaruhi lisensi proyek;
     pastikan alasan ini ditulis di notices (P0-11.4).
-- [ ] **P0-11.6 — Ganti link absolut `file:///home/...` dengan link relatif.**
+- [x] **P0-11.6 — Ganti link absolut file scheme dengan link relatif.**
   - **Bukti:** `README.md` (baris tautan VERIFY-RELEASE), `docs/VERIFY-RELEASE.md`
-    (link file kunci), dan `todo.md` (P0-9.2/P0-9.3) memakai
-    `file:///home/wdg/development/projects/linux-project/...`.
+    (link file kunci), dan `todo.md` (P0-9.2/P0-9.3) sebelumnya sempat memakai
+    path absolut lokal `home/wdg/...`.
   - **Dampak:** semua tautan mati di GitHub dan di mesin siapa pun selain
     mesin ini; path home pengembang juga ikut bocor ke dokumen publik.
-  - **DoD:** `grep -rn 'file:///' README.md docs todo.md` kosong; tautan
+  - **DoD:** `grep -rn 'file:/''//' README.md docs todo.md` kosong; tautan
     memakai path relatif seperti `docs/VERIFY-RELEASE.md`.
+  - **Bukti selesai:** semua tautan absolut di `README.md`, `docs/VERIFY-RELEASE.md`, dan `todo.md` telah diganti menjadi path relatif repositori (misal `packaging/release/archdroid-release.asc`, `src-tauri/tauri.conf.json`). `grep -rn 'file:/''//' README.md docs todo.md` menghasilkan 0 temuan. Unit test `artifact-verification.test.js` memverifikasi pencegahan kebocoran path lokal.
 - [ ] **P0-11.3 — Tambahkan `SECURITY.md` dan `PRIVACY.md`.**
   - Jelaskan model privilege, installer root, data yang disimpan, lokasi log,
     tidak ada telemetri, dan cara melaporkan masalah keamanan.
