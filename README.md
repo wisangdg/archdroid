@@ -10,17 +10,26 @@ ArchDroid mempermudah inisialisasi image Android, manajemen aplikasi APK, injeks
 
 ArchDroid dirancang dengan arsitektur **multi-distro** yang secara otomatis mendeteksi package manager host dan memetakan paket dependency yang sesuai.
 
-### Target Resmi yang Didukung (Supported)
+### Target Resmi — Tier 1 (Didukung Penuh & Teruji Live)
+
+| Distribusi | Package Manager | Format Paket | Status Dukungan & Bukti Uji |
+|---|---|---|---|
+| **Arch Linux / CachyOS / EndeavourOS / Manjaro** | `pacman` | PKGBUILD lokal (`makepkg -si`) / AppImage | **Didukung Penuh (Tier 1)**<br>Teruji live di VM QEMU/KVM Arch Linux (kernel 7.2.11, desktop launcher `gtk-launch`, Waydroid daemon, preflight, install/uninstall). Lihat [docs/P0-8.2-MATRIX-RESULTS.md](docs/P0-8.2-MATRIX-RESULTS.md) dan [docs/P0-9.1-PACKAGING-RESULTS.md](docs/P0-9.1-PACKAGING-RESULTS.md). |
+
+### Target Eksperimental — Tier 2 (Best-Effort — Belum Diuji Live)
 
 | Distribusi | Package Manager | Format Paket | Status Dukungan |
 |---|---|---|---|
-| **Arch Linux / CachyOS / EndeavourOS / Manjaro** | `pacman` | AUR / Source / AppImage | **Didukung Penuh (Tier 1)** |
-| **Ubuntu / Debian / Linux Mint / Pop!_OS** | `apt-get` | `.deb` / AppImage | **Didukung Penuh (Tier 1)** |
-| **Fedora / RHEL / Alma / Rocky Linux** | `dnf` | RPM / AppImage | **Didukung (Tier 1)** |
-| **openSUSE (Tumbleweed / Leap)** | `zypper` | RPM / AppImage | **Didukung (Tier 1)** |
+| **Ubuntu / Debian / Linux Mint / Pop!_OS** | `apt-get` | Preview `.deb` / AppImage | **Tier 2 (Best-Effort)**<br>Kontrak mapping paket teruji di unit test backend (`platform.rs`), tetapi belum melalui live testing matriks sistem operasi penuh. |
+| **Fedora / RHEL / Alma / Rocky Linux** | `dnf` | Preview `.rpm` / AppImage | **Tier 2 (Best-Effort)**<br>Kontrak mapping paket teruji di unit test backend (`platform.rs`), tetapi belum melalui live testing matriks sistem operasi penuh. |
+| **openSUSE (Tumbleweed / Leap)** | `zypper` | Preview `.rpm` / AppImage | **Tier 2 (Best-Effort)**<br>Kontrak mapping paket teruji di unit test backend (`platform.rs`), tetapi belum melalui live testing matriks sistem operasi penuh. |
 
 > [!NOTE]
-> Dependency sistem (`waydroid`, `squashfs-tools` / `squashfs`, `lzip`, `git`) dipetakan secara dinamis berdasarkan package manager host yang terdeteksi, dan diinstal menggunakan flag non-interaktif minimalis (`--needed` / `--no-install-recommends`).
+> Dependency sistem (`waydroid`, `squashfs-tools` / `squashfs`, `lzip`, `git`) dipetakan secara dinamis berdasarkan package manager host yang terdeteksi, dan diinstal menggunakan flag non-interaktif minimalis (`--needed` / `--no-install-recommends`). ArchDroid tidak pernah memasang paket secara diam-diam: dialog konfirmasi menampilkan daftar paket dan command persis yang akan dijalankan, dan script root hanya menjalankan paket yang disetujui.
+
+### Integritas & Verifikasi Artefak
+
+Setiap rilis resmi Tier 1 (`archdroid-bin-*.pkg.tar.zst` dan `ArchDroid_*.AppImage`) disertai file checksum `SHA256SUMS` dan tanda tangan digital GPG `SHA256SUMS.asc` dari kunci publik resmi (`18F47067ACC5BBF9`). Panduan verifikasi manual dan otomatis dapat dilihat di [docs/VERIFY-RELEASE.md](docs/VERIFY-RELEASE.md).
 
 ### Target yang Tidak Didukung (Explicitly Unsupported)
 
@@ -57,8 +66,11 @@ menampilkan item yang kurang beserta perintah perbaikannya:
 - **Installer GApps/Houdini/Multitouch**: gagal cepat sebelum prompt root bila
   elevation, jaringan, disk, atau image Waydroid belum siap. Script root
   GApps/Houdini juga memasang `git`, `python3`/`python3-venv`, `unsquashfs`,
-  dan `lzip` yang hilang sebelum checkout. Pada distro tanpa package manager
-  yang didukung, script berhenti dengan daftar tool yang harus dipasang manual.
+  dan `lzip` yang hilang sebelum checkout, tetapi hanya paket yang tampil dan
+  disetujui di dialog konfirmasi; paket yang dibutuhkan setelah itu membuat
+  script berhenti dengan pesan yang bisa ditindaklanjuti. Pada distro tanpa
+  package manager yang didukung, script berhenti dengan daftar tool yang harus
+  dipasang manual.
 - **Phantom Keymapper**: build membutuhkan `git`, `cargo`, JDK (`javac` dan
   `jar`), `sed`, `install`, `d8`, dan `android.jar`. `d8`/`android.jar` tidak
   selalu tersedia di repositori distro; instal Android SDK command-line tools
@@ -95,6 +107,7 @@ ArchDroid menerapkan prinsip keamanan defensif berlapis:
 - **Hash-Pinned Python Dependencies**: Dependensi Python untuk helper instalasi di-lock dan diverifikasi dengan hash SHA-256 (`--require-hashes --only-binary=:all:`).
 - **Isolasi Lingkungan Root**: Script privileged berjalan di direktori temporer privat (`mktemp -d`, mode `0700`), `SUDO_USER` di-unset, dan cache diarahkan ke `$ARCHDROID_WORK/cache` agar proses root tidak pernah menulis file ke `~/.cache` milik user desktop.
 - **Explicit Consent**: Semua installer root wajib dikonfirmasi melalui modal persetujuan pengguna sebelum prompt root polkit/sudo muncul.
+- **Package Approval**: Daftar paket sistem dan command persis yang akan dijalankan ditampilkan di modal; backend memvalidasi ulang daftar yang disetujui dan menolak instalasi paket di luar rencana (`approval_required` / `invalid_input`).
 - **Fail-Fast Preflight**: Jika dependensi hilang pada distribusi yang tidak didukung, sistem menolak operasi sebelum meminta izin root.
 
 ---

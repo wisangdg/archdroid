@@ -23,12 +23,18 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src ipc: http://ipc.localhost; object-src 'none'; frame-src 'none'",
+      "devCsp": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' ipc: http://ipc.localhost http://localhost:5173 ws://localhost:5173; object-src 'none'; frame-src 'none'"
     }
   },
   "bundle": {
     "active": true,
     "targets": "all",
+    "publisher": "Wisang Drillian Geni <gwisang45@gmail.com>",
+    "homepage": "https://github.com/archdroid/archdroid",
+    "license": "MIT",
+    "licenseFile": "../LICENSE",
+    "copyright": "Copyright © 2026 Wisang Drillian Geni",
     "category": "Utility",
     "shortDescription": "Android emulator manager for Linux",
     "longDescription": "ArchDroid is an LDPlayer-style desktop front-end for Waydroid. It initializes the Android system image, starts and stops the engine, installs APKs, injects GApps and ARM translation (libhoudini), manages system properties, opens the shared folder and provides smart key mapping - all from a single window.",
@@ -39,6 +45,31 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "linux": {
+      "deb": {
+        "depends": [
+          "waydroid"
+        ],
+        "recommends": [
+          "squashfs-tools",
+          "lzip",
+          "git"
+        ],
+        "section": "utils",
+        "priority": "optional"
+      },
+      "rpm": {
+        "depends": [
+          "waydroid"
+        ],
+        "recommends": [
+          "squashfs-tools",
+          "lzip",
+          "git"
+        ],
+        "release": "1"
+      }
+    },
     "android": {
       "debugApplicationIdSuffix": ".debug"
     }

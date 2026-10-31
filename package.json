@@ -3,13 +3,24 @@
   "private": true,
   "version": "0.1.0",
   "description": "ArchDroid - an LDPlayer-style Android emulator manager for Linux, powered by Waydroid",
+  "license": "MIT",
+  "author": "Wisang Drillian Geni <gwisang45@gmail.com>",
+  "homepage": "https://github.com/archdroid/archdroid",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/archdroid/archdroid.git"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "test": "node --test src/lib/*.test.js",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "build:bundles": "NO_STRIP=1 tauri build",
+    "package:arch": "cd packaging/arch && makepkg -f",
+    "release:stage": "./scripts/release/generate-release.sh",
+    "release:verify": "./scripts/release/verify-release.sh"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",

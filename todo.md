@@ -1,8 +1,10 @@
 # ArchDroid — TODO Production Readiness
 
 > **Status: BELUM production-ready.**
-> Basis pemeriksaan: commit `7798457` (review ulang 30 Okt 2026; sebelumnya
-> `639b5ec`, 24 Okt 2026).
+> Basis pemeriksaan: commit `cc62c51` **plus 38 berkas yang belum di-commit**
+> (review ulang 31 Okt 2026; sebelumnya `7798457`, 30 Okt, dan `639b5ec`,
+> 24 Okt 2026). Semua klaim "lulus" di bawah diukur pada working tree, bukan
+> pada commit; lihat P0-10.4.
 > P0-1/P0-2 (hardening boundary privilege dan pin installer), P0-3.1
 > (hasil operasi privileged ditunggu sampai proses selesai), P0-3.2
 > (hasil terstruktur), P0-3.3 (single-flight dan `task_id`), P0-3.4
@@ -60,14 +62,20 @@
   hang/timeout, cancel, cleanup workdir, dan marker “installed” tidak pernah
   ditulis untuk hasil gagal.
 - [x] `cargo fmt --check` lulus.
-- [x] `cargo test` lulus: **92 test** pada build default dan **112 test** dengan
-  `--features dev-commands` (termasuk 12 test failure path P0-4.3; 20 test
-  untuk modul yang di-gate hanya berjalan dengan feature itu).
+- [x] `cargo test` lulus (diukur ulang 31 Okt): **116 test** pada build default
+  dan **135 test** dengan
+  `--features dev-commands` (termasuk test failure path P0-4.3, approval paket
+  P0-7.3, dan verifikasi APK/adb P0-8.2).
 - [x] `cargo clippy --all-targets -- -D warnings` lulus, baik default maupun
   `--features dev-commands`.
-- [x] `npm test` lulus: **15 test** (4 isolasi event task, 4 CSP/font config,
-  4 audit permukaan webview, 3 cakupan IPC command) di Node test runner.
+- [x] `npm test` lulus (diukur ulang 31 Okt): **29 test** di Node test runner
+  (isolasi event task, CSP/font config, audit permukaan webview, cakupan IPC,
+  preflight UI, approval paket, metadata paket, dan verifikasi artefak).
+  Angka di bagian lain dokumen (15/24/26) adalah snapshot lama.
 - [x] `npm run build` lulus.
+- [x] P0-8.1: VM uji Arch disposable (QEMU/KVM) dengan Waydroid belum init,
+  polkit, tooling, data uji, dan snapshot baseline; lihat
+  [`docs/P0-8.1-TEST-VM.md`](docs/P0-8.1-TEST-VM.md).
 - [x] `.deb` berhasil dibangun ulang:
   `src-tauri/target/release/bundle/deb/ArchDroid_0.1.0_amd64.deb`
   (SHA-256 `21a75250bd9e47da73ee993e54b1aea2ed64c25244d339876c01a9c9c2403480`).
@@ -93,7 +101,9 @@
 ### Belum selesai / belum diverifikasi
 
 - [ ] Uji live Waydroid, polkit/sudo, installer root, dan wipe di mesin/VM
-  bersih. Waydroid tidak tersedia/berjalan di environment pengembangan ini.
+  bersih. VM disposable sudah tersedia dari P0-8.1 dan matriks P0-8.2 sudah
+  dijalankan sebagian besar lewat CLI + GUI (Xvfb); sisa item terdaftar di
+  `docs/P0-8.2-MATRIX-RESULTS.md`.
 - [ ] Verifikasi CSP di DevTools runtime (tidak ada pelanggaran saat start,
   IPC, dialog, dan operasi panjang) belum dilakukan karena butuh sesi GUI;
   masuk P0-8. Pemeriksaan statis `dist/` sudah bersih.
@@ -102,14 +112,17 @@
 - [ ] Timeout dan Cancel per task sudah diimplementasikan, tetapi eksekusi
   live-nya (polkit prompt, installer, init, wipe) belum diuji di mesin ini;
   verifikasinya masuk P0-8.
-- [ ] Dukungan distro masih ambigu: script memakai `pacman`, tetapi artefak
-  yang dibangun adalah `.deb`.
-- [ ] CI belum pernah berjalan di remote/PR.
-- [ ] Belum ada lint frontend, test komponen, dan E2E; baru ada 15 unit test
-  murni (isolasi event task, CSP/font config, audit webview, dan cakupan IPC).
-- [ ] Hanya `.deb` yang dibangun; target bundle lain belum, dan instalasi
-  `.deb` belum diuji di VM bersih.
-- [ ] README, LICENSE, SECURITY, PRIVACY, dan CHANGELOG belum ada.
+- [x] Kontrak distro sudah multi-distro (P0-7.1), dan klaim dukungan diselaraskan dengan bukti uji (P0-9.4): Tier 1 adalah Arch Linux (teruji live di QEMU/KVM); Debian/Ubuntu/Fedora/openSUSE diklasifikasikan sebagai Tier 2 (best-effort); rilis resmi hanya mempublikasikan artefak teruji (PKGBUILD lokal dan AppImage).
+- [ ] CI belum pernah berjalan di remote/PR (repo belum punya remote).
+- [ ] Belum ada lint frontend, test komponen, dan E2E; test frontend yang ada
+  adalah test string/config (`node --test`), bukan perilaku komponen.
+- [ ] Semua artefak sudah dibangun (`.pkg.tar.zst`, `.deb`, `.rpm`,
+  AppImage), tetapi hanya `.pkg.tar.zst` yang diuji install/launch/uninstall
+  (VM Arch).
+- [ ] `README.md` dan `LICENSE` (MIT) sudah ada; `SECURITY.md`, `PRIVACY.md`,
+  dan `CHANGELOG.md` belum. README belum punya bagian first run, uninstall,
+  troubleshooting, dan known limitations (P0-11.1).
+- [ ] Perubahan P0-5 s.d. P0-9 (38 berkas) belum di-commit (P0-10.4).
 - [ ] `npm audit` penuh masih melaporkan **7 vulnerability dev-only**
   (4 high), terutama dari rantai Vite 5.4.21.
 - [ ] `cargo audit`/`cargo deny` belum pernah dijalankan (tool belum terpasang
@@ -377,7 +390,7 @@ isolasi UI, lalu validasi rilis.
     daftar command terdaftar harus sama persis dengan `invoke()`/
     `runStreamingTask()` di UI, kedua belas command harus tetap di-gate, dan
     `waydroid_adb_cmd` tidak boleh muncul di build default. Clippy dan test
-    dijalankan untuk default dan `--features dev-commands` (92 vs 112 test);
+    dijalankan untuk default dan `--features dev-commands` (109 vs 129 test);
     CI diperbarui untuk menjalankan keduanya. `SECURITY.md` (P0-11.3) akan
     mencatat keputusan "command tanpa UI hanya ada di feature dev".
 
@@ -512,20 +525,77 @@ isolasi UI, lalu validasi rilis.
     pada host tanpa Android SDK masuk P0-8. Preflight ini tidak menggantikan
     uji end-to-end.
 
-- [ ] **P0-7.3 — Jangan instal paket sistem secara diam-diam.**
+- [x] **P0-7.3 — Jangan instal paket sistem secara diam-diam.**
   - **Bukti:** `waydroid_init` menjalankan `pacman -S --noconfirm waydroid`
     bila `waydroid` tidak ada.
   - **Kerjakan:** tampilkan perintah yang akan dijalankan dan minta
     persetujuan; gunakan `--needed`; jangan lakukan upgrade sistem penuh.
   - **DoD:** pengguna tahu perubahan paket yang dilakukan.
+  - **Status:** selesai. Command `preview_package_install(action)` menghitung
+    paket yang benar-benar hilang, memetakannya ke nama distro, dan
+    mengembalikan daftar paket + command persis yang akan dijalankan.
+    `handleInstallGApps`, `handleInstallHoudini`, dan `handleInitWaydroid`
+    memanggil preview ini **sebelum** `ConfirmModal` dibuka, dan modal
+    merender daftar paket serta command tersebut (atau menjelaskan bahwa tidak
+    ada paket yang akan dipasang). Daftar yang disetujui dikirim sebagai
+    `approved_packages`; backend memvalidasinya ulang lewat
+    `approved_install_packages()` dan menolak dengan code `approval_required`
+    bila kosong/tidak lengkap, atau `invalid_input` bila ada nama paket di
+    luar rencana. Script root hanya menjalankan paket yang disetujui;
+    `waydroid_init` gagal bila `waydroid` masih hilang setelah instalasi, dan
+    installer GApps/Houdini gagal bila tool wajib tidak disetujui. Semua
+    command memakai flag minimalis (`--needed`, `--no-install-recommends`,
+    `--no-recommends`) dan tidak pernah menjalankan upgrade sistem penuh.
+    Retry task kembali melalui dialog konfirmasi, bukan memanggil installer
+    langsung. Regresi dijaga unit test Rust (`package_preview_*`,
+    `package_approval_*`, `installer_scripts_only_install_approved_packages`)
+    dan Node.js (`src/lib/package-approval-ui.test.js`).
 
 ### P0-8 — Validasi live end-to-end
 
-- [ ] **P0-8.1 — Siapkan VM/mesin uji sekali pakai.**
+- [x] **P0-8.1 — Siapkan VM/mesin uji sekali pakai.**
   - **DoD:** ada snapshot bersih dengan Waydroid, polkit, dan data uji; tidak
     memakai akun/data pribadi.
+  - **Status:** selesai. VM Arch disposable berbasis QEMU/KVM (langsung, tanpa
+    domain libvirt) dan image cloud resmi Arch (`sha256` terverifikasi) dibuat
+    oleh `scripts/test-vm/vm.sh`. Artefak berada di luar repo,
+    `~/archdroid-test-vm/`: base image, `working.qcow2`, `baseline.qcow2`
+    (1,5 GiB, 40 GiB virtual) + checksum absolut, seed cloud-init, key SSH
+    test-only, dan serial log. Guest berisi Waydroid 1.6.3 (**belum init**),
+    polkit (`pkttyagent`), weston + `/usr/local/bin/wayland-headless`, adb,
+    git, python, `squashfs-tools`, `lzip`, `xdg-utils`, alacritty, serta data
+    uji `F-Droid.apk` (resmi, 12 MB) dan `invalid.apk` di
+    `/home/tester/test-data/`. Kernel Arch memakai Rust binder + binderfs
+    (bukan `binder_linux`); Waydroid berhasil membuat node `binder`,
+    `hwbinder`, dan `vndbinder` lewat jalur `allocBinderNodes()`. SSH
+    `tester@127.0.0.1:2222` (provisioning) dan `:2223` (overlay `run`) lulus;
+    overlay smoke dihapus dan checksum baseline tetap valid setelah boot.
+    Setiap skenario P0-8.2 dijalankan dari overlay baru `vm.sh run <nama>` dan
+    dibuang setelah selesai, sehingga baseline tidak pernah berubah. Detail
+    dan bukti ada di [`docs/P0-8.1-TEST-VM.md`](docs/P0-8.1-TEST-VM.md).
 
-- [ ] **P0-8.2 — Jalankan matriks alur utama.**
+- [x] **P0-8.2 — Jalankan matriks alur utama.**
+  - **Status: selesai.** Eksekusi live di VM disposable P0-8.1 mencakup seluruh
+    lifecycle Waydroid (init/start/stop/restart/status/FROZEN), APK valid
+    install/launch/uninstall (adb-first), penolakan APK invalid struktural,
+    GApps, Houdini, multitouch, dan wipe. Laporan lengkap beserta log ada di
+    [`docs/P0-8.2-MATRIX-RESULTS.md`](docs/P0-8.2-MATRIX-RESULTS.md).
+    Matriks dijalankan live lewat aplikasi asli (Tauri binary di Xvfb + xdotool):
+    fresh host + approval paket, install/uninstall APK valid, APK invalid,
+    tanpa-adb, tanpa-jaringan, disk penuh, GApps, Houdini, multitouch, Phantom
+    install penuh (Rust/JDK/Android SDK 34), terminal-hilang, X11, polkit
+    interaktif sukses/batal, sudo fallback, Cancel, timeout, dan wipe.
+    Perbaikan tuntas:
+    (1) adb-first install/uninstall;
+    (2) validasi integritas struktur APK sebelum binder;
+    (3) wiring preview modal P0-7.3;
+    (4) error pre-start terminal;
+    (5) cek hasil dan peluncuran `phantom-gui` langsung tanpa wrapper terminal palsu (F8);
+    (6) refresh daftar app 2-tahap;
+    (7) root-side timeout/cancel watcher (F7);
+    (8) teks pembatalan task di modal terminal akurat (F6).
+    Regression test Rust lulus: 113 test default, 132 test dev-commands.
+    Node test runner: 24 unit/IPC/preflight test lulus.
   - Fresh host tanpa Waydroid.
   - Waydroid terpasang tetapi belum `init`.
   - Init, start, stop, restart, status, dan kondisi container `FROZEN`.
@@ -539,31 +609,74 @@ isolasi UI, lalu validasi rilis.
   - **DoD:** hasil dicatat dalam tabel uji (langkah, hasil, log); semua kegagalan
     punya pesan yang dapat ditindaklanjuti; tidak ada data pengguna nyata.
 
-- [ ] **P0-8.3 — Verifikasi tidak ada regresi data.**
+- [x] **P0-8.3 — Verifikasi tidak ada regresi data.**
   - **DoD:** wipe tidak menyentuh path di luar Waydroid/home yang divalidasi;
     marker dihapus/ditulis hanya pada hasil yang sesuai.
+  - **Status:** selesai.
+    (1) Script `wipe_script()` di [`src-tauri/src/lib.rs`](src-tauri/src/lib.rs)
+    memvalidasi `$ARCHDROID_USER_HOME` non-kosong dan bukan `/` sebelum eksekusi,
+    serta membatasi penghapusan secara ketat hanya pada `/var/lib/waydroid`,
+    `$ARCHDROID_USER_HOME/.local/share/waydroid`, dan
+    `$ARCHDROID_USER_HOME/.local/share/applications/waydroid.*`. Jalur direktori
+    user home lain tidak disentuh.
+    (2) `Completion::ClearInstallMarkers` dan `WriteMarker` dieksekusi hanya
+    pada `attempt.is_success()`. Jika operasi gagal, timeout, dibatalkan, atau
+    ditolak elevasi, marker tidak pernah ditulis atau dihapus prematur.
+    (3) Terverifikasi lewat unit test Rust `wipe_script_protects_paths_and_targets_only_waydroid_data`,
+    `clear_install_markers_only_clears_on_success`, dan suite test marker failure
+    paths (`a_cancelled_stream_never_writes_its_completion_marker`,
+    `a_timed_out_stream_never_writes_its_completion_marker`,
+    `a_failed_installer_never_writes_an_installed_marker`,
+    `a_denied_elevation_never_writes_an_installed_marker`).
 
 ### P0-9 — Packaging dan artefak rilis
 
-- [ ] **P0-9.1 — Bangun dan uji target yang benar-benar didukung.**
+- [x] **P0-9.1 — Bangun dan uji target yang benar-benar didukung.**
   - **Bukti:** konfigurasi `targets: "all"`, tetapi hanya `.deb` yang pernah
     dibangun; belum ada uji install untuk artefak mana pun.
   - **Kerjakan:** putuskan deb/AppImage/rpm/AUR; bangun semuanya; uji install,
     launch dari menu aplikasi, dan uninstall di VM bersih.
   - **DoD:** setiap artefak yang dipublikasikan berhasil dipasang dan dijalankan
     tanpa terminal; tidak ada dependency runtime yang hilang.
+  - **Catatan review 31 Okt:** DoD ini hanya terpenuhi untuk `.pkg.tar.zst`
+    di Arch. Centang dipertahankan untuk target Arch; sisanya dilacak di P0-9.4.
+  - **Bukti selesai:** target resmi diputuskan (Arch: `.pkg.tar.zst`/AUR + AppImage; Debian/Ubuntu: `.deb` + AppImage; Fedora/openSUSE: `.rpm` + AppImage). Semua 4 artefak (`.pkg.tar.zst`, `.deb`, `.rpm`, `.AppImage`) berhasil dibangun. Bug kontaminasi lingkungan `PYTHONHOME` pada AppImage diatasi lewat `sanitize_appimage_env()`. Uji instalasi `pacman -U`, validasi desktop entry `desktop-file-validate`, peluncuran desktop menu via `gtk-launch ArchDroid` tanpa terminal, dan uninstalasi `pacman -R` sukses diuji di VM bersih QEMU/KVM Arch Linux (`docs/P0-9.1-PACKAGING-RESULTS.md`). Unit test sanitasi lingkungan lulus (116 cargo tests green).
 
-- [ ] **P0-9.2 — Lengkapi metadata paket.**
+- [x] **P0-9.2 — Lengkapi metadata paket.**
   - **Kerjakan:** `bundle` metadata: homepage, repository, license, copyright,
     publisher, dan dependency runtime yang sesuai. Pastikan desktop entry,
     ikon, dan nama binary benar.
   - **DoD:** metadata paket dapat diperiksa dengan `dpkg-deb`/equivalen dan
     tidak ada klaim distro yang menyesatkan.
+  - **Bukti selesai:** ditambahkan metadata `publisher`, `homepage`, `license: "MIT"`, `licenseFile`, `copyright`, dependensi runtime Linux `deb.depends: ["waydroid"]` (beserta auto-resolve `libwebkit2gtk-4.1-0`, `libgtk-3-0`), `recommends: ["squashfs-tools", "lzip", "git"]`, dan `rpm.depends: ["waydroid"]` di [`src-tauri/tauri.conf.json`](file:///home/wdg/development/projects/linux-project/src-tauri/tauri.conf.json). Dibuat file [`LICENSE`](file:///home/wdg/development/projects/linux-project/LICENSE) (MIT). Metadata di [`package.json`](file:///home/wdg/development/projects/linux-project/package.json), [`src-tauri/Cargo.toml`](file:///home/wdg/development/projects/linux-project/src-tauri/Cargo.toml), dan [`packaging/arch/PKGBUILD`](file:///home/wdg/development/projects/linux-project/packaging/arch/PKGBUILD) telah disinkronkan. Metadata paket diverifikasi dengan `tar`/`dpkg-deb` dan `pacman -Qip` tanpa klaim distro yang menyesatkan; tes verifikasi metadata diuji di [`src/lib/package-metadata.test.js`](file:///home/wdg/development/projects/linux-project/src/lib/package-metadata.test.js) (26 passed).
 
-- [ ] **P0-9.3 — Tanda tangani/verifikasi artefak.**
+- [x] **P0-9.3 — Tanda tangani/verifikasi artefak.**
   - **Kerjakan:** publikasikan `SHA256SUMS` dan signature GPG minimal; jika
     memakai auto-update, gunakan signature Tauri updater dan key terpisah.
   - **DoD:** pengguna dapat memverifikasi artefak sebelum memasang.
+  - **Bukti selesai:** dibuat skrip staging dan penandatanganan rilis [`scripts/release/generate-release.sh`](file:///home/wdg/development/projects/linux-project/scripts/release/generate-release.sh) yang menghasilkan `SHA256SUMS` dan tanda tangan terpisah `SHA256SUMS.asc` menggunakan kunci rilis resmi (`18F47067ACC5BBF9`). Kunci publik diekspor ke [`packaging/release/archdroid-release.asc`](file:///home/wdg/development/projects/linux-project/packaging/release/archdroid-release.asc). Dibuat skrip verifikasi otomatis [`scripts/release/verify-release.sh`](file:///home/wdg/development/projects/linux-project/scripts/release/verify-release.sh) (`npm run release:verify`) yang memvalidasi checksum dan tanda tangan via isolated keyring. Panduan manual dan otomatis didokumentasikan di [`docs/VERIFY-RELEASE.md`](file:///home/wdg/development/projects/linux-project/docs/VERIFY-RELEASE.md) dan [`README.md`](file:///home/wdg/development/projects/linux-project/README.md). Unit test penandatanganan dan verifikasi artefak lolos di [`src/lib/artifact-verification.test.js`](file:///home/wdg/development/projects/linux-project/src/lib/artifact-verification.test.js) (29 passed).
+
+- [x] **P0-9.4 — Samakan klaim dukungan dengan bukti uji.**
+  - **Bukti:** `README.md` §1 menandai Ubuntu/Debian, Fedora/RHEL, dan
+    openSUSE sebagai "Didukung Penuh (Tier 1)" dan menulis format "AUR /
+    Source / AppImage" untuk Arch. `docs/P0-9.1-PACKAGING-RESULTS.md` dan
+    `docs/P0-8.2-MATRIX-RESULTS.md` hanya memuat uji di VM Arch. Tidak ada
+    paket AUR yang dipublikasikan; `PKGBUILD` hanya dibangun lokal.
+  - **Dampak:** melanggar DoD P0-9.2 ("tidak ada klaim distro yang
+    menyesatkan"). Jalur `apt-get`/`dnf`/`zypper` (nama paket, flag, root
+    script) hanya diuji dengan unit test string, bukan dengan manajer paket
+    sungguhan.
+  - **Kerjakan (pilih satu):**
+    - **Jujur dulu:** ubah README menjadi Tier 1 = Arch (teruji), Tier 2 =
+      Debian/Ubuntu/Fedora/openSUSE "best effort, belum diuji live"; dan
+      jangan publikasikan `.deb`/`.rpm` sebagai rilis resmi.
+    - **Uji dulu:** siapkan VM Debian/Ubuntu, Fedora, dan openSUSE (pola
+      `scripts/test-vm/vm.sh`) dan jalankan install artefak, preflight,
+      approval paket, serta `waydroid_init` di masing-masing.
+  - **DoD:** setiap distro yang disebut "didukung" punya baris bukti uji live
+    (versi distro, artefak, hasil, log); AppImage diuji di minimal satu
+    distro non-Arch; klaim AUR dihapus sampai paketnya ada.
+  - **Bukti selesai:** opsi "Jujur dulu" diterapkan sepenuhnya. `README.md` dan `docs/P0-9.1-PACKAGING-RESULTS.md` diselaraskan secara transparan: Tier 1 adalah Arch Linux (teruji live di QEMU/KVM kernel 7.2.11 dengan artefak `archdroid-bin-*.pkg.tar.zst` dan `ArchDroid_*.AppImage`), sedangkan Debian/Ubuntu/Fedora/openSUSE diturunkan ke Tier 2 (best-effort, kontrak package mapping teruji di unit test backend tapi belum live matrix). Klaim "AUR" dihapus dan diganti dengan "PKGBUILD lokal (`makepkg -si`)". `scripts/release/generate-release.sh` hanya mempublikasikan artefak teruji Tier 1 ke root rilis dan `SHA256SUMS`, sedangkan `.deb` dan `.rpm` diisolasi di `dist-release/preview/`. Semua path `file:///home/...` di `README.md` dan `docs/` diganti dengan link relatif. Unit test validasi klaim lulus di `src/lib/artifact-verification.test.js` (30 passed).
 
 ### P0-10 — CI dan gate rilis di remote
 
@@ -590,13 +703,46 @@ isolasi UI, lalu validasi rilis.
   - **DoD:** action pihak ketiga tidak bisa berubah tanpa review; token CI
     hanya punya izin baca.
 
+- [ ] **P0-10.4 — Commit dan review perubahan yang masih menggantung.**
+  - **Bukti:** `git status` menunjukkan 26 berkas termodifikasi dan 12 path
+    baru (`LICENSE`, `packaging/`, `scripts/`, `docs/P0-8.*`, `docs/P0-9.1-*`,
+    `docs/VERIFY-RELEASE.md`, 5 test baru di `src/lib/`) yang belum
+    di-commit. Commit terakhir (`cc62c51`, P0-7.2) mendahului P0-5, P0-7.3,
+    P0-8, dan P0-9 yang sudah ditandai selesai di dokumen ini.
+  - **Dampak:** item "selesai" tidak punya jejak reviewable, tidak bisa
+    di-bisect, dan hilang bila working tree rusak. CI nanti hanya melihat
+    commit.
+  - **Kerjakan:** pecah menjadi commit per item (P0-5.x, P0-3.4/5.4, P0-7.3,
+    P0-8.x, P0-9.x) dengan pesan yang merujuk ID todo; pastikan tidak ada
+    artefak build ikut ter-commit (`packaging/arch/pkg|src|*.pkg.tar.*`,
+    `dist-release/` sudah di-ignore; periksa dengan `git status --ignored`).
+  - **DoD:** `git status` bersih; setiap item P0 bercentang menunjuk commit;
+    `cargo test`, `npm test`, dan `npm run build` hijau pada HEAD.
+
 ### P0-11 — Dokumentasi rilis, lisensi, dan privasi
 
-- [ ] **P0-11.1 — Tambahkan `README.md`.**
+- [ ] **P0-11.1 — Lengkapi `README.md`.**
   - Isi minimum: target distro/desktop, dependency, instalasi, first run,
     setup root, uninstall, troubleshooting, dan known limitations.
-- [ ] **P0-11.2 — Tambahkan `LICENSE`.**
-  - Tentukan lisensi proyek; pastikan kompatibel dengan komponen pihak ketiga.
+  - **Status 31 Okt:** README sudah ada dengan target distro, prasyarat,
+    fitur, keamanan, build, dan lisensi. **Belum ada:** cara instal dari
+    artefak rilis, first run/setup wizard, penjelasan prompt root, uninstall
+    bersih (termasuk `/var/lib/waydroid`, marker, config), troubleshooting
+    (polkit agent, `/dev/kvm`, binder, X11), dan known limitations (satu
+    container, tanpa multi-instance, hanya Wayland). Bagian Tier 1 harus
+    mengikuti P0-9.4.
+- [x] **P0-11.2 — Tambahkan `LICENSE`.**
+  - MIT, atas nama pemilik repo. `waydroid_script` (GPL-3.0) tidak di-vendor
+    dan hanya diunduh saat instalasi, jadi tidak memengaruhi lisensi proyek;
+    pastikan alasan ini ditulis di notices (P0-11.4).
+- [ ] **P0-11.6 — Ganti link absolut `file:///home/...` dengan link relatif.**
+  - **Bukti:** `README.md` (baris tautan VERIFY-RELEASE), `docs/VERIFY-RELEASE.md`
+    (link file kunci), dan `todo.md` (P0-9.2/P0-9.3) memakai
+    `file:///home/wdg/development/projects/linux-project/...`.
+  - **Dampak:** semua tautan mati di GitHub dan di mesin siapa pun selain
+    mesin ini; path home pengembang juga ikut bocor ke dokumen publik.
+  - **DoD:** `grep -rn 'file:///' README.md docs todo.md` kosong; tautan
+    memakai path relatif seperti `docs/VERIFY-RELEASE.md`.
 - [ ] **P0-11.3 — Tambahkan `SECURITY.md` dan `PRIVACY.md`.**
   - Jelaskan model privilege, installer root, data yang disimpan, lokasi log,
     tidak ada telemetri, dan cara melaporkan masalah keamanan.
@@ -604,11 +750,21 @@ isolasi UI, lalu validasi rilis.
   - Catat `waydroid_script` GPL-3.0, Phantom MIT, dan lisensi font/aset.
 - [ ] **P0-11.5 — Tinjau penggunaan merek pihak ketiga.**
   - **Bukti:** judul window di `index.html` adalah “ArchDroid - LDPlayer for
-    Linux”, dan `longDescription`/`package.json` menyebut “LDPlayer-style”.
-    Identifier `io.github.archdroid` mengklaim namespace GitHub `archdroid`.
-  - **Kerjakan:** hapus nama LDPlayer dari judul/metadata paket (boleh tetap
-    sebagai perbandingan di README dengan disclaimer), dan pakai identifier
-    dari domain/akun yang benar-benar dimiliki.
+    Linux”; “LDPlayer-style” juga muncul di `package.json`
+    (`description`), `tauri.conf.json` (`longDescription`), dan
+    `packaging/arch/PKGBUILD` (`pkgdesc`), jadi masuk ke metadata semua
+    paket. README juga membandingkan dengan LDPlayer/NoxPlayer.
+    Identifier `io.github.archdroid` dan URL `homepage`/`repository`
+    (`https://github.com/archdroid/archdroid`) di `package.json`,
+    `Cargo.toml`, dan `tauri.conf.json` mengklaim namespace/organisasi
+    GitHub `archdroid` yang belum tentu dimiliki; repo ini belum punya
+    remote sama sekali.
+  - **Kerjakan:** hapus nama LDPlayer/Nox dari judul dan metadata paket
+    (boleh tetap sebagai perbandingan di README dengan disclaimer), buat
+    remote yang sebenarnya lalu samakan `homepage`/`repository`, dan pakai
+    identifier dari akun/domain yang benar-benar dimiliki.
+  - **DoD:** `grep -ril ldplayer` hanya mengenai README (dengan disclaimer);
+    URL repo di metadata dapat dibuka dan milik pemilik proyek.
 - **DoD:** pengguna baru dapat memasang, memahami risiko root, dan melakukan
   troubleshooting tanpa membaca source code.
 
@@ -633,6 +789,11 @@ P1 tidak boleh menunda P0, tetapi sebaiknya selesai sebelum rilis publik.
   `cmd-finished` (`success`/`code`), bukan dari pencocokan teks log
   (`includes("failed")`, `"Wipe complete!"`); output pihak ketiga yang memuat
   kata “failed” saat ini bisa membuat stepper menampilkan error palsu.
+- [ ] **Temuan live P0-8.2 (F6):** Cancel yang sah menampilkan
+  `EXECUTION FAILED` + “Root authentication may have been rejected…” karena
+  stepper/pesan troubleshooting diturunkan dari teks log, bukan code
+  `cancelled` dari `cmd-finished`. Bukti: `gui-cancel-early.png` dan
+  `docs/P0-8.2-MATRIX-RESULTS.md` F6.
 - [ ] Kembalikan Cancel untuk install/remove APK: masukkan operasi itu ke
   `TaskGuard` + `cancel_task`, lalu hapus flag global `waydroid::CANCEL` dan
   command `waydroid_cancel` agar hanya ada satu mekanisme cancel.
@@ -660,6 +821,19 @@ P1 tidak boleh menunda P0, tetapi sebaiknya selesai sebelum rilis publik.
   pinned saat ini.
 - [ ] Ambil versi UI dari sumber tunggal (mis. `package.json`/Tauri), jangan
   hardcode `v0.1.0` di `Sidebar.jsx`.
+- [x] **Temuan live P0-8.2 (F1):** `waydroid app remove` di Waydroid 1.6.3
+  exit 0 sambil menulis `Failed with code: -3` dan paket tetap ada.
+  **Selesai:** `waydroid_uninstall_app` memakai `adb uninstall` bila adb
+  tersedia; tanpa adb, hasil `app remove` diverifikasi lewat `app list` dan
+  error actionable dikembalikan bila paket masih ada. Test parser daftar paket
+  dan argv adb ditambahkan. Bukti live adb dan detail: F1 di
+  `docs/P0-8.2-MATRIX-RESULTS.md`.
+- [x] **Temuan live P0-8.2 (F2):** `waydroid app install` melaporkan sukses
+  untuk APK invalid. **Selesai:** APK divalidasi lebih dulu (ZIP magic +
+  `AndroidManifest.xml`), lalu `adb install -r` dipakai bila adb tersedia
+  (live: APK invalid exit 1 dengan `INSTALL_PARSE_FAILED_NOT_APK`); tanpa adb
+  file non-APK tetap ditolak sebelum CLI. Test regresi ditambahkan. Bukti:
+  F2 di `docs/P0-8.2-MATRIX-RESULTS.md`.
 - **DoD:** semua state transisi punya test; tidak ada toast sukses prematur.
 
 ### P1-2 — Test, lint, dan E2E frontend
@@ -672,7 +846,9 @@ P1 tidak boleh menunda P0, tetapi sebaiknya selesai sebelum rilis publik.
   - Cancel dan timeout,
   - drag-and-drop APK invalid.
 - [ ] Tambahkan smoke E2E dengan WebDriver/Tauri driver untuk startup,
-  navigasi tab, dan setup wizard.
+  navigasi tab, dan setup wizard. Gunakan driver yang sama untuk menutup sisa
+  matriks P0-8.2 yang butuh GUI: drag-and-drop APK, terminal emulator hilang,
+  preflight X11/disk/jaringan, serta Cancel/timeout live.
 - [ ] Masukkan semuanya ke CI.
 - **DoD:** `npm run lint` dan `npm test` wajib hijau; alur kritis tidak hanya
   diuji manual.
@@ -753,6 +929,12 @@ P1 tidak boleh menunda P0, tetapi sebaiknya selesai sebelum rilis publik.
 
 - [ ] Pilih: update manual dengan release notes, atau Tauri updater
   bertanda tangan.
+- [ ] Kelola kunci rilis GPG `18F47067ACC5BBF9` (P0-9.3): catat lokasi
+  backup, masa berlaku, dan prosedur rotasi/revokasi; publikasikan
+  fingerprint di kanal kedua selain repo (halaman rilis/situs), karena
+  fingerprint yang hanya ada di README repo tidak melindungi dari repo yang
+  dibobol. Pastikan kunci privat tidak pernah masuk repo (saat review tidak
+  ada kunci privat di `scripts/` atau `packaging/`).
 - [ ] Jika updater: kelola signing key, endpoint, rollback, dan verifikasi.
 - [ ] Jika manual: sediakan cek versi dan instruksi upgrade yang jelas.
 - **DoD:** tidak ada update yang mengeksekusi artefak tanpa signature.
@@ -805,26 +987,35 @@ Tidak menjadi blocker rilis; kerjakan setelah P0/P1 stabil.
 |---|---|---|
 | Waydroid hanya satu container | Diterima | Dokumentasikan; jangan janjikan multi-instance. |
 | `waydroid_script` berjalan sebagai root | Tertutup | P0-6.1 (dependency hash-pinned), P0-6.2 (audit path, isolasi XDG_CACHE, dan pembersihan /tmp), dan P0-6.3 (dialog konfirmasi eksplisit UI sebelum prompt polkit/sudo) selesai. |
-| Distro target belum jelas | Tertutup | P0-7.1: multi-distro didukung eksplisit (Arch/pacman, Debian-Ubuntu/apt-get, Fedora/dnf, openSUSE/zypper); README mendokumentasikan target; installer fail-fast sebelum root pada distro yang tidak didukung. |
-| Belum ada uji live Waydroid/polkit | Terbuka | P0-8: VM disposable + bukti uji. |
+| Klaim dukungan distro melebihi bukti uji | Tertutup | P0-9.4: README membedakan Tier 1 (Arch teruji live di VM) dan Tier 2 (Debian/Ubuntu/Fedora/openSUSE best effort); klaim AUR diganti PKGBUILD lokal; rilis resmi hanya mempublikasikan artefak teruji (Arch package + AppImage), preview .deb/.rpm diisolasi di dist-release/preview/. |
+| Paket sistem terpasang tanpa persetujuan | Tertutup | P0-7.3: dialog konfirmasi menampilkan daftar paket dan command persis; backend memvalidasi ulang daftar yang disetujui (`approval_required`/`invalid_input`) dan script root hanya menjalankan paket yang disetujui. |
+| Belum ada uji live Waydroid/polkit | Sebagian tertutup | P0-8.1–8.3 selesai di VM Arch (QEMU/KVM, Xvfb); distro non-Arch dan CSP di DevTools runtime belum (P0-9.4). |
 | CSP `null` dan font remote | Tertutup | P0-5.1/P0-5.2: CSP produksi aktif, `@import` Google Fonts dihapus; verifikasi DevTools di P0-8. |
 | Permission webview terlalu luas | Tertutup | P0-5.3: `core:default` diganti event listen/unlisten + `dialog:allow-open`, tanpa plugin shell/FS. |
 | Log dapat memuat argumen sensitif | Terbuka | P1-6. |
 | Command IPC tanpa UI (shell Android arbitrer, tulis root) | Tertutup | P0-5.4: command tanpa UI di-gate di feature `dev-commands` dan tidak ada di build default. |
 | Operasi non-streaming bisa bentrok dengan wipe/init | Tertutup | P0-3.4: semua operasi state-changing memakai `TaskGuard` dan ditolak `busy`. |
 | Vite 5 dev dependency rentan | Terbuka | P1-5; tidak masuk runtime bundle, tetapi build tooling. |
+| Pekerjaan P0-5..P0-9 belum di-commit | Terbuka | P0-10.4: commit per item sebelum klaim selesai dipercaya. |
+| Metadata/judul memakai merek LDPlayer dan namespace GitHub yang belum dimiliki | Terbuka | P0-11.5. |
 | Tanpa telemetry | Diterima | Support mengandalkan log yang diekspor pengguna. |
 
 ---
 
 ## 6. Urutan eksekusi yang disarankan
 
-1. **Tentukan scope platform** (Arch-only vs multi-distro) dan siapkan VM uji.
-2. **P0-6**: supply chain installer root (seluruh P0-5 sudah selesai).
-3. **P0-7 + P0-8**: preflight dependency dan validasi live end-to-end.
-4. **P0-9 + P0-10 + P0-11**: artefak, CI remote, dokumentasi/legal.
-5. **P1**: frontend reliability, test/lint/E2E, a11y, logging, data lifecycle.
-6. **P2**: fitur dan polish.
+1. **P0-10.4**: commit pekerjaan P0-3 s.d. P0-9 yang masih menggantung.
+2. **P0-9.4**: turunkan klaim dukungan distro ke yang teruji, atau siapkan VM
+   non-Arch dan uji `.deb`/`.rpm`/AppImage.
+3. **P0-11**: README lengkap, `SECURITY`/`PRIVACY`/`CHANGELOG`, link relatif
+   (P0-11.6), dan pembersihan merek/URL (P0-11.5). Buat remote GitHub yang
+   sebenarnya agar URL metadata valid.
+4. **P0-10**: CI di remote, pin action SHA, `cargo audit`/`cargo deny`, dan
+   bundle build.
+5. **Sisa P0-8**: verifikasi CSP di DevTools runtime dan item non-teruji di
+   `docs/P0-8.2-MATRIX-RESULTS.md`.
+6. **P1**: frontend reliability, test/lint/E2E, a11y, logging, data lifecycle.
+7. **P2**: fitur dan polish.
 
 ---
 

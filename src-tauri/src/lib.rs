@@ -1,6 +1,6 @@
 use base64::{engine::general_purpose, Engine as _};
 use serde::{Deserialize, Serialize};
-use std::io::{BufReader, Read};
+use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
@@ -44,6 +44,21 @@ pub struct DiagnosticsReport {
     pub items: Vec<DiagnosticItem>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub package_manager: Option<String>,
+}
+
+/// What a privileged installer would do to the host's package set.
+///
+/// `packages` holds distro package names when a supported package manager was
+/// detected, otherwise the generic requirement names for manual installation.
+/// `command` is the exact command the root script would run, so the UI can show
+/// it before the user approves elevation.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct PackageInstallPreview {
+    pub action: String,
+    pub package_manager: Option<String>,
+    pub packages: Vec<String>,
+    pub command: Option<String>,
+    pub requires_root: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -360,7 +375,17 @@ export XDG_CACHE_HOME="$ARCHDROID_WORK/cache"
 export XDG_DATA_HOME="$ARCHDROID_WORK/data"
 export XDG_CONFIG_HOME="$ARCHDROID_WORK/config"
 export WAYDROID_CONFIG=/var/lib/waydroid/waydroid.cfg
-trap 'rm -rf "$ARCHDROID_WORK" /tmp/gapps /tmp/houdiniunpack /tmp/waydroid' EXIT HUP INT TERM
+# The unprivileged app cannot signal this root process group (EPERM), so
+# timeout/cancel writes a file instead. This root-side watcher sees it and
+# signals its own group, which makes cancellation work for all children.
+(
+    while [ ! -e "$ARCHDROID_CANCEL_FILE" ]; do
+        sleep 0.2
+    done
+    kill -TERM 0
+) &
+ARCHDROID_CANCEL_WATCH=$!
+trap 'kill "$ARCHDROID_CANCEL_WATCH" 2>/dev/null; rm -rf "$ARCHDROID_WORK" /tmp/gapps /tmp/houdiniunpack /tmp/waydroid' EXIT HUP INT TERM
 {script}
 "#,
         home = home,
@@ -628,13 +653,103 @@ fn get_waydroid_apps() -> Vec<AppInfo> {
     apps
 }
 
+/// How much of each end of an APK to scan for the manifest entry. The local
+/// header for `AndroidManifest.xml` is normally in the first block; the central
+/// directory is at the end. This rejects text files and zips that are not APKs
+/// before the slow install call, without adding a zip dependency.
+const APK_SCAN_BYTES: u64 = 8 * 1024 * 1024;
+
+fn contains_marker(bytes: &[u8], marker: &[u8]) -> bool {
+    bytes.windows(marker.len()).any(|window| window == marker)
+}
+
+fn apk_looks_installable(path: &str) -> error::Result<()> {
+    let mut file = std::fs::File::open(path)?;
+    let len = file.metadata()?.len();
+    let mut magic = [0u8; 4];
+    if file.read_exact(&mut magic).is_err() || (magic != *b"PK\x03\x04" && magic != *b"PK\x05\x06")
+    {
+        return Err(AppError::invalid_input(format!(
+            "{path} is not an APK/ZIP archive."
+        )));
+    }
+
+    let marker = b"AndroidManifest.xml";
+    let mut scan = Vec::with_capacity(APK_SCAN_BYTES.min(len) as usize);
+    file.seek(SeekFrom::Start(0))?;
+    (&mut file).take(APK_SCAN_BYTES).read_to_end(&mut scan)?;
+    if contains_marker(&scan, marker) {
+        return Ok(());
+    }
+
+    if len > APK_SCAN_BYTES {
+        scan.clear();
+        file.seek(SeekFrom::End(-(APK_SCAN_BYTES as i64)))?;
+        (&mut file).take(APK_SCAN_BYTES).read_to_end(&mut scan)?;
+        if contains_marker(&scan, marker) {
+            return Ok(());
+        }
+    }
+
+    Err(AppError::invalid_input(format!(
+        "{path} is a ZIP file without AndroidManifest.xml; it is not a valid APK."
+    )))
+}
+
+/// Adb is authoritative when it is installed: `adb install` waits for the
+/// Android package manager and `adb uninstall` reports the real result. Without
+/// adb, `waydroid app install/remove` is used, and the obvious non-APK case is
+/// rejected before the CLI can report a false success.
+fn install_apk_blocking(path: String) -> error::Result<()> {
+    apk_looks_installable(&path)?;
+    if adb::available() {
+        adb::install_apk(&path)?;
+    } else {
+        waydroid::Waydroid::detect()?.app_install(&path)?;
+    }
+    Ok(())
+}
+
+fn uninstall_app_blocking(package: String) -> error::Result<()> {
+    let waydroid = waydroid::Waydroid::detect()?;
+    if adb::available() {
+        adb::uninstall_app(&package)?;
+        return Ok(());
+    }
+
+    // Waydroid 1.6.3 `app remove` can exit 0 while the platform service logs
+    // "Failed with code: -3" and leaves the package installed. The list is the
+    // only proof, so never report success without it.
+    waydroid.app_remove(&package)?;
+    let mut last_error = None;
+    for _ in 0..5 {
+        match waydroid.app_list() {
+            Ok(list) => {
+                if !waydroid::package_names(&list).contains(&package) {
+                    return Ok(());
+                }
+                last_error = None;
+            }
+            Err(error) => last_error = Some(error),
+        }
+        thread::sleep(Duration::from_millis(250));
+    }
+
+    Err(match last_error {
+        Some(error) => AppError::command_failed(format!(
+            "Could not verify whether {package} was uninstalled: {error}. Install adb (android-tools) for an authoritative result."
+        )),
+        None => AppError::command_failed(format!(
+            "Waydroid reported success, but {package} is still installed (Waydroid 1.6.3 app remove can fail this way). Install adb (android-tools), or run \"sudo waydroid shell cmd package uninstall {package}\"."
+        )),
+    })
+}
+
 #[tauri::command]
 async fn waydroid_install_apk(path: String) -> CommandResult {
-    run_exclusive("APK install", move || {
-        match waydroid::Waydroid::detect().and_then(|waydroid| waydroid.app_install(&path)) {
-            Ok(_) => CommandResult::success(),
-            Err(error) => error.into(),
-        }
+    run_exclusive("APK install", move || match install_apk_blocking(path) {
+        Ok(()) => CommandResult::success(),
+        Err(error) => error.into(),
     })
     .await
 }
@@ -642,8 +757,8 @@ async fn waydroid_install_apk(path: String) -> CommandResult {
 #[tauri::command]
 async fn waydroid_uninstall_app(package: String) -> CommandResult {
     run_exclusive("app uninstall", move || {
-        match waydroid::Waydroid::detect().and_then(|waydroid| waydroid.app_remove(&package)) {
-            Ok(_) => CommandResult::success(),
+        match uninstall_app_blocking(package) {
+            Ok(()) => CommandResult::success(),
             Err(error) => error.into(),
         }
     })
@@ -905,6 +1020,157 @@ fn gapps_missing_dependencies() -> Vec<&'static str> {
         missing.push("lzip");
     }
     missing
+}
+
+/// Actions that may need host packages before their privileged work starts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PackageInstallAction {
+    Init,
+    Gapps,
+    Houdini,
+}
+
+impl PackageInstallAction {
+    fn parse(action: &str) -> error::Result<Self> {
+        match action {
+            "init" => Ok(Self::Init),
+            "gapps" => Ok(Self::Gapps),
+            "houdini" => Ok(Self::Houdini),
+            other => Err(AppError::invalid_input(format!(
+                "Unknown package installation action \"{other}\". Expected init, gapps, or houdini."
+            ))),
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Init => "init",
+            Self::Gapps => "gapps",
+            Self::Houdini => "houdini",
+        }
+    }
+
+    fn description(self) -> &'static str {
+        match self {
+            Self::Init => "initializing Waydroid",
+            Self::Gapps => "installing GApps",
+            Self::Houdini => "installing ARM Translation",
+        }
+    }
+
+    /// Generic dependency names that are missing right now. The package manager
+    /// maps these to distro package names before anything is shown or run.
+    fn missing_packages(self) -> Vec<&'static str> {
+        match self {
+            Self::Init => {
+                if trusted_program("waydroid").is_none() {
+                    vec!["waydroid"]
+                } else {
+                    Vec::new()
+                }
+            }
+            Self::Gapps | Self::Houdini => gapps_missing_dependencies(),
+        }
+    }
+}
+
+fn package_install_preview(
+    action: PackageInstallAction,
+    missing: &[&'static str],
+    pm: Option<platform::PackageManager>,
+) -> PackageInstallPreview {
+    match pm {
+        Some(pm) => {
+            let mapped = pm.mapped_packages(missing);
+            PackageInstallPreview {
+                action: action.as_str().to_string(),
+                package_manager: Some(pm.name().to_string()),
+                packages: mapped.iter().map(|package| package.to_string()).collect(),
+                command: (!mapped.is_empty()).then(|| pm.install_mapped_command(&mapped)),
+                requires_root: true,
+            }
+        }
+        None => PackageInstallPreview {
+            action: action.as_str().to_string(),
+            package_manager: None,
+            packages: missing.iter().map(|package| package.to_string()).collect(),
+            command: None,
+            requires_root: true,
+        },
+    }
+}
+
+/// Validate the package list the user saw and approved against what the
+/// installer still needs. Only exact distro names from the reviewed plan are
+/// accepted, so an IPC caller cannot smuggle an arbitrary package or shell
+/// fragment into the root script.
+fn approved_install_packages(
+    action: PackageInstallAction,
+    required: &[&'static str],
+    pm: Option<platform::PackageManager>,
+    approved: Option<&[String]>,
+) -> error::Result<Vec<&'static str>> {
+    let Some(pm) = pm else {
+        // The existing preflight reports the missing package manager before
+        // elevation; there is no install plan to approve in that case.
+        return Ok(Vec::new());
+    };
+
+    let mapped = pm.mapped_packages(required);
+    if mapped.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let approved = approved.ok_or_else(|| {
+        AppError::approval_required(format!(
+            "Installing system packages for {} requires explicit approval. Review the package preview and confirm again.",
+            action.description()
+        ))
+    })?;
+
+    let mut accepted: Vec<&'static str> = Vec::new();
+    for name in approved {
+        let matched = mapped
+            .iter()
+            .copied()
+            .find(|candidate| *candidate == name)
+            .ok_or_else(|| {
+                AppError::invalid_input(format!(
+                    "Package \"{name}\" is not part of the reviewed installation plan for {}. Review the package preview again.",
+                    action.description()
+                ))
+            })?;
+        if !accepted.contains(&matched) {
+            accepted.push(matched);
+        }
+    }
+
+    let unapproved: Vec<&str> = mapped
+        .iter()
+        .copied()
+        .filter(|name| !accepted.contains(name))
+        .collect();
+    if !unapproved.is_empty() {
+        return Err(AppError::approval_required(format!(
+            "The following required packages were not approved: {}. Review the package preview and confirm again.",
+            unapproved.join(", ")
+        )));
+    }
+
+    Ok(accepted)
+}
+
+#[tauri::command]
+fn preview_package_install(
+    action: String,
+) -> std::result::Result<PackageInstallPreview, CommandResult> {
+    let action = PackageInstallAction::parse(&action).map_err(CommandResult::from)?;
+    let missing = action.missing_packages();
+    Ok(package_install_preview(
+        action,
+        &missing,
+        platform::PackageManager::detect(),
+    ))
 }
 
 /// Both GApps and Houdini modify an existing Android image. Refuse before the
@@ -1578,7 +1844,7 @@ async fn check_host_diagnostics() -> DiagnosticsReport {
 }
 
 #[tauri::command]
-async fn waydroid_init(app: AppHandle) -> CommandResult {
+async fn waydroid_init(app: AppHandle, approved_packages: Option<Vec<String>>) -> CommandResult {
     if has_elevation_tool().is_none() {
         return AppError::elevation_denied(
             "No root elevation tool (pkexec or sudo) found on host. Cannot initialize Waydroid.",
@@ -1617,15 +1883,34 @@ async fn waydroid_init(app: AppHandle) -> CommandResult {
         .into();
     }
 
-    let install_snippet = match (waydroid_missing, pm) {
-        (true, Some(pm)) => format!(
+    let required: Vec<&'static str> = if waydroid_missing {
+        vec!["waydroid"]
+    } else {
+        Vec::new()
+    };
+    let approved = match approved_install_packages(
+        PackageInstallAction::Init,
+        &required,
+        pm,
+        approved_packages.as_deref(),
+    ) {
+        Ok(packages) => packages,
+        Err(error) => return error.into(),
+    };
+
+    let install_snippet = match pm {
+        Some(pm) if !approved.is_empty() => format!(
             r#"if ! command -v waydroid > /dev/null; then
-    echo "==> Installing Waydroid from system repositories via {}..."
+    echo "==> Installing approved Waydroid package via {}..."
     {}
+fi
+if ! command -v waydroid > /dev/null; then
+    echo "[ERROR] waydroid is still missing after the approved package installation. Install it manually and retry." >&2
+    exit 1
 fi
 "#,
             pm.name(),
-            pm.install_command(&["waydroid"])
+            pm.install_mapped_command(&approved)
         ),
         _ => String::new(),
     };
@@ -2208,6 +2493,20 @@ async fn waydroid_adb_cmd(command: String) -> CommandResult {
     .await
 }
 
+fn wipe_script() -> &'static str {
+    r#"set -eu
+[ -n "${ARCHDROID_USER_HOME:-}" ] && [ "$ARCHDROID_USER_HOME" != "/" ] || { echo "[ERROR] Invalid user home" >&2; exit 1; }
+echo "[SYSTEM] Stopping Waydroid services..."
+waydroid session stop || true
+systemctl stop waydroid-container || true
+echo "[SYSTEM] Wiping Waydroid data..."
+rm -rf /var/lib/waydroid
+rm -rf "$ARCHDROID_USER_HOME/.local/share/waydroid"
+rm -rf "$ARCHDROID_USER_HOME"/.local/share/applications/waydroid.*
+echo "[SYSTEM] Wipe complete! Please restart ArchDroid."
+"#
+}
+
 #[tauri::command]
 async fn waydroid_wipe(app: AppHandle) -> CommandResult {
     if has_elevation_tool().is_none() {
@@ -2216,22 +2515,10 @@ async fn waydroid_wipe(app: AppHandle) -> CommandResult {
         )
         .into();
     }
-    let script = r#"
-    set -eu
-    echo "[SYSTEM] Stopping Waydroid services..."
-    waydroid session stop || true
-    systemctl stop waydroid-container || true
-    echo "[SYSTEM] Wiping Waydroid data..."
-    rm -rf /var/lib/waydroid
-    rm -rf "$ARCHDROID_USER_HOME/.local/share/waydroid"
-    rm -rf "$ARCHDROID_USER_HOME"/.local/share/applications/waydroid.*
-    echo "[SYSTEM] Wipe complete! Please restart ArchDroid."
-    "#
-    .to_string();
 
     stream_privileged_script(
         app,
-        script,
+        wipe_script().to_string(),
         Completion::ClearInstallMarkers,
         waydroid::TIMEOUT_LONG,
     )
@@ -2294,7 +2581,11 @@ test "$(git -C {repo} rev-parse HEAD)" = {rev}
 /// checks. Install every missing package before the script does any work, so a
 /// supported distro cannot fail after the root prompt because `git`, `venv`, or
 /// the extraction tools were absent.
-fn waydroid_script_dep_install(pm: Option<platform::PackageManager>, action: &str) -> String {
+fn waydroid_script_dep_install(
+    pm: Option<platform::PackageManager>,
+    approved: &[&str],
+    action: &str,
+) -> String {
     let check = r#"missing=""
 command -v git > /dev/null || missing="$missing git"
 if ! command -v python3 > /dev/null; then
@@ -2307,15 +2598,30 @@ command -v lzip > /dev/null || missing="$missing lzip"
 "#;
 
     match pm {
-        Some(pm) => format!(
+        Some(pm) if !approved.is_empty() => format!(
             r#"{check}if [ -n "$missing" ]; then
-    echo "[SYSTEM] Installing required tools via {name}..."
+    echo "[SYSTEM] Installing approved tools via {name}: {packages}..."
     {install}
+fi
+{check}if [ -n "$missing" ]; then
+    echo "[ERROR] Missing required tools:$missing were not approved for installation. Review the package preview and retry {action}." >&2
+    exit 1
 fi
 "#,
             check = check,
             name = pm.name(),
-            install = pm.install_command(&["git", "python3", "python3-venv", "squashfs", "lzip"]),
+            packages = approved.join(" "),
+            install = pm.install_mapped_command(approved),
+            action = action,
+        ),
+        Some(_) => format!(
+            r#"{check}if [ -n "$missing" ]; then
+    echo "[ERROR] Missing required tools:$missing were not approved for installation. Review the package preview and retry {action}." >&2
+    exit 1
+fi
+"#,
+            check = check,
+            action = action,
         ),
         None => format!(
             r#"{check}if [ -n "$missing" ]; then
@@ -2329,7 +2635,7 @@ fi
     }
 }
 
-fn gapps_install_script(pm: Option<platform::PackageManager>) -> String {
+fn gapps_install_script(pm: Option<platform::PackageManager>, approved: &[&str]) -> String {
     format!(
         r#"set -eu
 {dep_install}rm -rf /tmp/gapps /tmp/waydroid
@@ -2346,13 +2652,13 @@ fi
 rm -rf /tmp/gapps /tmp/waydroid
 echo "[SUCCESS] GApps installation complete! Please Start Waydroid."
 "#,
-        dep_install = waydroid_script_dep_install(pm, "installing GApps"),
+        dep_install = waydroid_script_dep_install(pm, approved, "installing GApps"),
         checkout = pinned_git_checkout("\"$repo\"", WAYDROID_SCRIPT_URL, WAYDROID_SCRIPT_REV),
         setup = waydroid_script_python_setup(),
     )
 }
 
-fn houdini_install_script(pm: Option<platform::PackageManager>) -> String {
+fn houdini_install_script(pm: Option<platform::PackageManager>, approved: &[&str]) -> String {
     format!(
         r#"set -eu
 {dep_install}rm -rf /tmp/houdiniunpack /tmp/waydroid
@@ -2369,7 +2675,7 @@ fi
 rm -rf /tmp/houdiniunpack /tmp/waydroid
 echo "[SUCCESS] ARM Translation installation complete!"
 "#,
-        dep_install = waydroid_script_dep_install(pm, "installing ARM Translation"),
+        dep_install = waydroid_script_dep_install(pm, approved, "installing ARM Translation"),
         checkout = pinned_git_checkout("\"$repo\"", WAYDROID_SCRIPT_URL, WAYDROID_SCRIPT_REV),
         setup = waydroid_script_python_setup(),
     )
@@ -2400,15 +2706,26 @@ echo "[SUCCESS] Phantom Keymapper installed successfully!"
 }
 
 #[tauri::command]
-async fn install_gapps(app: AppHandle) -> CommandResult {
+async fn install_gapps(app: AppHandle, approved_packages: Option<Vec<String>>) -> CommandResult {
     let pm = platform::PackageManager::detect();
     if let Err(error) = installer_preflight(pm, "installing GApps") {
         return error.into();
     }
 
+    let required = gapps_missing_dependencies();
+    let approved = match approved_install_packages(
+        PackageInstallAction::Gapps,
+        &required,
+        pm,
+        approved_packages.as_deref(),
+    ) {
+        Ok(packages) => packages,
+        Err(error) => return error.into(),
+    };
+
     stream_privileged_script(
         app,
-        gapps_install_script(pm),
+        gapps_install_script(pm, &approved),
         Completion::WriteMarker("gapps_installed"),
         waydroid::TIMEOUT_LONG,
     )
@@ -2417,15 +2734,26 @@ async fn install_gapps(app: AppHandle) -> CommandResult {
 }
 
 #[tauri::command]
-async fn install_houdini(app: AppHandle) -> CommandResult {
+async fn install_houdini(app: AppHandle, approved_packages: Option<Vec<String>>) -> CommandResult {
     let pm = platform::PackageManager::detect();
     if let Err(error) = installer_preflight(pm, "installing ARM Translation") {
         return error.into();
     }
 
+    let required = gapps_missing_dependencies();
+    let approved = match approved_install_packages(
+        PackageInstallAction::Houdini,
+        &required,
+        pm,
+        approved_packages.as_deref(),
+    ) {
+        Ok(packages) => packages,
+        Err(error) => return error.into(),
+    };
+
     stream_privileged_script(
         app,
-        houdini_install_script(pm),
+        houdini_install_script(pm, &approved),
         Completion::WriteMarker("houdini_installed"),
         waydroid::TIMEOUT_LONG,
     )
@@ -2460,30 +2788,71 @@ async fn install_phantom(app: AppHandle) -> CommandResult {
 
 #[tauri::command]
 fn run_phantom() -> CommandResult {
-    let term = match find_terminal_emulator() {
-        Some(term) => term,
-        None => {
-            return AppError::not_found(
-                "terminal emulator",
-                "No supported terminal emulator (alacritty, foot, kitty, konsole, gnome-terminal, xterm) found. Please install a terminal emulator to run the Phantom Keymapper.",
-            )
-            .into();
-        }
-    };
+    // 1. Prefer phantom-gui directly without a terminal wrapper
+    let gui_bin = resolve_program("phantom-gui")
+        .or_else(|| trusted_program("phantom-gui"))
+        .or_else(|| {
+            dirs::home_dir()
+                .map(|h| h.join(".local/bin/phantom-gui"))
+                .filter(|p| p.is_file())
+        });
 
-    let result = match term.as_str() {
-        "gnome-terminal" => Command::new("gnome-terminal")
-            .args(["--", "bash", "-c", "phantom"])
-            .spawn(),
-        _ => Command::new(&term)
-            .args(["-e", "bash", "-c", "phantom"])
-            .spawn(),
-    };
-
-    match result {
-        Ok(_) => CommandResult::with_message(&format!("Launched Phantom Keymapper via {term}.")),
-        Err(err) => AppError::from_spawn(&term, "Failed to spawn terminal emulator.", err).into(),
+    if let Some(gui_path) = gui_bin {
+        return match Command::new(&gui_path).spawn() {
+            Ok(_) => CommandResult::with_message("Launched Phantom Keymapper GUI."),
+            Err(err) => {
+                AppError::from_spawn("phantom-gui", "Failed to spawn Phantom GUI.", err).into()
+            }
+        };
     }
+
+    // 2. Fallback to CLI client inside terminal if phantom-gui is missing
+    let cli_bin = resolve_program("phantom")
+        .or_else(|| trusted_program("phantom"))
+        .or_else(|| {
+            dirs::home_dir()
+                .map(|h| h.join(".local/bin/phantom"))
+                .filter(|p| p.is_file())
+        });
+
+    if let Some(cli_path) = cli_bin {
+        let term = match find_terminal_emulator() {
+            Some(term) => term,
+            None => {
+                return AppError::not_found(
+                    "terminal emulator",
+                    "No supported terminal emulator (alacritty, foot, kitty, konsole, gnome-terminal, xterm) found to run Phantom. Please install a terminal emulator.",
+                )
+                .into();
+            }
+        };
+
+        let cli_str = cli_path.to_string_lossy().to_string();
+        let result = match term.as_str() {
+            "gnome-terminal" => Command::new("gnome-terminal")
+                .args(["--", "bash", "-c", &cli_str])
+                .spawn(),
+            _ => Command::new(&term)
+                .args(["-e", "bash", "-c", &cli_str])
+                .spawn(),
+        };
+
+        return match result {
+            Ok(_) => {
+                CommandResult::with_message(&format!("Launched Phantom Keymapper via {term}."))
+            }
+            Err(err) => {
+                AppError::from_spawn(&term, "Failed to spawn terminal emulator.", err).into()
+            }
+        };
+    }
+
+    // 3. Neither phantom-gui nor phantom is found
+    AppError::not_found(
+        "phantom-gui",
+        "Phantom Keymapper is not installed. Please click 'Install / Update Phantom' to compile and install it first.",
+    )
+    .into()
 }
 
 /// The single-flight slot. Streaming operations share one terminal, so only
@@ -2779,27 +3148,41 @@ fn terminate_process_group(child: &mut Child) {
     let _ = child.wait();
 }
 
-/// Wait for `child`, but kill its process group when the deadline elapses or
+/// Ask the root-side watcher to stop its own process group. The app cannot
+/// signal a root-owned group directly (EPERM).
+fn request_privileged_cancel(cancel_path: Option<&Path>) {
+    if let Some(path) = cancel_path {
+        let _ = std::fs::write(path, "cancel\n");
+    }
+}
+
+/// Wait for `child`, but stop its process group when the deadline elapses or
 /// the task-scoped cancel flag is raised.
 fn wait_with_deadline(
     child: &mut Child,
     timeout_secs: u64,
     cancel: &AtomicBool,
+    cancel_path: Option<&Path>,
 ) -> std::io::Result<WaitOutcome> {
     let deadline = Instant::now() + Duration::from_secs(timeout_secs);
     loop {
         match child.try_wait() {
             Ok(Some(status)) => return Ok(WaitOutcome::Exited(status)),
             Ok(None) if cancel.load(Ordering::SeqCst) => {
+                // The root-side watcher handles the elevated group; the local
+                // kill is the only option for user-level scripts.
+                request_privileged_cancel(cancel_path);
                 terminate_process_group(child);
                 return Ok(WaitOutcome::Cancelled);
             }
             Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(20)),
             Ok(None) => {
+                request_privileged_cancel(cancel_path);
                 terminate_process_group(child);
                 return Ok(WaitOutcome::TimedOut);
             }
             Err(error) => {
+                request_privileged_cancel(cancel_path);
                 terminate_process_group(child);
                 return Err(error);
             }
@@ -2861,6 +3244,7 @@ fn run_and_stream(
     mut command: Command,
     timeout_secs: u64,
     cancel: &AtomicBool,
+    cancel_path: Option<&Path>,
 ) -> StreamResult {
     let program = command.get_program().to_string_lossy().to_string();
     // The UI can press Cancel between `cmd-started` and this spawn. Do not open
@@ -2896,7 +3280,10 @@ fn run_and_stream(
     let stdout_reader = spawn_line_reader(app.clone(), task_id, stdout, captured.clone());
     let stderr_reader = spawn_line_reader(app.clone(), task_id, stderr, captured.clone());
 
-    let wait = wait_with_deadline(&mut child, timeout_secs, cancel);
+    let wait = wait_with_deadline(&mut child, timeout_secs, cancel, cancel_path);
+    if let Some(path) = cancel_path {
+        let _ = std::fs::remove_file(path);
+    }
 
     let _ = stdout_reader.join();
     let _ = stderr_reader.join();
@@ -2981,7 +3368,7 @@ fn run_user_script(
         .arg("--norc")
         .arg("-c")
         .arg(&script);
-    let attempt = run_and_stream(app, task_id, command, timeout_secs, cancel);
+    let attempt = run_and_stream(app, task_id, command, timeout_secs, cancel, None);
     finish_stream(app, task_id, &attempt, Completion::None);
     attempt
 }
@@ -3098,8 +3485,20 @@ fn run_privileged_script_for_task(
     cancel: &AtomicBool,
 ) -> StreamResult {
     log::info!("root script requested:\n{script}");
+    // A user-owned path is the only out-of-band signal that works both ways:
+    // the app can create it without root, and the root watcher can see it.
+    let cancel_path = std::env::temp_dir().join(format!(
+        "archdroid-cancel-{}-{}",
+        std::process::id(),
+        task_id
+    ));
+    let _ = std::fs::remove_file(&cancel_path);
     let body = match elevate_env(&script) {
-        Ok(body) => body,
+        Ok(body) => format!(
+            "ARCHDROID_CANCEL_FILE={}\n{}",
+            sh_quote(&cancel_path.to_string_lossy()),
+            body
+        ),
         Err(error) => {
             emit_output(app, task_id, format!("[ERROR] {error}"));
             let attempt = StreamResult::failure(error, false);
@@ -3117,7 +3516,14 @@ fn run_privileged_script_for_task(
                 task_id,
                 "[SYSTEM] Requesting root access via polkit...",
             );
-            let mut attempt = run_and_stream(app, task_id, command, timeout_secs, cancel);
+            let mut attempt = run_and_stream(
+                app,
+                task_id,
+                command,
+                timeout_secs,
+                cancel,
+                Some(&cancel_path),
+            );
             match pkexec_step(&mut attempt, &forced) {
                 ElevationStep::Stop => {
                     finish_stream(app, task_id, &attempt, completion);
@@ -3159,7 +3565,14 @@ fn run_privileged_script_for_task(
     };
 
     emit_output(app, task_id, "[SYSTEM] Requesting root access via sudo...");
-    let attempt = run_and_stream(app, task_id, command, timeout_secs, cancel);
+    let attempt = run_and_stream(
+        app,
+        task_id,
+        command,
+        timeout_secs,
+        cancel,
+        Some(&cancel_path),
+    );
 
     let attempt = match sudo_failure(attempt) {
         Ok(attempt) => attempt,
@@ -3214,8 +3627,38 @@ async fn stream_privileged_script(
     }
 }
 
+pub(crate) fn sanitize_appimage_env() {
+    // If running inside an AppImage, AppRun unconditionally sets PYTHONHOME and
+    // PYTHONPATH pointing into the bundle's AppDir. Because the bundle does not
+    // ship a full Python runtime, any host tools written in Python (like /usr/bin/waydroid)
+    // fail immediately with "Fatal Python error: Failed to import encodings module".
+    let in_appimage =
+        std::env::var_os("APPDIR").is_some() || std::env::var_os("APPIMAGE").is_some();
+    if in_appimage {
+        if let Ok(pyhome) = std::env::var("PYTHONHOME") {
+            if std::env::var("APPDIR")
+                .map(|d| pyhome.starts_with(&d))
+                .unwrap_or(false)
+                || pyhome.contains("appimage")
+            {
+                std::env::remove_var("PYTHONHOME");
+            }
+        }
+        if let Ok(pypath) = std::env::var("PYTHONPATH") {
+            if std::env::var("APPDIR")
+                .map(|d| pypath.starts_with(&d))
+                .unwrap_or(false)
+                || pypath.contains("appimage")
+            {
+                std::env::remove_var("PYTHONPATH");
+            }
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    sanitize_appimage_env();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         // Defaults already log to stdout and `<app log dir>/<app name>.log`
@@ -3276,7 +3719,8 @@ pub fn run() {
             install_multitouch,
             install_phantom,
             run_phantom,
-            check_host_diagnostics
+            check_host_diagnostics,
+            preview_package_install
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -3285,6 +3729,35 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn apk_check_rejects_text_and_manifestless_zips() {
+        let dir = std::env::temp_dir().join(format!("archdroid-apk-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let text = dir.join("text.apk");
+        std::fs::write(&text, "this is not an APK\n").unwrap();
+        let error = apk_looks_installable(text.to_str().unwrap()).unwrap_err();
+        assert_eq!(error.code(), error::code::INVALID_INPUT);
+        assert!(error.to_string().contains("not an APK/ZIP"));
+
+        let manifestless = dir.join("manifestless.apk");
+        std::fs::write(&manifestless, b"PK\x03\x04notes.txt").unwrap();
+        let error = apk_looks_installable(manifestless.to_str().unwrap()).unwrap_err();
+        assert_eq!(error.code(), error::code::INVALID_INPUT);
+        assert!(error.to_string().contains("without AndroidManifest.xml"));
+
+        let apk = dir.join("ok.apk");
+        std::fs::write(&apk, b"PK\x03\x04AndroidManifest.xml").unwrap();
+        apk_looks_installable(apk.to_str().unwrap()).unwrap();
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn mapped_dependencies(pm: platform::PackageManager) -> Vec<&'static str> {
+        pm.mapped_packages(&["git", "python3", "python3-venv", "squashfs", "lzip"])
+    }
 
     #[test]
     fn sh_quote_wraps_and_escapes_single_quotes() {
@@ -3337,8 +3810,11 @@ mod tests {
         assert!(body.contains("export WAYDROID_CONFIG=/var/lib/waydroid/waydroid.cfg"));
         assert!(body.contains("mktemp -d /var/tmp/archdroid."));
         assert!(body.contains("chmod 700 \"$ARCHDROID_WORK\""));
+        assert!(body.contains("ARCHDROID_CANCEL_FILE"));
+        assert!(body.contains("ARCHDROID_CANCEL_WATCH=$!"));
+        assert!(body.contains("kill -TERM 0"));
         assert!(body.contains(
-            "trap 'rm -rf \"$ARCHDROID_WORK\" /tmp/gapps /tmp/houdiniunpack /tmp/waydroid'"
+            "trap 'kill \"$ARCHDROID_CANCEL_WATCH\" 2>/dev/null; rm -rf \"$ARCHDROID_WORK\" /tmp/gapps /tmp/houdiniunpack /tmp/waydroid'"
         ));
         assert!(body.contains(ELEVATED_SENTINEL));
         assert!(body.trim_end().ends_with("echo body"));
@@ -3427,8 +3903,10 @@ mod tests {
 
     #[test]
     fn third_party_installers_are_pinned_and_use_private_workdirs() {
-        let gapps = gapps_install_script(Some(platform::PackageManager::Pacman));
-        let houdini = houdini_install_script(Some(platform::PackageManager::Pacman));
+        let pacman = platform::PackageManager::Pacman;
+        let approved = mapped_dependencies(pacman);
+        let gapps = gapps_install_script(Some(pacman), &approved);
+        let houdini = houdini_install_script(Some(pacman), &approved);
         assert!(gapps.contains("rm -rf /tmp/gapps /tmp/waydroid"));
         assert!(houdini.contains("rm -rf /tmp/houdiniunpack /tmp/waydroid"));
         for script in [&gapps, &houdini] {
@@ -3584,9 +4062,10 @@ mod tests {
             None,
         ];
         for pm in pms {
+            let approved = pm.map(mapped_dependencies).unwrap_or_default();
             for (name, script) in [
-                ("gapps", gapps_install_script(pm)),
-                ("houdini", houdini_install_script(pm)),
+                ("gapps", gapps_install_script(pm, &approved)),
+                ("houdini", houdini_install_script(pm, &approved)),
             ] {
                 let output = Command::new("bash")
                     .args(["-n", "-c", &script])
@@ -3614,25 +4093,29 @@ mod tests {
 
     #[test]
     fn installers_adapt_to_detected_package_manager() {
-        let pacman_gapps = gapps_install_script(Some(platform::PackageManager::Pacman));
+        let pacman = platform::PackageManager::Pacman;
+        let pacman_gapps = gapps_install_script(Some(pacman), &mapped_dependencies(pacman));
         assert!(
             pacman_gapps.contains("pacman -S --needed --noconfirm git python squashfs-tools lzip")
         );
 
-        let apt_gapps = gapps_install_script(Some(platform::PackageManager::Apt));
+        let apt = platform::PackageManager::Apt;
+        let apt_gapps = gapps_install_script(Some(apt), &mapped_dependencies(apt));
         assert!(apt_gapps.contains(
             "apt-get install -y --no-install-recommends git python3 python3-venv squashfs-tools lzip"
         ));
 
-        let dnf_gapps = gapps_install_script(Some(platform::PackageManager::Dnf));
+        let dnf = platform::PackageManager::Dnf;
+        let dnf_gapps = gapps_install_script(Some(dnf), &mapped_dependencies(dnf));
         assert!(dnf_gapps.contains("dnf install -y git python3 squashfs-tools lzip"));
 
-        let zypper_gapps = gapps_install_script(Some(platform::PackageManager::Zypper));
+        let zypper = platform::PackageManager::Zypper;
+        let zypper_gapps = gapps_install_script(Some(zypper), &mapped_dependencies(zypper));
         assert!(zypper_gapps.contains(
             "zypper --non-interactive install --no-recommends git python3 squashfs lzip"
         ));
 
-        let unsupported_gapps = gapps_install_script(None);
+        let unsupported_gapps = gapps_install_script(None, &[]);
         assert!(!unsupported_gapps.contains("pacman"));
         assert!(!unsupported_gapps.contains("apt-get"));
         assert!(unsupported_gapps.contains("[ERROR] Missing required tools:"));
@@ -3648,16 +4131,17 @@ mod tests {
             platform::PackageManager::Dnf,
             platform::PackageManager::Zypper,
         ] {
+            let approved = mapped_dependencies(pm);
             for script in [
-                gapps_install_script(Some(pm)),
-                houdini_install_script(Some(pm)),
+                gapps_install_script(Some(pm), &approved),
+                houdini_install_script(Some(pm), &approved),
             ] {
                 assert!(script.contains("command -v git"));
                 assert!(script.contains("import venv, ensurepip"));
                 assert!(script.contains("command -v unsquashfs"));
                 assert!(script.contains("command -v lzip"));
                 let install_at = script
-                    .find("Installing required tools via")
+                    .find("Installing approved tools via")
                     .expect("dependency install step missing");
                 let checkout_at = script.find("git init -q").expect("checkout step missing");
                 assert!(
@@ -3666,6 +4150,99 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn package_preview_lists_distro_names_and_the_exact_command() {
+        let missing = ["git", "python3", "python3-venv", "squashfs", "lzip"];
+        let pacman = package_install_preview(
+            PackageInstallAction::Gapps,
+            &missing,
+            Some(platform::PackageManager::Pacman),
+        );
+        assert_eq!(pacman.action, "gapps");
+        assert_eq!(pacman.package_manager.as_deref(), Some("pacman"));
+        assert_eq!(
+            pacman.packages,
+            vec!["git", "python", "squashfs-tools", "lzip"]
+        );
+        assert_eq!(
+            pacman.command.as_deref(),
+            Some("pacman -S --needed --noconfirm git python squashfs-tools lzip")
+        );
+        assert!(pacman.requires_root);
+
+        let apt = package_install_preview(
+            PackageInstallAction::Houdini,
+            &missing,
+            Some(platform::PackageManager::Apt),
+        );
+        assert_eq!(
+            apt.packages,
+            vec!["git", "python3", "python3-venv", "squashfs-tools", "lzip"]
+        );
+        assert!(apt
+            .command
+            .as_deref()
+            .unwrap()
+            .contains("apt-get install -y --no-install-recommends"));
+
+        let unsupported = package_install_preview(PackageInstallAction::Init, &["waydroid"], None);
+        assert_eq!(unsupported.packages, vec!["waydroid"]);
+        assert_eq!(unsupported.command, None);
+        assert_eq!(unsupported.package_manager, None);
+    }
+
+    #[test]
+    fn package_approval_requires_every_reviewed_package() {
+        let required = ["git", "python3", "python3-venv", "squashfs", "lzip"];
+        let pm = Some(platform::PackageManager::Pacman);
+
+        let missing = approved_install_packages(PackageInstallAction::Gapps, &required, pm, None)
+            .unwrap_err();
+        assert_eq!(missing.code(), error::code::APPROVAL_REQUIRED);
+
+        let partial = vec!["git".to_string()];
+        let partial_error =
+            approved_install_packages(PackageInstallAction::Gapps, &required, pm, Some(&partial))
+                .unwrap_err();
+        assert_eq!(partial_error.code(), error::code::APPROVAL_REQUIRED);
+        assert!(partial_error.to_string().contains("python"));
+
+        let reviewed = platform::PackageManager::Pacman.mapped_packages(&required);
+        let reviewed: Vec<String> = reviewed.iter().map(|name| name.to_string()).collect();
+        assert_eq!(
+            approved_install_packages(PackageInstallAction::Gapps, &required, pm, Some(&reviewed))
+                .unwrap(),
+            vec!["git", "python", "squashfs-tools", "lzip"]
+        );
+
+        let mut smuggled = reviewed.clone();
+        smuggled.push("bash".to_string());
+        let smuggled_error =
+            approved_install_packages(PackageInstallAction::Gapps, &required, pm, Some(&smuggled))
+                .unwrap_err();
+        assert_eq!(smuggled_error.code(), error::code::INVALID_INPUT);
+    }
+
+    #[test]
+    fn installer_scripts_only_install_approved_packages() {
+        let script = gapps_install_script(Some(platform::PackageManager::Pacman), &["git"]);
+        assert!(script.contains("pacman -S --needed --noconfirm git"));
+        assert!(!script.contains("pacman -S --needed --noconfirm git python"));
+        assert!(script.contains("were not approved for installation"));
+        assert!(script.contains("Review the package preview"));
+
+        let no_approval = gapps_install_script(Some(platform::PackageManager::Pacman), &[]);
+        assert!(!no_approval.contains("pacman -S --needed --noconfirm"));
+        assert!(no_approval.contains("were not approved for installation"));
+    }
+
+    #[test]
+    fn package_preview_rejects_unknown_actions() {
+        let result = preview_package_install("bogus".to_string()).unwrap_err();
+        assert_eq!(result.code.as_deref(), Some(error::code::INVALID_INPUT));
+        assert!(result.message.unwrap().contains("init, gapps, or houdini"));
     }
 
     #[test]
@@ -3923,7 +4500,8 @@ wait
         let grandchild = wait_for_pid_file(&pid_file);
         let started = Instant::now();
         let cancel = AtomicBool::new(false);
-        let outcome = wait_with_deadline(&mut child, 1, &cancel).expect("waiting must not fail");
+        let outcome =
+            wait_with_deadline(&mut child, 1, &cancel, None).expect("waiting must not fail");
 
         assert!(matches!(outcome, WaitOutcome::TimedOut));
         assert!(
@@ -3975,7 +4553,8 @@ wait
         let grandchild = wait_for_pid_file(&pid_file);
         let cancel = AtomicBool::new(true);
         let started = Instant::now();
-        let outcome = wait_with_deadline(&mut child, 30, &cancel).expect("waiting must not fail");
+        let outcome =
+            wait_with_deadline(&mut child, 30, &cancel, None).expect("waiting must not fail");
 
         assert!(matches!(outcome, WaitOutcome::Cancelled));
         assert!(
@@ -4003,7 +4582,7 @@ wait
         let mut child = command.spawn().expect("bash must start");
 
         let cancel = AtomicBool::new(false);
-        match wait_with_deadline(&mut child, 30, &cancel).expect("waiting must not fail") {
+        match wait_with_deadline(&mut child, 30, &cancel, None).expect("waiting must not fail") {
             WaitOutcome::Exited(status) => assert_eq!(status.code(), Some(7)),
             WaitOutcome::TimedOut => panic!("a quick script must not time out"),
             WaitOutcome::Cancelled => panic!("a quick script must not be cancelled"),
@@ -4311,6 +4890,79 @@ wait
     }
 
     #[test]
+    fn clear_install_markers_only_clears_on_success() {
+        let m1 = marker_file("gapps_installed");
+        let m2 = marker_file("houdini_installed");
+        let m3 = marker_file("multitouch_installed");
+
+        write_marker(&m1);
+        write_marker(&m2);
+        write_marker(&m3);
+
+        assert!(m1.exists());
+        assert!(m2.exists());
+        assert!(m3.exists());
+
+        // A failed attempt must NOT clear markers
+        apply_completion(
+            &exit_failure("wipe", 1, true),
+            Completion::ClearInstallMarkers,
+        );
+        assert!(m1.exists(), "failure must not clear markers");
+        assert!(m2.exists(), "failure must not clear markers");
+        assert!(m3.exists(), "failure must not clear markers");
+
+        // A cancelled attempt must NOT clear markers
+        apply_completion(
+            &StreamResult::failure(
+                AppError::CancelRequested {
+                    program: "wipe".to_string(),
+                },
+                true,
+            ),
+            Completion::ClearInstallMarkers,
+        );
+        assert!(m1.exists(), "cancel must not clear markers");
+        assert!(m2.exists(), "cancel must not clear markers");
+        assert!(m3.exists(), "cancel must not clear markers");
+
+        // A successful attempt MUST clear markers
+        apply_completion(
+            &StreamResult::success(true),
+            Completion::ClearInstallMarkers,
+        );
+        assert!(!m1.exists(), "successful wipe must clear gapps marker");
+        assert!(!m2.exists(), "successful wipe must clear houdini marker");
+        assert!(!m3.exists(), "successful wipe must clear multitouch marker");
+    }
+
+    #[test]
+    fn wipe_script_protects_paths_and_targets_only_waydroid_data() {
+        let script = wipe_script();
+        let output = Command::new("bash")
+            .args(["-n", "-c", script])
+            .output()
+            .expect("bash should be executable");
+        assert!(output.status.success());
+
+        // Defense in depth check on ARCHDROID_USER_HOME
+        assert!(script
+            .contains(r#"[ -n "${ARCHDROID_USER_HOME:-}" ] && [ "$ARCHDROID_USER_HOME" != "/" ]"#));
+
+        // Exact target paths
+        assert!(script.contains("rm -rf /var/lib/waydroid"));
+        assert!(script.contains(r#"rm -rf "$ARCHDROID_USER_HOME/.local/share/waydroid""#));
+        assert!(script
+            .contains(r#"rm -rf "$ARCHDROID_USER_HOME"/.local/share/applications/waydroid.*"#));
+
+        // Must not contain general home or system deletion
+        assert!(!script.contains("rm -rf $HOME"));
+        assert!(!script.contains("rm -rf /home"));
+        assert!(!script.contains("rm -rf /usr"));
+        assert!(!script.contains("rm -rf /etc"));
+    }
+
+    #[test]
     fn finished_event_is_structured_even_for_success() {
         let value =
             serde_json::to_value(StreamResult::success(true).finished_event("task-7")).unwrap();
@@ -4471,5 +5123,23 @@ wait
                 .contains("distribution's package manager"),
             "{unsupported}"
         );
+    }
+
+    #[test]
+    fn sanitize_appimage_env_cleans_polluted_python_vars() {
+        std::env::set_var("APPDIR", "/tmp/appimage_extracted_12345");
+        std::env::set_var("PYTHONHOME", "/tmp/appimage_extracted_12345/usr/");
+        std::env::set_var(
+            "PYTHONPATH",
+            "/tmp/appimage_extracted_12345/usr/share/pyshared/:",
+        );
+
+        sanitize_appimage_env();
+
+        assert!(std::env::var("PYTHONHOME").is_err());
+        assert!(std::env::var("PYTHONPATH").is_err());
+
+        // Cleanup test env
+        std::env::remove_var("APPDIR");
     }
 }

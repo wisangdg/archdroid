@@ -1,0 +1,41 @@
+# Maintainer: ArchDroid Team <https://github.com/archdroid/archdroid>
+pkgname=archdroid-bin
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="LDPlayer-style desktop front-end for Waydroid"
+arch=('x86_64')
+url="https://github.com/archdroid/archdroid"
+license=('MIT')
+depends=(
+    'gtk3'
+    'webkit2gtk-4.1'
+    'libappindicator-gtk3'
+    'waydroid'
+)
+optdepends=(
+    'squashfs-tools: for GApps extraction'
+    'lzip: for image decompression'
+    'git: for libhoudini translation repository'
+)
+provides=('archdroid')
+conflicts=('archdroid')
+
+package() {
+    local repo_root
+    repo_root="$(realpath "${startdir}/../..")"
+    local deb_data="${repo_root}/src-tauri/target/release/bundle/deb/ArchDroid_${pkgver}_amd64.deb"
+
+    if [ -f "${deb_data}" ]; then
+        cd "${pkgdir}"
+        ar p "${deb_data}" data.tar.gz | tar -xz
+    else
+        install -Dm755 "${repo_root}/src-tauri/target/release/archdroid" "${pkgdir}/usr/bin/archdroid"
+        install -Dm644 "${repo_root}/src-tauri/target/release/bundle/deb/ArchDroid_${pkgver}_amd64/data/usr/share/applications/ArchDroid.desktop" "${pkgdir}/usr/share/applications/ArchDroid.desktop"
+        for size in 32x32 128x128; do
+            install -Dm644 "${repo_root}/src-tauri/icons/${size}.png" "${pkgdir}/usr/share/icons/hicolor/${size}/apps/archdroid.png"
+        done
+        install -Dm644 "${repo_root}/src-tauri/icons/128x128@2x.png" "${pkgdir}/usr/share/icons/hicolor/256x256@2/apps/archdroid.png"
+    fi
+
+    install -Dm644 "${repo_root}/LICENSE" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+}

@@ -82,6 +82,7 @@ static CANCEL: AtomicBool = AtomicBool::new(false);
 
 /// Ask the running long operation (`app install|remove`) to stop; its child is
 /// killed within one poll tick (~20ms).
+#[cfg(any(test, feature = "dev-commands"))]
 pub fn request_cancel() {
     CANCEL.store(true, Ordering::SeqCst);
 }
@@ -147,6 +148,7 @@ fn argv(parts: &[&str]) -> Vec<String> {
 }
 
 /// `waydroid -V` prints the version.
+#[cfg(feature = "dev-commands")]
 pub fn argv_version() -> Vec<String> {
     argv(&["--version"])
 }
@@ -165,6 +167,18 @@ pub fn argv_session_stop() -> Vec<String> {
 
 pub fn argv_app_list() -> Vec<String> {
     argv(&["app", "list"])
+}
+
+/// Parse `waydroid app list` output. Each installed app prints one
+/// `packageName: <name>` line; the surrounding name/category lines are ignored.
+pub fn package_names(list_output: &str) -> std::collections::BTreeSet<String> {
+    list_output
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("packageName:"))
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+        .collect()
 }
 
 /// `path` is the local path of an `.apk`.
@@ -235,6 +249,7 @@ impl Waydroid {
         run_program(&self.program, args, timeout_secs, true)
     }
 
+    #[cfg(feature = "dev-commands")]
     pub fn version(&self) -> Result<String> {
         self.run(&argv_version(), TIMEOUT_QUICK)
             .map(|text| text.trim().to_string())
@@ -263,6 +278,8 @@ impl Waydroid {
         let mut command = Command::new(&self.program);
         command
             .args(args)
+            .env_remove("PYTHONHOME")
+            .env_remove("PYTHONPATH")
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -381,6 +398,8 @@ pub(crate) fn run_program(
     let mut command = Command::new(program_path);
     command
         .args(args)
+        .env_remove("PYTHONHOME")
+        .env_remove("PYTHONPATH")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -525,6 +544,11 @@ mod tests {
         assert_eq!(argv_status(), vec!["status"]);
         assert_eq!(argv_session_start(), vec!["session", "start"]);
         assert_eq!(argv_session_stop(), vec!["session", "stop"]);
+    }
+
+    #[cfg(feature = "dev-commands")]
+    #[test]
+    fn version_argv_matches_the_upstream_action() {
         assert_eq!(argv_version(), vec!["--version"]);
     }
 
@@ -636,6 +660,17 @@ exit 0"#,
         );
         assert_eq!(argv_prop_get("ro.x"), vec!["prop", "get", "ro.x"]);
         assert_eq!(argv_prop_set("ro.x", "1"), vec!["prop", "set", "ro.x", "1"]);
+    }
+
+    #[test]
+    fn app_list_output_is_parsed_into_package_names() {
+        let output = "Name: F-Droid\npackageName: org.fdroid.fdroid\ncategories:\n\
+                      Name: Google Play Store\npackageName: com.android.vending\ncategories:\n";
+        let names = package_names(output);
+        assert_eq!(names.len(), 2);
+        assert!(names.contains("org.fdroid.fdroid"));
+        assert!(names.contains("com.android.vending"));
+        assert!(package_names("").is_empty());
     }
 
     /// The words must stay separate argv entries: something that looks like a
