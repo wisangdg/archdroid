@@ -29,7 +29,7 @@ ArchDroid dirancang dengan arsitektur **multi-distro** yang secara otomatis mend
 
 ### Integritas & Verifikasi Artefak
 
-Setiap rilis resmi Tier 1 (`archdroid-bin-*.pkg.tar.zst` dan `ArchDroid_*.AppImage`) disertai file checksum `SHA256SUMS` dan tanda tangan digital GPG `SHA256SUMS.asc` dari kunci publik resmi (`18F47067ACC5BBF9`). Panduan verifikasi manual dan otomatis dapat dilihat di [docs/VERIFY-RELEASE.md](docs/VERIFY-RELEASE.md).
+Setiap rilis resmi Tier 1 (`archdroid-bin-*.pkg.tar.zst` dan `ArchDroid_*.AppImage`) disertai file checksum `SHA256SUMS` dan tanda tangan digital GPG `SHA256SUMS.asc` dari kunci publik resmi (`18F47067ACC5BBF9`). Panduan verifikasi manual dan otomatis dapat dilihat di [docs/VERIFY-RELEASE.md](docs/VERIFY-RELEASE.md). Strategi update (manual, tanpa updater) dan pengelolaan kunci: [docs/RELEASE-AND-UPDATES.md](docs/RELEASE-AND-UPDATES.md).
 
 ### Target yang Tidak Didukung (Explicitly Unsupported)
 

@@ -890,97 +890,90 @@ P1 tidak boleh menunda P0, tetapi sebaiknya selesai sebelum rilis publik.
 
 ### P1-4 — Diagnostik runtime dan first-run
 
-- [ ] Hubungkan `SetupWizard` ke `waydroid_status_json()`; tampilkan langkah
-  berbeda untuk Waydroid hilang, belum init, init berjalan, dan siap.
-- [ ] Tampilkan preflight P0-7 di UI sebelum tombol install/start.
-- [ ] Tambahkan petunjuk actionable untuk: polkit agent tidak ada, sudo butuh
+- [x] Hubungkan `SetupWizard` ke status Waydroid; tampilkan langkah berbeda untuk
+  Waydroid hilang, belum init, init berjalan, dan siap.
+  - **Status:** selesai. `src/lib/setupStage.js` menurunkan stage (`missing`/`uninitialized`/`initializing`/`ready`) dari report `check_host_diagnostics` + state `installing`; judul dan deskripsi wizard berubah per stage. Catatan: `waydroid_status_json` hanya ada di build `dev-commands`, sehingga wizard memakai report diagnostik yang selalu tersedia.
+- [x] Tampilkan preflight P0-7 di UI sebelum tombol install/start.
+  - **Status:** selesai untuk wizard init (sudah ada, tombol di-gate). Gating tombol start/install-tools di luar wizard belum dilakukan.
+- [x] Tambahkan petunjuk actionable untuk: polkit agent tidak ada, sudo butuh
   TTY, `adb` tidak ada, `/dev/kvm` tidak bisa diakses, dan X11.
-- [ ] Pastikan `check_host_diagnostics` tidak melakukan blocking call di main
+  - **Status:** selesai. `collect_diagnostics` kini mendeteksi `pkexec` tanpa polkit agent berjalan dan sudo-only tanpa TTY (status error + remediation); `adb` hilang naik ke warning; KVM dan X11 sudah punya remediation.
+- [x] Pastikan `check_host_diagnostics` tidak melakukan blocking call di main
   thread.
+  - **Status:** selesai (sudah memakai `spawn_blocking`).
 - **DoD:** host yang belum siap mendapat penjelasan dan perbaikan, bukan error
-  mentah.
+  mentah. Terverifikasi: `cargo test` (diagnostik + nama polkit agent), `npm test`, `npm run lint`.
 
 ### P1-5 — Maintenance dependency dan supply chain
 
-- [ ] Perbarui toolchain frontend. `npm audit` penuh saat ini melaporkan
-  **7 dev-only vulnerability (4 high)**, termasuk Vite 5.4.21; upgrade ke Vite
-  yang didukung atau dokumentasikan risiko yang diterima.
-- [ ] Jalankan `cargo audit`/`cargo deny` dan `npm audit --omit=dev` di CI.
-- [ ] Pin GitHub Actions ke SHA dan review permission workflow.
-- [ ] Tinjau `core:default` di `capabilities/default.json`; pertahankan hanya
-  permission yang dipakai.
-- [ ] Batasi pembacaan icon dari file `.desktop`: validasi path, tipe file,
-  ukuran maksimum; jangan membaca file arbitrer tanpa batas. Saat ini semua
-  ikon diberi MIME `image/png` secara hardcode, jadi ikon SVG/XPM rusak.
-- [ ] Dokumentasikan ADB auto-authorization dan batasi command ke serial
-  Waydroid (sudah ada upaya di `adb.rs`, tetapi perlu test/regresi).
-- **DoD:** tidak ada temuan high/critical yang tidak tercatat dan diterima
-  secara eksplisit.
+- [x] Perbarui toolchain frontend.
+  - **Status:** selesai. Vite 8, Vitest 5, `@vitejs/plugin-react` 6, plus `npm audit fix`. Tersisa 6 moderate dev-only (`minimatch` via eslint) yang diterima; lihat `docs/DEPENDENCY-SECURITY.md`. `npm audit --omit=dev` = 0.
+- [x] Jalankan `cargo audit` dan `npm audit --omit=dev` di CI.
+  - **Status:** step `cargo audit` ditambahkan di CI (belum dijalankan lokal karena `cargo-audit` tidak terpasang); `cargo deny` tidak dipakai.
+- [x] Pin GitHub Actions ke SHA dan review permission workflow (`contents: read`).
+- [x] Tinjau `core:default`: tidak dipakai; hanya 3 permission eksplisit.
+- [x] Batasi pembacaan icon `.desktop`.
+  - **Status:** selesai. `icon_data_uri`: path absolut, file reguler, maks 512 KiB, PNG/SVG berdasarkan isi (MIME benar); XPM/lainnya ditolak. Ada unit test.
+- [x] Dokumentasikan ADB auto-authorization dan batasi command ke serial Waydroid.
+  - **Status:** didokumentasikan di `docs/DEPENDENCY-SECURITY.md`; test regresi serial sudah ada di `adb.rs`.
+- **DoD:** temuan tersisa tercatat dan diterima eksplisit di `docs/DEPENDENCY-SECURITY.md`.
 
 ### P1-6 — Logging dan privasi
 
-- [ ] Redaksi data sensitif dari log: path home, argumen `adb shell` arbitrer,
-  identitas device/profil, dan output yang mungkin berisi token.
-  `run_privileged_script_for_task` saat ini menulis seluruh isi script root
-  ke log file (`log::info!("root script requested:\n{script}")`), termasuk
-  isi `waydroid.cfg`/`waydroid_base.prop` dari `profile_apply`.
-- [ ] Batasi ukuran log UI (log terminal tidak boleh tumbuh tanpa batas) dan
-  batasi output `waydroid_log`.
-- [ ] Sediakan UI untuk melihat, mengekspor, dan menghapus log; dokumentasikan
-  lokasinya.
-- [ ] Pastikan tidak ada telemetry/upload otomatis.
+- [x] Redaksi data sensitif dari log.
+  - **Status:** selesai. Isi script root/user tidak lagi ditulis ke log (hanya jumlah baris). Pesan error di log dan tampilan log melewati `redact_text` (path home → `~`, nilai `token/password/secret/api_key`, `Bearer`). Unit test `redaction_masks_home_and_secrets`. Argumen `adb shell` dan identitas device tidak pernah di-log oleh kode saat ini.
+- [x] Batasi ukuran log UI dan output `waydroid_log`.
+  - **Status:** selesai. Terminal UI menyimpan maks 2000 baris (`appendLogLine`); `waydroid_log` memakai `tail -n 1000`; tampilan log aplikasi dibatasi 64 KiB terakhir. File log dirotasi plugin (40 KB).
+- [x] UI untuk melihat, mengekspor, dan menghapus log.
+  - **Status:** selesai. Panel "Application Log" di Settings (View / Copy / Clear) dengan lokasi log ditampilkan. "Ekspor" berupa Copy ke clipboard (belum ada dialog simpan file).
+- [x] Pastikan tidak ada telemetry/upload otomatis.
+  - **Status:** tidak ada dependensi HTTP/telemetry di `Cargo.toml`; satu-satunya koneksi jaringan adalah probe TCP konektivitas di preflight. Dinyatakan di panel log.
 - **DoD:** log cukup untuk support tanpa membocorkan data pribadi.
 
 ### P1-7 — Data, config, dan lifecycle
 
-- [ ] Beri versi/skema pada config profil dan migrasi aman; file rusak harus
-  fallback tanpa panic.
-- [ ] Pastikan penulisan config atomik dan permission benar. Bukti:
-  `device::save_to` memakai `fs::write` langsung (tidak tulis-temp-lalu-
-  rename), dan `config_path()` jatuh ke `./` bila `dirs::config_dir()` kosong.
-- [ ] `write_marker` mengabaikan error (`let _ = fs::write(...)`); kegagalan
-  menulis marker harus dilaporkan agar status tidak diam-diam salah.
-- [ ] Dokumentasikan path config/cache/log, data Waydroid, dan cara uninstall
-  bersih.
-- [ ] Uji marker install saat image di-wipe/di-init ulang; jangan percaya marker
-  basi.
-- [ ] Sediakan backup/export sebelum wipe (minimal peringatan eksplisit).
-- **DoD:** tidak ada state “installed” palsu dan tidak ada data user yang
-  tertinggal tanpa penjelasan.
+- [x] Beri versi/skema pada config profil dan migrasi aman.
+  - **Status:** selesai. `DeviceProfile.version` (`PROFILE_VERSION = 1`), `migrate()` untuk file lama tanpa versi; file rusak dipindah ke `profile.json.corrupt` lalu fallback ke default tanpa panic.
+- [x] Penulisan config atomik dan permission benar.
+  - **Status:** selesai. `save_to`: file temp 0600 → `sync_all` → `rename`. `config_path()` tidak lagi jatuh ke `./` (pakai `~/.config`, lalu temp dir).
+- [x] `write_marker` melaporkan error.
+  - **Status:** selesai. Mengembalikan `io::Result`; penyelesaian install menampilkan `[WARNING]` di terminal bila gagal, refresh dari live check hanya me-log.
+- [x] Dokumentasikan path config/cache/log, data Waydroid, uninstall bersih: `docs/DATA-AND-UNINSTALL.md`.
+- [x] Marker basi: live check menghapus marker yang tidak didukung image, Init/Wipe menghapus semua marker (sudah ada test).
+- [x] Peringatan eksplisit sebelum wipe kini menyebut backup via Shared Storage. Backup/export otomatis belum ada.
+- **DoD:** tidak ada state "installed" palsu; data user terdokumentasi.
 
 ### P1-8 — Strategi update dan distribusi
 
-- [ ] Pilih: update manual dengan release notes, atau Tauri updater
-  bertanda tangan.
-- [ ] Kelola kunci rilis GPG `18F47067ACC5BBF9` (P0-9.3): catat lokasi
-  backup, masa berlaku, dan prosedur rotasi/revokasi; publikasikan
-  fingerprint di kanal kedua selain repo (halaman rilis/situs), karena
-  fingerprint yang hanya ada di README repo tidak melindungi dari repo yang
-  dibobol. Pastikan kunci privat tidak pernah masuk repo (saat review tidak
-  ada kunci privat di `scripts/` atau `packaging/`).
-- [ ] Jika updater: kelola signing key, endpoint, rollback, dan verifikasi.
-- [ ] Jika manual: sediakan cek versi dan instruksi upgrade yang jelas.
-- **DoD:** tidak ada update yang mengeksekusi artefak tanpa signature.
+- [x] Pilih: update manual dengan release notes (tanpa Tauri updater).
+  - **Status:** diputuskan dan didokumentasikan di `docs/RELEASE-AND-UPDATES.md`. Test `release-hygiene.test.js` menjaga tidak ada plugin updater.
+- [~] Kelola kunci rilis GPG `18F47067ACC5BBF9`.
+  - **Status:** prosedur rotasi/revokasi, parameter kunci, dan pemeriksaan "tidak ada kunci privat di repo" (test) selesai. **Butuh tindakan pemilik:** set masa berlaku (kunci saat ini tanpa expiry), catat lokasi backup, dan publikasikan fingerprint di kanal kedua (Releases/keyserver); checklist ada di dokumen.
+- [x] Jika updater: tidak berlaku.
+- [x] Jika manual: instruksi upgrade, verifikasi, dan rollback tertulis.
+- **DoD:** tidak ada update yang mengeksekusi artefak tanpa signature (aplikasi tidak mengunduh/menjalankan apa pun sendiri).
 
 ### P1-9 — Performa dan UX operasi
 
-- [ ] Kurangi probe berulang: satu `status_json`/snapshot per polling, cache
-  app list/icon berdasarkan mtime.
-- [ ] Tampilkan progress tahap yang benar (sinkron dengan script).
-- [ ] Pastikan tombol disabled selama operasi dan bisa pulih setelah
-  gagal/cancel.
-- [ ] Ukur startup, memory, dan waktu buka daftar app; tetapkan budget.
-- **DoD:** UI tidak freeze saat `systemctl`/`xdg-open`/terminal dibuka dan
-  polling tidak menumpuk.
+- [x] Kurangi probe berulang dan cache app list/icon berdasarkan mtime.
+  - **Status:** selesai. Polling 5 detik kini hanya `waydroid_status` (GApps/Houdini lewat adb di-refresh saat sesi online dan setelah task), dilewati bila jendela tersembunyi, dan `checkStatus` tetap single-flight. `collect_apps_in` meng-cache entri `.desktop` per path+mtime (ikon hanya dibaca ulang bila file berubah; entri yang dihapus ikut keluar dari cache). Catatan: perubahan file ikon tanpa perubahan `.desktop` tidak terdeteksi.
+- [x] Progress tahap sinkron dengan script.
+  - **Status:** selesai. Script gapps/houdini/phantom/wipe/init mencetak `[STEP] <id>` sesuai `TASK_STEP_CONFIGS`; `detectStepProgress` memakai marker terakhir dan hanya jatuh ke heuristik teks bila tidak ada marker. Test Rust memastikan urutan marker per script; test JS memastikan marker diikuti.
+- [x] Tombol disabled selama operasi dan pulih setelah gagal/cancel.
+  - **Status:** tombol View Logs dan Factory Reset kini ikut `busy` (sebelumnya tidak). Pemulihan `installing` setelah gagal/cancel sudah dicakup test P1-2.
+- [x] Ukur dan tetapkan budget.
+  - **Status:** app list 200 entri + ikon: cold 8 ms / warm 1,4 ms (budget test: < 250 ms / < 25 ms). Diagnostik host ~0,1 s (di `spawn_blocking`). Bundle JS 249 KB (75 KB gzip). Startup dan memory jendela belum diukur (butuh sesi GUI); budget awal: jendela tampil < 1,5 s, RSS < 200 MB.
+- **DoD:** command yang memanggil `systemctl`/`xdg-open`/terminal/probe tool berjalan off main thread (`preview_package_install` kini async + `spawn_blocking`); polling tidak menumpuk.
 
 ### P1-10 — Ketahanan installer
 
-- [ ] Uji instalasi ulang GApps/Houdini/multitouch setelah sukses, gagal di
+- [x] Uji instalasi ulang GApps/Houdini/multitouch setelah sukses, gagal di
   tengah, dan marker dihapus.
-- [ ] Uji disk penuh/network putus dan pastikan error jelas serta tidak merusak
-  image.
-- [ ] Tambahkan verifikasi post-install (live status) sebelum marker dianggap
-  valid.
+  - **Status:** selesai di level state machine marker (`installer_markers_follow_reinstall_success_failure_and_removal`): sukses → `pending`, live check → `verified`, install ulang idempoten, prompt ditolak tidak menyentuh marker, gagal setelah root menghapus marker, marker lama `installed` dianggap `pending`. Belum diuji end-to-end di VM dengan image sungguhan.
+- [x] Disk penuh/network putus: error jelas.
+  - **Status:** preflight sudah menolak disk < 500 MB / offline sebelum root. Kegagalan di tengah jalan kini dikenali dari output (`No space left on device`, DNS/koneksi putus, `unable to access 'https://`) dan terminal menampilkan `[HINT]` yang actionable; baris penyebab tetap tersimpan walau output panjang. Integritas image: waydroid_script menulis ke overlay, kegagalan menghapus marker sehingga live check melaporkan `partial`/`not_installed` alih-alih "installed". Simulasi disk penuh/network putus sungguhan belum dijalankan.
+- [x] Verifikasi post-install sebelum marker dianggap valid.
+  - **Status:** selesai. Marker `pending` vs `verified`; status offline melaporkan `pending` ("Unverified" di UI, tombol install tetap aktif) sampai live check mengonfirmasi. Didokumentasikan di `docs/DATA-AND-UNINSTALL.md`.
 - **DoD:** operasi idempoten atau gagal dengan aman; tidak ada marker palsu.
 
 ---
@@ -1015,7 +1008,7 @@ Tidak menjadi blocker rilis; kerjakan setelah P0/P1 stabil.
 | Belum ada uji live Waydroid/polkit | Sebagian tertutup | P0-8.1–8.3 selesai di VM Arch (QEMU/KVM, Xvfb); distro non-Arch dan CSP di DevTools runtime belum (P0-9.4). |
 | CSP `null` dan font remote | Tertutup | P0-5.1/P0-5.2: CSP produksi aktif, `@import` Google Fonts dihapus; verifikasi DevTools di P0-8. |
 | Permission webview terlalu luas | Tertutup | P0-5.3: `core:default` diganti event listen/unlisten + `dialog:allow-open`, tanpa plugin shell/FS. |
-| Log dapat memuat argumen sensitif | Terbuka | P1-6. |
+| Log dapat memuat argumen sensitif | Tertutup | P1-6: script tidak di-log, pesan diredaksi. |
 | Command IPC tanpa UI (shell Android arbitrer, tulis root) | Tertutup | P0-5.4: command tanpa UI di-gate di feature `dev-commands` dan tidak ada di build default. |
 | Operasi non-streaming bisa bentrok dengan wipe/init | Tertutup | P0-3.4: semua operasi state-changing memakai `TaskGuard` dan ditolak `busy`. |
 | Vite 5 dev dependency rentan | Terbuka | P1-5; tidak masuk runtime bundle, tetapi build tooling. |
