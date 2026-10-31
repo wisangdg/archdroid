@@ -758,9 +758,10 @@ isolasi UI, lalu validasi rilis.
   - **DoD:** `grep -rn 'file:/''//' README.md docs todo.md` kosong; tautan
     memakai path relatif seperti `docs/VERIFY-RELEASE.md`.
   - **Bukti selesai:** semua tautan absolut di `README.md`, `docs/VERIFY-RELEASE.md`, dan `todo.md` telah diganti menjadi path relatif repositori (misal `packaging/release/archdroid-release.asc`, `src-tauri/tauri.conf.json`). `grep -rn 'file:/''//' README.md docs todo.md` menghasilkan 0 temuan. Unit test `artifact-verification.test.js` memverifikasi pencegahan kebocoran path lokal.
-- [ ] **P0-11.3 — Tambahkan `SECURITY.md` dan `PRIVACY.md`.**
-  - Jelaskan model privilege, installer root, data yang disimpan, lokasi log,
+- [x] **P0-11.3 — Tambahkan `SECURITY.md` dan `PRIVACY.md`.**
+  - **Jelaskan:** model privilege, installer root, data yang disimpan, lokasi log,
     tidak ada telemetri, dan cara melaporkan masalah keamanan.
+  - **Bukti selesai:** ditambahkan file `SECURITY.md` (kebijakan keamanan, model unprivileged webview/IPC, batasan elevasi root dengan sanitasi env dan isolasi cache, explicit consent modal, package approval gating, hash lock Python, serta kontak pelaporan privat ke GitHub Advisories / email pengembang) dan `PRIVACY.md` (komitmen zero telemetri/analytics, zero phone-home, pemetaan lokasi data lokal `~/.config/archdroid`, `~/.cache/archdroid`, `/var/lib/waydroid`, dan retensi/penghapusan data). Tautan menggunakan path relatif.
 - [ ] **P0-11.4 — Tambahkan `CHANGELOG.md` dan third-party notices.**
   - Catat `waydroid_script` GPL-3.0, Phantom MIT, dan lisensi font/aset.
 - [ ] **P0-11.5 — Tinjau penggunaan merek pihak ketiga.**
