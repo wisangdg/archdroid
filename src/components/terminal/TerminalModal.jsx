@@ -50,12 +50,12 @@ export default function TerminalModal({
     return detectStepProgress(taskType, logs);
   }, [taskType, logs]);
 
-  // If viewing logs or if process failed, ensure console is visible
+  // If viewing logs or if process failed/cancelled, ensure console is visible
   useEffect(() => {
-    if (taskType === "logs" || progress.isFailed) {
+    if (taskType === "logs" || progress.isFailed || progress.isCancelled) {
       setShowConsole(true);
     }
-  }, [taskType, progress.isFailed]);
+  }, [taskType, progress.isFailed, progress.isCancelled]);
 
   if (!isOpen) return null;
 
@@ -220,7 +220,9 @@ export default function TerminalModal({
             >
               <div className="status-card-header">
                 <span className="status-card-phase">
-                  {progress.isFailed
+                  {progress.isCancelled
+                    ? "Operation Cancelled"
+                    : progress.isFailed
                     ? "Execution Failed"
                     : progress.isCompleted
                     ? "All Stages Completed"
@@ -239,11 +241,20 @@ export default function TerminalModal({
                 {progress.errorMessage || progress.currentMessage}
               </p>
 
-              {progress.isFailed && (
+              {(progress.isFailed || progress.isCancelled) && (
                 <div className="status-failure-advice">
-                  <strong>Troubleshooting:</strong> Root authentication may have been rejected,
-                  or packages could not be reached. Ensure polkit authentication is configured or
-                  check internet connectivity.
+                  {progress.isCancelled ? (
+                    <>
+                      <strong>Operation Cancelled:</strong> The process was stopped by user request.
+                      No modifications were completed.
+                    </>
+                  ) : (
+                    <>
+                      <strong>Troubleshooting:</strong> Root authentication may have been rejected,
+                      or packages could not be reached. Ensure polkit authentication is configured or
+                      check internet connectivity.
+                    </>
+                  )}
                 </div>
               )}
             </div>

@@ -26,7 +26,7 @@ use std::time::{Duration, Instant};
 
 use crate::error::{AppError, Result};
 use crate::resolve_program;
-use crate::waydroid::{self, Waydroid, TIMEOUT_QUICK};
+use crate::waydroid::{self, Waydroid, TIMEOUT_LONG, TIMEOUT_QUICK};
 
 const HINT: &str = "Install adb (android-tools) to run Android commands, or use root access.";
 const WAYDROID_ADB_PORT: u16 = 5555;
@@ -45,6 +45,7 @@ pub fn shell_line(line: &str) -> Result<String> {
 }
 
 /// Active variant: an explicit user command may resume a frozen container.
+#[cfg(feature = "dev-commands")]
 pub fn shell_line_active(line: &str) -> Result<String> {
     shell_active(&[line])
 }
@@ -58,11 +59,72 @@ pub fn shell(args: &[&str]) -> Result<String> {
 
 /// Explicit user action: resume a frozen container first, then freeze it again
 /// afterwards if this call was the one that resumed it.
+#[cfg(feature = "dev-commands")]
 pub fn shell_active(args: &[&str]) -> Result<String> {
     shell_mode(args, true)
 }
 
+/// True when the host can run adb at all. Callers use this to choose the
+/// authoritative adb path or the `waydroid app` fallback before starting.
+pub fn available() -> bool {
+    resolve_program("adb").is_some()
+}
+
+/// Install an APK through adb. Unlike `waydroid app install`, this waits for
+/// the Android package manager and returns its real result (parse failure,
+/// incompatible package, success).
+pub fn install_apk(path: &str) -> Result<String> {
+    with_device(true, |adb, serial| {
+        let argv = adb_install_args(serial, path);
+        waydroid::run_program(adb, &argv, TIMEOUT_LONG, false)
+    })
+}
+
+/// Uninstall a package through adb. `waydroid app remove` can exit 0 while the
+/// platform service fails (`Failed with code: -3`), so adb is the authoritative
+/// path when it is available.
+pub fn uninstall_app(package: &str) -> Result<String> {
+    if !is_valid_package(package) {
+        return Err(AppError::invalid_input(format!(
+            "Invalid Android package name: {package:?}"
+        )));
+    }
+    with_device(true, |adb, serial| {
+        let argv = adb_uninstall_args(serial, package);
+        waydroid::run_program(adb, &argv, TIMEOUT_LONG, false)
+    })
+}
+
+fn adb_install_args(serial: &str, path: &str) -> Vec<String> {
+    vec![
+        "-s".to_string(),
+        serial.to_string(),
+        "install".to_string(),
+        "-r".to_string(),
+        path.to_string(),
+    ]
+}
+
+fn adb_uninstall_args(serial: &str, package: &str) -> Vec<String> {
+    vec![
+        "-s".to_string(),
+        serial.to_string(),
+        "uninstall".to_string(),
+        package.to_string(),
+    ]
+}
+
 fn shell_mode(args: &[&str], allow_unfreeze: bool) -> Result<String> {
+    with_device(allow_unfreeze, |adb, serial| {
+        let mut argv = vec!["-s".to_string(), serial.to_string(), "shell".to_string()];
+        argv.extend(args.iter().map(|arg| (*arg).to_string()));
+        waydroid::run_program(adb, &argv, TIMEOUT_QUICK, false)
+    })
+}
+
+/// Shared connection/authorization/freeze handling for every adb operation.
+/// The gate stays held for the whole command; `run` gets a ready device.
+fn with_device<T>(allow_unfreeze: bool, run: impl FnOnce(&Path, &str) -> Result<T>) -> Result<T> {
     let _gate = ADB_GATE
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -80,7 +142,7 @@ fn shell_mode(args: &[&str], allow_unfreeze: bool) -> Result<String> {
     }
 
     let mut unfroze = false;
-    let outcome = (|| -> Result<String> {
+    let outcome = (|| -> Result<T> {
         if waydroid::container_frozen(&status) {
             if !allow_unfreeze {
                 return Err(AppError::session_frozen(
@@ -114,9 +176,7 @@ fn shell_mode(args: &[&str], allow_unfreeze: bool) -> Result<String> {
             }
         }
 
-        let mut argv = vec!["-s".to_string(), serial, "shell".to_string()];
-        argv.extend(args.iter().map(|arg| (*arg).to_string()));
-        waydroid::run_program(&adb, &argv, TIMEOUT_QUICK, false)
+        run(&adb, &serial)
     })();
 
     if unfroze {
@@ -127,13 +187,14 @@ fn shell_mode(args: &[&str], allow_unfreeze: bool) -> Result<String> {
 
 /// Best effort "Android finished booting" probe. A frozen/stopped session is
 /// simply "not booted yet"; it must not wait for a shell timeout.
+#[cfg(feature = "dev-commands")]
 pub fn booted() -> bool {
     shell(&["getprop", "sys.boot_completed"]).is_ok_and(|output| output.trim() == "1")
 }
 
 /// Android package names are letters, digits, `.` and `_`. Everything else is
-/// rejected before it can reach `am force-stop` as an argv word, because adb
-/// joins the words into one device shell line.
+/// rejected before it can reach `am force-stop` or `adb uninstall` as an argv
+/// word, because adb joins the words into one device shell line.
 pub fn is_valid_package(package: &str) -> bool {
     !package.is_empty()
         && package
@@ -480,6 +541,29 @@ mod tests {
         assert!(!is_valid_package("org.fdroid.fdroid; rm -rf /"));
         assert!(!is_valid_package("com.foo bar"));
         assert!(!is_valid_package("com.foo\nam start"));
+    }
+
+    #[test]
+    fn install_and_uninstall_target_the_waydroid_serial() {
+        assert_eq!(
+            adb_install_args("192.168.240.112:5555", "/tmp/app.apk"),
+            vec![
+                "-s",
+                "192.168.240.112:5555",
+                "install",
+                "-r",
+                "/tmp/app.apk"
+            ]
+        );
+        assert_eq!(
+            adb_uninstall_args("192.168.240.112:5555", "org.fdroid.fdroid"),
+            vec![
+                "-s",
+                "192.168.240.112:5555",
+                "uninstall",
+                "org.fdroid.fdroid"
+            ]
+        );
     }
 
     #[test]

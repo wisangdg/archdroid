@@ -50,22 +50,32 @@ export function detectStepProgress(taskType, logs = []) {
   }
 
   const logText = logs.join("\n");
+  const isCancelled =
+    logText.includes("[CANCELLED]") ||
+    logText.includes("was cancelled") ||
+    logText.includes("Operation cancelled");
+
   const isFailed =
-    logText.includes("[ERROR]") ||
-    logText.includes("failed!") ||
-    logText.includes("Failed to install") ||
-    logText.includes("[PROCESS FINISHED WITH ERRORS]");
+    !isCancelled &&
+    (logText.includes("[ERROR]") ||
+      logText.includes("failed!") ||
+      logText.includes("Failed to install") ||
+      logText.includes("[PROCESS FINISHED WITH ERRORS]"));
 
   const isCompleted =
-    logText.includes("[SUCCESS]") ||
-    logText.includes("[PROCESS COMPLETED SUCCESSFULLY]") ||
-    logText.includes("Wipe complete!");
+    !isCancelled &&
+    (logText.includes("[SUCCESS]") ||
+      logText.includes("[PROCESS COMPLETED SUCCESSFULLY]") ||
+      logText.includes("Wipe complete!"));
 
   let activeIndex = 0;
   let currentMessage = "Initiating task...";
   let errorMessage = null;
 
-  if (isFailed) {
+  if (isCancelled) {
+    currentMessage = "Operation was cancelled by user.";
+    errorMessage = "Operation was cancelled by user.";
+  } else if (isFailed) {
     const errorLine = logs.find(
       (l) => l.includes("[ERROR]") || l.includes("failed") || l.includes("Failed")
     );
@@ -143,6 +153,7 @@ export function detectStepProgress(taskType, logs = []) {
     steps,
     activeStepIndex: activeIndex,
     isFailed,
+    isCancelled,
     isCompleted,
     currentMessage: currentMessage || "Processing...",
     errorMessage,
