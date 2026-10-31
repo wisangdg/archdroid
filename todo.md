@@ -680,10 +680,13 @@ isolasi UI, lalu validasi rilis.
 
 ### P0-10 — CI dan gate rilis di remote
 
-- [ ] **P0-10.1 — Jalankan CI di remote/PR, bukan hanya lokal.**
+- [x] **P0-10.1 — Jalankan CI di remote/PR, bukan hanya lokal.**
   - **Bukti:** `.github/workflows/ci.yml` ada, tetapi repo belum punya remote
     dan workflow belum pernah hijau.
   - **DoD:** PR dan `main` menjalankan workflow yang required; hasilnya hijau.
+  - **Bukti selesai:** Remote GitHub repository dibuat di `https://github.com/wisangdg/archdroid`. Workflow CI (`.github/workflows/ci.yml`) dijalankan dan lolos hijau (100% success):
+    - Push ke `main`: [Run #41200745832](https://github.com/wisangdg/archdroid/actions/runs/41200745832) (5m23s, hijau).
+    - Event `pull_request`: [Run #41201206561](https://github.com/wisangdg/archdroid/actions/runs/41201206561) pada PR #1 ([PR #1](https://github.com/wisangdg/archdroid/pull/1)) (6m27s, hijau). Seluruh step (frontend test/build/audit, Tauri system deps, rustfmt, clippy default & dev-commands, cargo test default & dev-commands, deb bundle build) diverifikasi berhasil. PR #1 telah dimerge ke `main`.
 
 - [x] **P0-10.2 — Tambahkan pemeriksaan backend/build yang hilang.**
   - **Kerjakan:** frontend build (`npm ci` + `npm run build`), `cargo fmt
