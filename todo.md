@@ -762,8 +762,9 @@ isolasi UI, lalu validasi rilis.
   - **Jelaskan:** model privilege, installer root, data yang disimpan, lokasi log,
     tidak ada telemetri, dan cara melaporkan masalah keamanan.
   - **Bukti selesai:** ditambahkan file `SECURITY.md` (kebijakan keamanan, model unprivileged webview/IPC, batasan elevasi root dengan sanitasi env dan isolasi cache, explicit consent modal, package approval gating, hash lock Python, serta kontak pelaporan privat ke GitHub Advisories / email pengembang) dan `PRIVACY.md` (komitmen zero telemetri/analytics, zero phone-home, pemetaan lokasi data lokal `~/.config/archdroid`, `~/.cache/archdroid`, `/var/lib/waydroid`, dan retensi/penghapusan data). Tautan menggunakan path relatif.
-- [ ] **P0-11.4 — Tambahkan `CHANGELOG.md` dan third-party notices.**
-  - Catat `waydroid_script` GPL-3.0, Phantom MIT, dan lisensi font/aset.
+- [x] **P0-11.4 — Tambahkan `CHANGELOG.md` dan third-party notices.**
+  - **Catat:** `waydroid_script` GPL-3.0, Phantom MIT, dan lisensi font/aset.
+  - **Bukti selesai:** ditambahkan file `CHANGELOG.md` (mengikuti format Keep a Changelog untuk rilis 0.1.0 merangkum seluruh fitur P0: launcher, drag-and-drop APK, setup wizard, addon root injection dengan package approval, CSP, multi-target packaging, dan release signing) dan `NOTICES.md` (atribusi lengkap untuk Waydroid GPL-3.0, `waydroid_script` GPL-3.0 dengan penjelasan isolasi runtime non-vendored, Phantom MIT, Lucide Icons ISC, serta kebijakan font sistem lokal offline tanpa bundle binary/remote import).
 - [ ] **P0-11.5 — Tinjau penggunaan merek pihak ketiga.**
   - **Bukti:** judul window di `index.html` adalah “ArchDroid - LDPlayer for
     Linux”; “LDPlayer-style” juga muncul di `package.json`
