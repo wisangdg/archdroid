@@ -9,28 +9,32 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 OUT_DIR="${REPO_ROOT}/dist-release"
 PREVIEW_DIR="${OUT_DIR}/preview"
 KEY_ID="${GPG_KEY_ID:-18F47067ACC5BBF9}"
+# Stage only artifacts of the version being released: older builds left in the
+# bundle directories must never be signed into a newer SHA256SUMS.
+VERSION="$(sed -n 's/^  "version": "\(.*\)",$/\1/p' "$REPO_ROOT/package.json")"
+[[ -n "$VERSION" ]] || { echo "Error: could not read version from package.json" >&2; exit 1; }
 
 mkdir -p "$OUT_DIR"
 rm -rf "$OUT_DIR"/*
 
-echo "==> Staging Tier 1 (official verified) artifacts in $OUT_DIR"
+echo "==> Staging Tier 1 (official verified) $VERSION artifacts in $OUT_DIR"
 
 # 1. Arch Linux package (Tier 1)
-ARCH_PKGS="$(ls -1t "$REPO_ROOT/packaging/arch"/archdroid-bin-[0-9]*.pkg.tar.zst 2>/dev/null || true)"
-if [[ -n "$ARCH_PKGS" ]]; then
-    for pkg in $ARCH_PKGS; do
-        cp -v "$pkg" "$OUT_DIR/"
-    done
+ARCH_PKG="$(ls -1t "$REPO_ROOT/packaging/arch"/archdroid-bin-"$VERSION"-[0-9]*-x86_64.pkg.tar.zst 2>/dev/null | head -n1 || true)"
+if [[ -f "$ARCH_PKG" ]]; then
+    cp -v "$ARCH_PKG" "$OUT_DIR/"
 else
-    echo "Warning: Arch package not found, run npm run package:arch" >&2
+    echo "Error: Arch package for $VERSION not found, run npm run package:arch" >&2
+    exit 1
 fi
 
 # 2. AppImage (Tier 1 Universal)
-APPIMAGE_PKG="$(ls -1t "$REPO_ROOT/src-tauri/target/release/bundle/appimage"/*.AppImage 2>/dev/null | head -n1 || true)"
+APPIMAGE_PKG="$REPO_ROOT/src-tauri/target/release/bundle/appimage/ArchDroid_${VERSION}_amd64.AppImage"
 if [[ -f "$APPIMAGE_PKG" ]]; then
     cp -v "$APPIMAGE_PKG" "$OUT_DIR/"
 else
-    echo "Warning: .AppImage package not found, run npm run build:bundles" >&2
+    echo "Error: AppImage for $VERSION not found, run npm run build:bundles" >&2
+    exit 1
 fi
 
 # 3. Public Key
@@ -57,8 +61,8 @@ echo "==> Verifying Tier 1 release bundle"
 
 # 4. Optional: Stage Tier 2 preview artifacts in preview/ subdirectory
 mkdir -p "$PREVIEW_DIR"
-DEB_PKG="$(ls -1t "$REPO_ROOT/src-tauri/target/release/bundle/deb"/*.deb 2>/dev/null | head -n1 || true)"
-RPM_PKG="$(ls -1t "$REPO_ROOT/src-tauri/target/release/bundle/rpm"/*.rpm 2>/dev/null | head -n1 || true)"
+DEB_PKG="$REPO_ROOT/src-tauri/target/release/bundle/deb/ArchDroid_${VERSION}_amd64.deb"
+RPM_PKG="$REPO_ROOT/src-tauri/target/release/bundle/rpm/ArchDroid-${VERSION}-1.x86_64.rpm"
 
 if [[ -f "$DEB_PKG" ]]; then
     cp -v "$DEB_PKG" "$PREVIEW_DIR/"
