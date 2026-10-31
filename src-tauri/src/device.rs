@@ -524,7 +524,12 @@ mod tests {
         let path = temp_path("roundtrip");
         let profile = sample_profile();
         save_to(&path, &profile).expect("save");
-        assert_eq!(load_from(&path), profile);
+        // Loading stamps the current schema version on an unversioned profile.
+        let expected = DeviceProfile {
+            version: PROFILE_VERSION,
+            ..profile
+        };
+        assert_eq!(load_from(&path), expected);
         let _ = fs::remove_file(path);
     }
 
