@@ -1,6 +1,7 @@
 use base64::{engine::general_purpose, Engine as _};
 use serde::{Deserialize, Serialize};
-use std::io::{BufReader, Read, Seek, SeekFrom};
+use std::collections::HashMap;
+use std::io::{BufReader, IsTerminal, Read, Seek, SeekFrom};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
@@ -8,7 +9,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 mod adb;
 mod capabilities;
@@ -20,7 +21,7 @@ mod waydroid;
 
 use error::AppError;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct AppInfo {
     pub id: String,
     pub name: String,
@@ -189,12 +190,65 @@ fn marker_file(name: &str) -> PathBuf {
 /// Persist a marker so a finished install is still known after a restart.
 /// This is only called from the unprivileged app process, after a root command
 /// has completed successfully; root never writes into the user cache.
-/// Best effort: a read-only cache directory must never break a status check.
-fn write_marker(marker: &Path) {
+/// A read-only cache directory must never break a status check, so callers
+/// that only refresh a marker may ignore the error; install completion reports it.
+fn write_marker(marker: &Path) -> std::io::Result<()> {
     if let Some(parent) = marker.parent() {
-        let _ = std::fs::create_dir_all(parent);
+        std::fs::create_dir_all(parent)?;
     }
-    let _ = std::fs::write(marker, "installed\n");
+    std::fs::write(marker, MARKER_PENDING)
+}
+
+/// An install script exited 0 but no live check has confirmed the result yet.
+const MARKER_PENDING: &str = "pending\n";
+/// A live check against the running container confirmed the add-on.
+const MARKER_VERIFIED: &str = "verified\n";
+
+/// Marker state as the offline status path should report it.
+#[derive(Debug, PartialEq)]
+enum MarkerState {
+    Absent,
+    Pending,
+    Verified,
+}
+
+fn marker_state(marker: &Path) -> MarkerState {
+    match std::fs::read_to_string(marker) {
+        Ok(text) if text == MARKER_VERIFIED => MarkerState::Verified,
+        // Older builds wrote "installed\n" without a live check: treat as pending.
+        Ok(_) => MarkerState::Pending,
+        Err(_) => MarkerState::Absent,
+    }
+}
+
+/// Status for an add-on whose container cannot be asked right now.
+fn offline_marker_report(marker: &Path, what: &str) -> Option<CommandResult> {
+    match marker_state(marker) {
+        MarkerState::Verified => Some(CommandResult::report(
+            "installed",
+            &format!(
+                "{what} installed (verified on the last live check). Start Waydroid to re-check."
+            ),
+        )),
+        MarkerState::Pending => Some(CommandResult::report(
+            "pending",
+            &format!("{what} install finished but is not verified yet. Start Waydroid to verify."),
+        )),
+        MarkerState::Absent => None,
+    }
+}
+
+/// Record a live-check confirmation; failure only costs the offline shortcut.
+fn refresh_marker(marker: &Path) {
+    let write = || -> std::io::Result<()> {
+        if let Some(parent) = marker.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(marker, MARKER_VERIFIED)
+    };
+    if let Err(error) = write() {
+        log::warn!("could not refresh {}: {error}", marker.display());
+    }
 }
 
 /// Quote a value so it survives being embedded into a `sh` script.
@@ -601,48 +655,102 @@ async fn get_waydroid_apps() -> Vec<AppInfo> {
         .unwrap_or_default()
 }
 
-fn collect_waydroid_apps_sync() -> Vec<AppInfo> {
-    let mut apps = Vec::new();
-    if let Some(mut path) = dirs::data_local_dir() {
-        path.push("applications");
-        if let Ok(entries) = std::fs::read_dir(path) {
-            for entry in entries.flatten() {
-                let file_name = entry.file_name().to_string_lossy().to_string();
-                if file_name.starts_with("waydroid.") && file_name.ends_with(".desktop") {
-                    let package = file_name.replace("waydroid.", "").replace(".desktop", "");
+/// Largest icon file read from a `.desktop` entry. Launcher icons are a few KB;
+/// the cap keeps a hostile or wrong `Icon=` target from filling memory.
+const MAX_ICON_BYTES: u64 = 512 * 1024;
 
-                    // Simple parse of desktop file
-                    let content = std::fs::read_to_string(entry.path()).unwrap_or_default();
-                    let name = content
-                        .lines()
-                        .find(|l| l.starts_with("Name="))
-                        .map(|l| l.replace("Name=", ""))
-                        .unwrap_or(package.clone());
-
-                    let icon_path = content
-                        .lines()
-                        .find(|l| l.starts_with("Icon="))
-                        .map(|l| l.replace("Icon=", ""));
-
-                    let mut icon_b64 = None;
-                    if let Some(path) = icon_path {
-                        if let Ok(bytes) = std::fs::read(&path) {
-                            let b64 = general_purpose::STANDARD.encode(&bytes);
-                            icon_b64 = Some(format!("data:image/png;base64,{}", b64));
-                        }
-                    }
-
-                    apps.push(AppInfo {
-                        id: package.clone(),
-                        name,
-                        package,
-                        icon: icon_b64,
-                    });
-                }
-            }
-        }
+fn icon_mime(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return Some("image/png");
     }
+    // Browsers do not render XPM, so it is rejected like any non-image.
+    let head = String::from_utf8_lossy(&bytes[..bytes.len().min(512)]);
+    let head = head.trim_start_matches('\u{feff}').trim_start();
+    if head.starts_with("<svg") || (head.starts_with("<?xml") && head.contains("<svg")) {
+        return Some("image/svg+xml");
+    }
+    None
+}
+
+/// Read an `Icon=` target as a data URI. Only absolute paths to small regular
+/// PNG/SVG files are accepted; anything else yields no icon.
+fn icon_data_uri(path: &Path) -> Option<String> {
+    if !path.is_absolute() {
+        return None;
+    }
+    let file = std::fs::File::open(path).ok()?;
+    let metadata = file.metadata().ok()?;
+    if !metadata.is_file() || metadata.len() > MAX_ICON_BYTES {
+        return None;
+    }
+    let mut bytes = Vec::new();
+    file.take(MAX_ICON_BYTES).read_to_end(&mut bytes).ok()?;
+    let mime = icon_mime(&bytes)?;
+    Some(format!(
+        "data:{mime};base64,{}",
+        general_purpose::STANDARD.encode(&bytes)
+    ))
+}
+
+/// Parsed `.desktop` entries keyed by path and modification time, so a poll
+/// after an install only re-reads (and re-encodes icons for) changed files.
+type AppCache = HashMap<PathBuf, (std::time::SystemTime, AppInfo)>;
+static APP_CACHE: Mutex<Option<AppCache>> = Mutex::new(None);
+
+fn collect_waydroid_apps_sync() -> Vec<AppInfo> {
+    let Some(dir) = dirs::data_local_dir().map(|dir| dir.join("applications")) else {
+        return Vec::new();
+    };
+    collect_apps_in(&dir)
+}
+
+fn collect_apps_in(dir: &Path) -> Vec<AppInfo> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut guard = APP_CACHE
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let old = guard.take().unwrap_or_default();
+    let mut fresh = AppCache::new();
+    let mut apps = Vec::new();
+    for entry in entries.flatten() {
+        let file_name = entry.file_name().to_string_lossy().to_string();
+        let Some(package) = file_name
+            .strip_prefix("waydroid.")
+            .and_then(|rest| rest.strip_suffix(".desktop"))
+        else {
+            continue;
+        };
+        let path = entry.path();
+        let mtime = entry.metadata().and_then(|m| m.modified()).ok();
+        let app = match (mtime, old.get(&path)) {
+            (Some(mtime), Some((cached, app))) if *cached == mtime => app.clone(),
+            _ => parse_desktop_entry(&path, package),
+        };
+        if let Some(mtime) = mtime {
+            fresh.insert(path, (mtime, app.clone()));
+        }
+        apps.push(app);
+    }
+    *guard = Some(fresh);
     apps
+}
+
+fn parse_desktop_entry(path: &Path, package: &str) -> AppInfo {
+    let content = std::fs::read_to_string(path).unwrap_or_default();
+    let field = |key: &str| {
+        content
+            .lines()
+            .find_map(|l| l.strip_prefix(key))
+            .map(str::to_string)
+    };
+    AppInfo {
+        id: package.to_string(),
+        name: field("Name=").unwrap_or_else(|| package.to_string()),
+        package: package.to_string(),
+        icon: field("Icon=").and_then(|icon| icon_data_uri(Path::new(&icon))),
+    }
 }
 
 /// How much of each end of an APK to scan for the manifest entry. The local
@@ -816,7 +924,7 @@ async fn waydroid_prop_get(key: String) -> CommandResult {
 async fn waydroid_log(app: AppHandle) -> CommandResult {
     let script = r#"
 if [ -f /var/lib/waydroid/waydroid.log ]; then
-    cat /var/lib/waydroid/waydroid.log
+    tail -n 1000 /var/lib/waydroid/waydroid.log
 else
     echo "No logs found at /var/lib/waydroid/waydroid.log"
 fi
@@ -826,6 +934,98 @@ fi
     stream_privileged_script(app, script, Completion::None, waydroid::TIMEOUT_NORMAL)
         .await
         .into_command_result()
+}
+
+/// Mask what must not reach a log or a support paste: the home directory and
+/// the value of `token=`/`password=`-style assignments or `Bearer` headers.
+fn redact_text(text: &str) -> String {
+    const SENSITIVE: [&str; 6] = ["token", "password", "passwd", "secret", "apikey", "api_key"];
+    let mut text = text.to_string();
+    if let Some(home) = std::env::var_os("HOME").and_then(|h| h.into_string().ok()) {
+        if home.len() > 1 {
+            text = text.replace(&home, "~");
+        }
+    }
+    text.lines()
+        .map(|line| {
+            let mut words: Vec<String> = line.split(' ').map(str::to_string).collect();
+            for i in 0..words.len() {
+                let lower = words[i].to_ascii_lowercase();
+                if lower == "bearer" && i + 1 < words.len() {
+                    words[i + 1] = "[redacted]".to_string();
+                } else if let Some(eq) = lower.find(['=', ':']) {
+                    let key =
+                        lower[..eq].trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '_');
+                    if SENSITIVE.iter().any(|k| key.ends_with(k)) {
+                        if eq + 1 < words[i].len() {
+                            words[i] = format!("{}[redacted]", &words[i][..=eq]);
+                        } else if i + 1 < words.len() {
+                            words[i + 1] = "[redacted]".to_string();
+                        }
+                    }
+                }
+            }
+            words.join(" ")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Newest `*.log` file in the app log directory.
+fn app_log_file(app: &AppHandle) -> Option<PathBuf> {
+    let dir = app.path().app_log_dir().ok()?;
+    std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .filter(|e| e.path().extension().is_some_and(|x| x == "log"))
+        .max_by_key(|e| e.metadata().and_then(|m| m.modified()).ok())
+        .map(|e| e.path())
+}
+
+/// Most of the log the UI will ever show.
+const MAX_LOG_VIEW_BYTES: u64 = 64 * 1024;
+
+#[tauri::command]
+async fn app_log_read(app: AppHandle) -> CommandResult {
+    off_main_thread(move || {
+        let Some(path) = app_log_file(&app) else {
+            return CommandResult::with_data(String::new());
+        };
+        let read = || -> std::io::Result<String> {
+            let mut file = std::fs::File::open(&path)?;
+            let len = file.metadata()?.len();
+            file.seek(SeekFrom::Start(len.saturating_sub(MAX_LOG_VIEW_BYTES)))?;
+            let mut bytes = Vec::new();
+            file.read_to_end(&mut bytes)?;
+            Ok(redact_text(&String::from_utf8_lossy(&bytes)))
+        };
+        match read() {
+            Ok(text) => CommandResult::with_data(text),
+            Err(e) => AppError::Io(e).into(),
+        }
+    })
+    .await
+}
+
+/// Where the log lives, so Settings can tell the user.
+#[tauri::command]
+fn app_log_location(app: AppHandle) -> CommandResult {
+    match app.path().app_log_dir() {
+        Ok(dir) => CommandResult::with_data(redact_text(&dir.to_string_lossy())),
+        Err(e) => AppError::Io(std::io::Error::other(e.to_string())).into(),
+    }
+}
+
+#[tauri::command]
+async fn app_log_clear(app: AppHandle) -> CommandResult {
+    off_main_thread(move || match app_log_file(&app) {
+        Some(path) => match std::fs::write(&path, b"") {
+            Ok(()) => CommandResult::success(),
+            Err(e) => AppError::Io(e).into(),
+        },
+        None => CommandResult::success(),
+    })
+    .await
 }
 
 fn check_network_connectivity() -> bool {
@@ -943,6 +1143,29 @@ fn has_elevation_tool() -> Option<&'static str> {
     } else {
         None
     }
+}
+
+/// True when a polkit authentication agent process is running. `pkexec` has
+/// nowhere to show its password prompt without one.
+fn polkit_agent_running() -> bool {
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return false;
+    };
+    entries.flatten().any(|entry| {
+        entry
+            .file_name()
+            .to_str()
+            .is_some_and(|name| name.bytes().all(|b| b.is_ascii_digit()))
+            && std::fs::read_to_string(entry.path().join("comm"))
+                .map(|comm| is_polkit_agent_name(comm.trim()))
+                .unwrap_or(false)
+    })
+}
+
+fn is_polkit_agent_name(comm: &str) -> bool {
+    let comm = comm.to_ascii_lowercase();
+    // `polkitd` is the daemon, not an authentication agent.
+    comm != "polkitd" && (comm.contains("polkit") || comm.contains("policykit"))
 }
 
 fn has_program(name: &str) -> bool {
@@ -1171,17 +1394,19 @@ fn approved_install_packages(
     Ok(accepted)
 }
 
+/// Probing for missing tools spawns `python3` and friends, so it runs off the
+/// main thread like every other host probe.
 #[tauri::command]
-fn preview_package_install(
+async fn preview_package_install(
     action: String,
 ) -> std::result::Result<PackageInstallPreview, CommandResult> {
     let action = PackageInstallAction::parse(&action).map_err(CommandResult::from)?;
-    let missing = action.missing_packages();
-    Ok(package_install_preview(
-        action,
-        &missing,
-        platform::PackageManager::detect(),
-    ))
+    tauri::async_runtime::spawn_blocking(move || {
+        let missing = action.missing_packages();
+        package_install_preview(action, &missing, platform::PackageManager::detect())
+    })
+    .await
+    .map_err(|e| CommandResult::from(AppError::Io(std::io::Error::other(e.to_string()))))
 }
 
 /// Both GApps and Houdini modify an existing Android image. Refuse before the
@@ -1575,22 +1800,54 @@ fn collect_diagnostics() -> DiagnosticsReport {
         items.push(DiagnosticItem {
             key: "adb".to_string(),
             title: "Android Debug Bridge".to_string(),
-            status: "info".to_string(),
+            status: "warning".to_string(),
             value: "Not Installed".to_string(),
-            detail: "adb is optional but recommended for non-root container queries.".to_string(),
+            detail: "adb is missing. App list, install/uninstall, and Android boot detection fall back to slower or unavailable paths.".to_string(),
             remediation: pm.map(|p| p.user_install_command(&["adb"])),
         });
     }
 
     // 8. Root Elevation Tool (polkit / sudo)
-    if let Some(tool) = has_elevation_tool() {
+    let has_pkexec = has_program("pkexec");
+    let has_sudo = has_program("sudo");
+    if has_pkexec && !polkit_agent_running() {
+        items.push(DiagnosticItem {
+            key: "elevation".to_string(),
+            title: "Privilege Elevation".to_string(),
+            status: if has_sudo && std::io::stdin().is_terminal() {
+                "warning"
+            } else {
+                "error"
+            }
+            .to_string(),
+            value: "No Polkit Agent".to_string(),
+            detail: "pkexec is installed but no polkit authentication agent is running, so the password prompt cannot appear. Start an agent in your session, or launch ArchDroid from a terminal so sudo can ask instead.".to_string(),
+            remediation: Some(
+                "Start one, e.g. hyprpolkitagent, polkit-gnome-authentication-agent-1, or lxqt-policykit-agent"
+                    .to_string(),
+            ),
+        });
+    } else if !has_pkexec && has_sudo && !std::io::stdin().is_terminal() {
+        items.push(DiagnosticItem {
+            key: "elevation".to_string(),
+            title: "Privilege Elevation".to_string(),
+            status: "error".to_string(),
+            value: "sudo Needs a TTY".to_string(),
+            detail: "Only sudo is available and ArchDroid has no terminal to ask for the password. Administrative operations will fail.".to_string(),
+            remediation: Some(format!(
+                "{}, or start ArchDroid from a terminal",
+                pm.map(|p| p.user_install_command(&["polkit"]))
+                    .unwrap_or_else(|| "Install polkit and a polkit agent".to_string())
+            )),
+        });
+    } else if let Some(tool) = has_elevation_tool() {
         items.push(DiagnosticItem {
             key: "elevation".to_string(),
             title: "Privilege Elevation".to_string(),
             status: "ok".to_string(),
             value: match tool {
                 "pkexec" => "Polkit (pkexec)".to_string(),
-                _ => "sudo".to_string(),
+                _ => "sudo (terminal)".to_string(),
             },
             detail: format!(
                 "Authentication agent '{tool}' is available for administrative operations."
@@ -1938,7 +2195,9 @@ fi
 
     let script = format!(
         r#"set -e
-{install_snippet}echo "==> Initializing Waydroid (this will download ~1GB of data)..."
+echo "[STEP] pkg"
+{install_snippet}echo "[STEP] download"
+echo "==> Initializing Waydroid (this will download ~1GB of data)..."
 if waydroid init; then
     echo ""
     echo "[SUCCESS] Waydroid initialized successfully!"
@@ -1971,7 +2230,7 @@ fn gapps_state() -> CommandResult {
         let has_play_framework = stdout.lines().any(|l| l.contains("com.google.android.gsf"));
 
         if has_play_store && has_play_services {
-            write_marker(&marker);
+            refresh_marker(&marker);
             return CommandResult::report(
                 "installed",
                 "Google Play Store and Play Services are installed.",
@@ -1994,12 +2253,9 @@ fn gapps_state() -> CommandResult {
         return CommandResult::report("not_installed", "GApps is not installed.");
     }
 
-    // Method 2: the container is offline, trust the marker written by a successful install
-    if marker.exists() {
-        return CommandResult::report(
-            "installed",
-            "GApps installed (verified marker). Start Waydroid for a live check.",
-        );
+    // Method 2: the container is offline; report what the marker can vouch for.
+    if let Some(report) = offline_marker_report(&marker, "GApps") {
+        return report;
     }
 
     // Method 3: Fallback to waydroid app list (works offline but only shows launchable apps)
@@ -2026,7 +2282,7 @@ fn houdini_state() -> CommandResult {
     if let Some(abilist) = live_shell(&["getprop", "ro.product.cpu.abilist"]) {
         let abilist = abilist.to_lowercase();
         if abilist.contains("arm") {
-            write_marker(&marker);
+            refresh_marker(&marker);
             return CommandResult::report("installed", "ARM translation (libhoudini) is active.");
         }
         if marker.exists() {
@@ -2035,11 +2291,8 @@ fn houdini_state() -> CommandResult {
         return CommandResult::report("not_installed", "ARM translation is not active.");
     }
 
-    if marker.exists() {
-        return CommandResult::report(
-            "installed",
-            "ARM translation (libhoudini) installed (verified marker).",
-        );
+    if let Some(report) = offline_marker_report(&marker, "ARM translation (libhoudini)") {
+        return report;
     }
 
     CommandResult::report("not_installed", "ARM Translation is not installed.")
@@ -2067,7 +2320,7 @@ fn multitouch_state() -> CommandResult {
         let missing = capabilities::missing_features(&declared);
 
         if missing.is_empty() {
-            write_marker(&marker);
+            refresh_marker(&marker);
             return CommandResult::report(
                 "installed",
                 "Android declares the multitouch features Google Play filters on.",
@@ -2079,6 +2332,8 @@ fn multitouch_state() -> CommandResult {
                 "Features are installed but Android has not loaded them yet - restart Waydroid.",
             );
         }
+        // Neither Android nor the overlay has the features: the marker is stale.
+        let _ = std::fs::remove_file(&marker);
         return CommandResult::report(
             "not_installed",
             &format!(
@@ -2094,7 +2349,7 @@ fn multitouch_state() -> CommandResult {
     if capabilities::file_installed() || marker.exists() {
         return CommandResult::report(
             "partial",
-            "Features installed (verified marker). Start Waydroid for a live check.",
+            "Features installed but not checked against a running Android. Start Waydroid for a live check.",
         );
     }
 
@@ -2518,9 +2773,11 @@ async fn waydroid_adb_cmd(command: String) -> CommandResult {
 fn wipe_script() -> &'static str {
     r#"set -eu
 [ -n "${ARCHDROID_USER_HOME:-}" ] && [ "$ARCHDROID_USER_HOME" != "/" ] || { echo "[ERROR] Invalid user home" >&2; exit 1; }
+echo "[STEP] stop"
 echo "[SYSTEM] Stopping Waydroid services..."
 waydroid session stop || true
 systemctl stop waydroid-container || true
+echo "[STEP] wipe"
 echo "[SYSTEM] Wiping Waydroid data..."
 rm -rf /var/lib/waydroid
 rm -rf "$ARCHDROID_USER_HOME/.local/share/waydroid"
@@ -2566,7 +2823,8 @@ const WAYDROID_SCRIPT_LOCK: &str = include_str!("../resources/waydroid_script-re
 /// set of wheels. Both installers call this so their pip flags cannot drift.
 fn waydroid_script_python_setup() -> String {
     format!(
-        r#"echo "[SYSTEM] Setting up Python environment..."
+        r#"echo "[STEP] env"
+echo "[SYSTEM] Setting up Python environment..."
 python3 -m venv "$repo/venv"
 requirements_lock="$repo/archdroid-requirements.lock"
 printf '%s\n' {lock} > "$requirements_lock"
@@ -2586,7 +2844,8 @@ fi
 /// that silently resolved a different object.
 fn pinned_git_checkout(repo: &str, url: &str, rev: &str) -> String {
     format!(
-        r#"git init -q {repo}
+        r#"echo "[STEP] repo"
+git init -q {repo}
 git -C {repo} remote add origin {url}
 git -C {repo} fetch --depth 1 origin {rev}
 git -C {repo} checkout -q --detach FETCH_HEAD
@@ -2660,11 +2919,13 @@ fi
 fn gapps_install_script(pm: Option<platform::PackageManager>, approved: &[&str]) -> String {
     format!(
         r#"set -eu
+echo "[STEP] deps"
 {dep_install}rm -rf /tmp/gapps /tmp/waydroid
 repo="$ARCHDROID_WORK/waydroid_script"
 {checkout}
 {setup}
 cd "$repo"
+echo "[STEP] inject"
 echo "[SYSTEM] Injecting GApps into Android Image (this will take a while)..."
 if ! PYTHONUNBUFFERED=1 "$repo/venv/bin/python3" main.py install gapps; then
     rm -rf /tmp/gapps /tmp/waydroid
@@ -2683,11 +2944,13 @@ echo "[SUCCESS] GApps installation complete! Please Start Waydroid."
 fn houdini_install_script(pm: Option<platform::PackageManager>, approved: &[&str]) -> String {
     format!(
         r#"set -eu
+echo "[STEP] deps"
 {dep_install}rm -rf /tmp/houdiniunpack /tmp/waydroid
 repo="$ARCHDROID_WORK/waydroid_script"
 {checkout}
 {setup}
 cd "$repo"
+echo "[STEP] inject"
 echo "[SYSTEM] Installing ARM Translation / libhoudini (this may take several minutes)..."
 if ! PYTHONUNBUFFERED=1 "$repo/venv/bin/python3" main.py install libhoudini; then
     rm -rf /tmp/houdiniunpack /tmp/waydroid
@@ -2716,6 +2979,7 @@ repo="$work/phantom"
 {checkout}
 export INSTALL_SYSTEM_WRAPPER=0
 export PREFIX="$HOME/.local"
+echo "[STEP] build"
 echo "[SYSTEM] Running Phantom installer as the desktop user..."
 if ! bash "$repo/install.sh"; then
     echo "[ERROR] Phantom installation failed!" >&2
@@ -3077,13 +3341,41 @@ fn emit_output(app: &AppHandle, task_id: &str, line: impl Into<String>) {
 }
 
 /// Emit a completed line and remember the beginning of the output.
+/// Recognise host conditions that make an installer fail half-way and say what
+/// to do, instead of leaving the user with the raw tail of pip/git/cp output.
+fn failure_hint(text: &str) -> Option<&'static str> {
+    let lower = text.to_ascii_lowercase();
+    if lower.contains("no space left on device") || lower.contains("disk quota exceeded") {
+        Some("The disk filled up during the operation. Free at least 1.5 GB on the filesystem holding /var/lib/waydroid and /tmp, then retry; the add-on is not marked installed.")
+    } else if [
+        "could not resolve host",
+        "temporary failure in name resolution",
+        "network is unreachable",
+        "connection timed out",
+        "connection reset",
+        "failed to establish a new connection",
+        "unable to access 'https://",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
+    {
+        Some("The network dropped during the download. Check the connection and retry; nothing was marked installed and the retry starts from a clean work directory.")
+    } else {
+        None
+    }
+}
+
 fn flush_line(app: &AppHandle, task_id: &str, buffer: &mut String, captured: &Arc<Mutex<String>>) {
     if buffer.is_empty() {
         return;
     }
     emit_output(app, task_id, buffer.clone());
     if let Ok(mut text) = captured.lock() {
-        if text.len() < MAX_CAPTURED_OUTPUT {
+        // Past the head budget, still keep lines that explain a failure so the
+        // hint survives long installer output.
+        if text.len() < MAX_CAPTURED_OUTPUT
+            || (text.len() < 2 * MAX_CAPTURED_OUTPUT && failure_hint(buffer).is_some())
+        {
             text.push_str(buffer);
             text.push('\n');
         }
@@ -3231,14 +3523,19 @@ fn stream_outcome(
     let started = captured_text.contains(ELEVATED_SENTINEL);
     match wait {
         Ok(WaitOutcome::Exited(status)) if status.success() => StreamResult::success(started),
-        Ok(WaitOutcome::Exited(status)) => StreamResult::failure(
-            AppError::Exit {
-                program: program.to_string(),
-                code: status.code(),
-                output: captured_text,
-            },
-            started,
-        ),
+        Ok(WaitOutcome::Exited(status)) => {
+            if let Some(hint) = failure_hint(&captured_text) {
+                emit_error(format!("[HINT] {hint}"));
+            }
+            StreamResult::failure(
+                AppError::Exit {
+                    program: program.to_string(),
+                    code: status.code(),
+                    output: captured_text,
+                },
+                started,
+            )
+        }
         Ok(WaitOutcome::TimedOut) => {
             let error = AppError::Timeout {
                 program: program.to_string(),
@@ -3293,7 +3590,10 @@ fn run_and_stream(
         Err(e) => {
             let error =
                 AppError::from_spawn(&program, "Install the missing program and try again.", e);
-            log::error!("{program} could not start: {error}");
+            log::error!(
+                "{program} could not start: {}",
+                redact_text(&error.to_string())
+            );
             emit_output(app, task_id, format!("[ERROR] {error}"));
             return StreamResult::failure(error, false);
         }
@@ -3321,7 +3621,7 @@ fn run_and_stream(
     if outcome.is_success() {
         log::info!("{program} finished");
     } else if let Err(error) = &outcome.outcome {
-        log::warn!("{program} failed: {error}");
+        log::warn!("{program} failed: {}", redact_text(&error.to_string()));
     }
     outcome
 }
@@ -3337,10 +3637,13 @@ enum Completion {
 }
 
 impl Completion {
-    fn apply(self) {
+    /// Returns a user-visible warning if the marker could not be written.
+    fn apply(self) -> Option<String> {
         match self {
-            Self::None => {}
-            Self::WriteMarker(name) => write_marker(&marker_file(name)),
+            Self::None => None,
+            Self::WriteMarker(name) => write_marker(&marker_file(name)).err().map(|error| {
+                format!("[WARNING] Installed, but could not record it in the cache ({error}); status may show \"not installed\" until the next live check.")
+            }),
             Self::ClearInstallMarkers => {
                 for name in [
                     "gapps_installed",
@@ -3349,6 +3652,7 @@ impl Completion {
                 ] {
                     let _ = std::fs::remove_file(marker_file(name));
                 }
+                None
             }
         }
     }
@@ -3356,14 +3660,24 @@ impl Completion {
 
 /// Apply a completion marker only after a successful run. Timeout and cancel
 /// are failures, so they must never leave an "installed" marker behind.
-fn apply_completion(attempt: &StreamResult, completion: Completion) {
+fn apply_completion(attempt: &StreamResult, completion: Completion) -> Option<String> {
     if attempt.is_success() {
-        completion.apply();
+        completion.apply()
+    } else {
+        // A reinstall that got root and then failed may have left the add-on
+        // half-replaced, so an older marker no longer vouches for anything.
+        // A refused prompt touched nothing and keeps it.
+        if let (true, Completion::WriteMarker(name)) = (attempt.started, completion) {
+            let _ = std::fs::remove_file(marker_file(name));
+        }
+        None
     }
 }
 
 fn finish_stream(app: &AppHandle, task_id: &str, attempt: &StreamResult, completion: Completion) {
-    apply_completion(attempt, completion);
+    if let Some(warning) = apply_completion(attempt, completion) {
+        emit_output(app, task_id, warning);
+    }
     let _ = app.emit("cmd-finished", attempt.finished_event(task_id));
 }
 
@@ -3377,7 +3691,7 @@ fn run_user_script(
     timeout_secs: u64,
     cancel: &AtomicBool,
 ) -> StreamResult {
-    log::info!("user script requested:\n{script}");
+    log::info!("user script requested ({} lines)", script.lines().count());
     let Some(shell) = trusted_program("bash") else {
         let error = AppError::not_found(
             "bash",
@@ -3510,7 +3824,7 @@ fn run_privileged_script_for_task(
     timeout_secs: u64,
     cancel: &AtomicBool,
 ) -> StreamResult {
-    log::info!("root script requested:\n{script}");
+    log::info!("root script requested ({} lines)", script.lines().count());
     // A user-owned path is the only out-of-band signal that works both ways:
     // the app can create it without root, and the root watcher can see it.
     let cancel_path = std::env::temp_dir().join(format!(
@@ -3700,6 +4014,9 @@ pub fn run() {
         // unconditionally only together with its UI and test.
         .invoke_handler(tauri::generate_handler![
             waydroid_status,
+            app_log_read,
+            app_log_location,
+            app_log_clear,
             #[cfg(feature = "dev-commands")]
             waydroid_status_json,
             #[cfg(feature = "dev-commands")]
@@ -3851,13 +4168,13 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
         let marker = root.join("gapps_installed");
 
-        write_marker(&marker);
+        write_marker(&marker).unwrap();
 
         assert_eq!(
             std::fs::read_to_string(&marker)
                 .expect("the app must be able to read its own marker")
                 .trim(),
-            "installed"
+            "pending"
         );
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -4264,7 +4581,8 @@ mod tests {
 
     #[test]
     fn package_preview_rejects_unknown_actions() {
-        let result = preview_package_install("bogus".to_string()).unwrap_err();
+        let result = tauri::async_runtime::block_on(preview_package_install("bogus".to_string()))
+            .unwrap_err();
         assert_eq!(result.code.as_deref(), Some(error::code::INVALID_INPUT));
         assert!(result.message.unwrap().contains("init, gapps, or houdini"));
     }
@@ -4900,6 +5218,61 @@ wait
     }
 
     #[test]
+    fn installer_markers_follow_reinstall_success_failure_and_removal() {
+        let marker = marker_file("reinstall_test_marker");
+        let _ = std::fs::remove_file(&marker);
+        let completion = Completion::WriteMarker("reinstall_test_marker");
+
+        // Fresh success: pending until a live check confirms it.
+        apply_completion(&StreamResult::success(true), completion);
+        assert_eq!(marker_state(&marker), MarkerState::Pending);
+        assert_eq!(
+            offline_marker_report(&marker, "X").unwrap().status,
+            "pending"
+        );
+
+        // Live check confirms; a second successful install is idempotent.
+        refresh_marker(&marker);
+        assert_eq!(marker_state(&marker), MarkerState::Verified);
+        apply_completion(&StreamResult::success(true), completion);
+        assert_eq!(marker_state(&marker), MarkerState::Pending);
+        refresh_marker(&marker);
+
+        // A refused prompt touched nothing: the verified marker survives.
+        apply_completion(
+            &StreamResult::failure(AppError::elevation_denied("dismissed"), false),
+            completion,
+        );
+        assert_eq!(marker_state(&marker), MarkerState::Verified);
+
+        // Failing half-way as root invalidates the old marker.
+        apply_completion(&exit_failure("installer", 1, true), completion);
+        assert_eq!(marker_state(&marker), MarkerState::Absent);
+        assert!(offline_marker_report(&marker, "X").is_none());
+
+        // A legacy "installed" marker is not trusted as verified.
+        std::fs::write(&marker, "installed\n").unwrap();
+        assert_eq!(marker_state(&marker), MarkerState::Pending);
+        let _ = std::fs::remove_file(&marker);
+    }
+
+    #[test]
+    fn failure_hints_name_disk_and_network_problems() {
+        assert!(
+            failure_hint("cp: error writing 'x': No space left on device")
+                .unwrap()
+                .contains("disk filled up")
+        );
+        assert!(failure_hint(
+            "fatal: unable to access 'https://github.com/x': Could not resolve host: github.com"
+        )
+        .unwrap()
+        .contains("network dropped"));
+        assert!(failure_hint("ERROR: Failed to establish a new connection").is_some());
+        assert!(failure_hint("[ERROR] Failed to install GApps.").is_none());
+    }
+
+    #[test]
     fn a_denied_elevation_never_writes_an_installed_marker() {
         let marker = marker_file("elevation_test_marker");
         let _ = std::fs::remove_file(&marker);
@@ -4920,9 +5293,9 @@ wait
         let m2 = marker_file("houdini_installed");
         let m3 = marker_file("multitouch_installed");
 
-        write_marker(&m1);
-        write_marker(&m2);
-        write_marker(&m3);
+        write_marker(&m1).unwrap();
+        write_marker(&m2).unwrap();
+        write_marker(&m3).unwrap();
 
         assert!(m1.exists());
         assert!(m2.exists());
@@ -5071,6 +5444,122 @@ wait
         assert!(keys.contains(&"disk"));
         assert!(keys.contains(&"network"));
         assert!(keys.contains(&"waydroid_image"));
+    }
+
+    #[test]
+    fn icon_loader_accepts_small_images_and_rejects_the_rest() {
+        let dir = std::env::temp_dir().join(format!("archdroid-icon-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let write = |name: &str, bytes: &[u8]| {
+            let path = dir.join(name);
+            std::fs::write(&path, bytes).unwrap();
+            path
+        };
+        let png = write("a.png", b"\x89PNG\r\n\x1a\nrest");
+        assert!(icon_data_uri(&png)
+            .unwrap()
+            .starts_with("data:image/png;base64,"));
+        let svg = write("a.svg", b"<svg xmlns='http://www.w3.org/2000/svg'/>");
+        assert!(icon_data_uri(&svg)
+            .unwrap()
+            .starts_with("data:image/svg+xml;base64,"));
+        assert!(icon_data_uri(&write("a.xpm", b"/* XPM */")).is_none());
+        assert!(icon_data_uri(&write("passwd", b"root:x:0:0")).is_none());
+        let big = write("big.png", &vec![0u8; MAX_ICON_BYTES as usize + 1]);
+        assert!(icon_data_uri(&big).is_none());
+        assert!(icon_data_uri(&dir).is_none());
+        assert!(icon_data_uri(Path::new("relative.png")).is_none());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn installer_scripts_announce_their_steps() {
+        let steps = |script: &str| -> Vec<String> {
+            script
+                .lines()
+                .filter_map(|l| l.strip_prefix("echo \"[STEP] "))
+                .map(|l| l.trim_end_matches('"').to_string())
+                .collect()
+        };
+        let pm = Some(platform::PackageManager::Pacman);
+        assert_eq!(
+            steps(&gapps_install_script(pm, &[])),
+            ["deps", "repo", "env", "inject"]
+        );
+        assert_eq!(
+            steps(&houdini_install_script(pm, &[])),
+            ["deps", "repo", "env", "inject"]
+        );
+        assert_eq!(steps(&phantom_install_script()), ["repo", "build"]);
+        assert_eq!(steps(wipe_script()), ["stop", "wipe"]);
+    }
+
+    #[test]
+    fn app_list_reuses_unchanged_entries_and_drops_removed_ones() {
+        let dir = std::env::temp_dir().join(format!("archdroid-apps-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let desktop = dir.join("waydroid.com.example.desktop");
+        std::fs::write(&desktop, "Name=Example\n").unwrap();
+        std::fs::write(dir.join("other.desktop"), "Name=Other\n").unwrap();
+
+        let first = collect_apps_in(&dir);
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0].name, "Example");
+        assert_eq!(collect_apps_in(&dir)[0].name, "Example");
+
+        std::fs::remove_file(&desktop).unwrap();
+        assert!(collect_apps_in(&dir).is_empty());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Budget: 200 desktop entries with 4 KiB PNG icons list in < 250 ms cold
+    /// and < 25 ms warm (cache hit). Generous for CI; locally it is far lower.
+    #[test]
+    fn app_list_meets_its_time_budget() {
+        let dir = std::env::temp_dir().join(format!("archdroid-bench-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut icon = b"\x89PNG\r\n\x1a\n".to_vec();
+        icon.resize(4096, 0);
+        let icon_path = dir.join("icon.png");
+        std::fs::write(&icon_path, icon).unwrap();
+        for i in 0..200 {
+            std::fs::write(
+                dir.join(format!("waydroid.pkg{i}.desktop")),
+                format!("Name=App {i}\nIcon={}\n", icon_path.display()),
+            )
+            .unwrap();
+        }
+        let start = std::time::Instant::now();
+        assert_eq!(collect_apps_in(&dir).len(), 200);
+        let cold = start.elapsed();
+        let start = std::time::Instant::now();
+        assert_eq!(collect_apps_in(&dir).len(), 200);
+        let warm = start.elapsed();
+        eprintln!("app list: cold {cold:?}, warm {warm:?}");
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(cold.as_millis() < 250, "cold {cold:?}");
+        assert!(warm.as_millis() < 25, "warm {warm:?}");
+    }
+
+    #[test]
+    fn redaction_masks_home_and_secrets() {
+        std::env::set_var("HOME", "/home/alice");
+        let out =
+            redact_text("read /home/alice/.cache/x token=abc123 Bearer xyz\nPASSWORD: hunter2");
+        assert!(!out.contains("alice"));
+        assert!(!out.contains("abc123") && !out.contains("xyz"));
+        assert!(!out.contains("hunter2"));
+        assert!(out.contains("~/.cache/x"));
+        assert_eq!(redact_text("plain line"), "plain line");
+    }
+
+    #[test]
+    fn polkit_agent_names_exclude_the_daemon() {
+        assert!(is_polkit_agent_name("polkit-gnome-au"));
+        assert!(is_polkit_agent_name("hyprpolkitagent"));
+        assert!(is_polkit_agent_name("lxqt-policykit"));
+        assert!(!is_polkit_agent_name("polkitd"));
+        assert!(!is_polkit_agent_name("bash"));
     }
 
     #[test]
