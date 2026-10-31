@@ -4,6 +4,10 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
 const root = new URL("../../", import.meta.url);
+// Built from two pieces so this file does not match its own scan.
+const PRIVATE_KEY_MARKER = new RegExp(
+  "BEGIN (PGP|RSA|EC|OPENSSH) " + "PRIVATE KEY"
+);
 const read = (path) => readFileSync(new URL(path, root), "utf8");
 
 test("no private key material is tracked in the repository", () => {
@@ -20,9 +24,7 @@ test("no private key material is tracked in the repository", () => {
       continue;
     }
     assert.ok(
-      !/BEGIN (PGP|RSA|EC|OPENSSH) PRIVATE KEY|BEGIN PGP PRIVATE KEY BLOCK/.test(
-        text
-      ),
+      !PRIVATE_KEY_MARKER.test(text),
       `${file} contains private key material`
     );
   }
