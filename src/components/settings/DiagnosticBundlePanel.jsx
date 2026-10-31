@@ -41,8 +41,10 @@ export default function DiagnosticBundlePanel() {
           <h3>Diagnostic Bundle</h3>
           <p>
             One text file for bug reports: system and Waydroid versions, host
-            checks, add-on state, and recent logs. Collected without root, saved
-            to your Downloads folder, and never uploaded.
+            checks, add-on state, and recent logs. The logs can include Android
+            package names and APK file names you have used; home paths and
+            secrets are masked. Collected without root, saved to your Downloads
+            folder, and never uploaded.
           </p>
           {note && <p role="status">{note}</p>}
           {bundle && (

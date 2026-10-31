@@ -14,6 +14,8 @@ Format ini mengacu pada [Keep a Changelog](https://keepachangelog.com/id/1.0.0/)
 ### Diperbaiki
 - Baris log yang panjang di Settings (Application Log, Diagnostic Bundle) kini terbungkus dan tidak lagi melebarkan kartu.
 - `PRIVACY.md` menyebut lokasi preferensi dan log aplikasi yang sebenarnya.
+- `PRIVACY.md` kini mengungkap probe konektivitas otomatis (koneksi TCP tanpa data ke `1.1.1.1:53`, lalu `8.8.8.8:53` bila gagal) yang sudah ada sejak 0.1.0. Sebelumnya dokumen menyatakan semua koneksi jaringan hanya terjadi atas permintaan pengguna.
+- Teks panel Diagnostic Bundle, README, dan `PRIVACY.md` menyebut bahwa log di dalam bundle dapat memuat nama paket Android dan nama file APK.
 
 ### Diperbaiki
 - Setelah Cancel, stepper tetap menandai tahap yang sudah selesai dan berhenti berputar, bukan kembali ke tahap 1.

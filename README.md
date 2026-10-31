@@ -196,7 +196,7 @@ Sebelum prompt password root (Polkit/sudo) dimunculkan, ArchDroid **selalu menam
 - **Nvidia Proprietary**: Pastikan modul `nvidia-drm.modeset=1` aktif pada boot parameter kernel. Jika Waydroid mengalami render glitch, Waydroid dapat dikonfigurasi untuk menggunakan fallback software renderer (`Mesa llvmpipe`).
 
 ### 6. Melaporkan Masalah (Diagnostic Bundle)
-Buka **Settings → Diagnostic Bundle → Create Bundle**. ArchDroid menulis satu file teks ke `~/Downloads/archdroid-diagnostics-<waktu>.txt` berisi versi sistem dan Waydroid, hasil diagnostik host, status add-on, serta log terakhir, dengan path home dan nilai token/password disamarkan. Baca isinya, lalu lampirkan ke laporan bug. File ini dibuat tanpa root dan tidak pernah diunggah otomatis.
+Buka **Settings → Diagnostic Bundle → Create Bundle**. ArchDroid menulis satu file teks ke `~/Downloads/archdroid-diagnostics-<waktu>.txt` berisi versi sistem dan Waydroid, hasil diagnostik host, status add-on, serta log terakhir, dengan path home dan nilai token/password disamarkan. Log dapat memuat nama paket Android dan nama file APK yang pernah Anda pakai; baca isinya dan hapus yang tidak ingin dibagikan, lalu lampirkan ke laporan bug. File ini dibuat tanpa root dan tidak pernah diunggah otomatis.
 
 ---
 
