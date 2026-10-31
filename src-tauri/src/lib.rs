@@ -551,12 +551,17 @@ fi
 /// Mask what must not reach a log or a support paste: the home directory and
 /// the value of `token=`/`password=`-style assignments or `Bearer` headers.
 fn redact_text(text: &str) -> String {
+    let home = std::env::var_os("HOME").and_then(|h| h.into_string().ok());
+    redact_with_home(text, home.as_deref())
+}
+
+/// [`redact_text`] with the home directory passed in, so tests never have to
+/// mutate the process environment (which other threads read concurrently).
+fn redact_with_home(text: &str, home: Option<&str>) -> String {
     const SENSITIVE: [&str; 6] = ["token", "password", "passwd", "secret", "apikey", "api_key"];
     let mut text = text.to_string();
-    if let Some(home) = std::env::var_os("HOME").and_then(|h| h.into_string().ok()) {
-        if home.len() > 1 {
-            text = text.replace(&home, "~");
-        }
+    if let Some(home) = home.filter(|home| home.len() > 1) {
+        text = text.replace(home, "~");
     }
     text.lines()
         .map(|line| {
@@ -1763,14 +1768,18 @@ mod tests {
 
     #[test]
     fn redaction_masks_home_and_secrets() {
-        std::env::set_var("HOME", "/home/alice");
-        let out =
-            redact_text("read /home/alice/.cache/x token=abc123 Bearer xyz\nPASSWORD: hunter2");
+        let out = redact_with_home(
+            "read /home/alice/.cache/x token=abc123 Bearer xyz\nPASSWORD: hunter2",
+            Some("/home/alice"),
+        );
         assert!(!out.contains("alice"));
         assert!(!out.contains("abc123") && !out.contains("xyz"));
         assert!(!out.contains("hunter2"));
         assert!(out.contains("~/.cache/x"));
-        assert_eq!(redact_text("plain line"), "plain line");
+        assert_eq!(
+            redact_with_home("plain line", Some("/home/alice")),
+            "plain line"
+        );
     }
 
     #[test]
