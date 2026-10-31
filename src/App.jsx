@@ -70,18 +70,26 @@ export default function App() {
   // Config State
   const [multiWindow, setMultiWindow] = useState(false);
   const [invertColors, setInvertColors] = useState(false);
-  const [displayRes, setDisplayRes] = useState({ width: "", height: "", dpi: "" });
+  const [displayRes, setDisplayRes] = useState({
+    width: "",
+    height: "",
+    dpi: "",
+  });
 
-  const addToast = useCallback(({ type = "info", title, message, duration = 4000 }) => {
-    const id = Date.now().toString() + Math.random().toString(36).substring(2, 6);
-    setToasts((prev) => [...prev, { id, type, title, message }]);
+  const addToast = useCallback(
+    ({ type = "info", title, message, duration = 4000 }) => {
+      const id =
+        Date.now().toString() + Math.random().toString(36).substring(2, 6);
+      setToasts((prev) => [...prev, { id, type, title, message }]);
 
-    if (duration > 0) {
-      setTimeout(() => {
-        setToasts((prev) => prev.filter((t) => t.id !== id));
-      }, duration);
-    }
-  }, []);
+      if (duration > 0) {
+        setTimeout(() => {
+          setToasts((prev) => prev.filter((t) => t.id !== id));
+        }, duration);
+      }
+    },
+    []
+  );
 
   const removeToast = useCallback((id) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
@@ -108,7 +116,8 @@ export default function App() {
       addToast({
         type: "warning",
         title: "Operation In Progress",
-        message: "Wait for the current operation to finish before starting another.",
+        message:
+          "Wait for the current operation to finish before starting another.",
       });
       return null;
     }
@@ -255,21 +264,25 @@ export default function App() {
     }
   };
 
-  const loadApps = async () => {
+  const loadApps = useCallback(async () => {
     try {
       const waydroidApps = await invoke("get_waydroid_apps");
       setApps(waydroidApps || []);
     } catch (e) {
       console.error("Failed to load apps:", e);
     }
-  };
+  }, []);
 
   const checkStatus = useCallback(async () => {
     if (statusCheckInFlight.current) return;
     statusCheckInFlight.current = true;
     try {
       const res = await invoke("waydroid_status");
-      if (res.status === "success" && res.data && res.data.includes("RUNNING")) {
+      if (
+        res.status === "success" &&
+        res.data &&
+        res.data.includes("RUNNING")
+      ) {
         setStatus("online");
         setIsInitialized(true);
         if (prevStatusRef.current !== "online") {
@@ -336,7 +349,8 @@ export default function App() {
         addToast({
           type: "warning",
           title: "Session Slow to Start",
-          message: "Start command was sent, but the session is not yet reporting online.",
+          message:
+            "Start command was sent, but the session is not yet reporting online.",
         });
       }
     } catch (e) {
@@ -395,7 +409,9 @@ export default function App() {
         addToast({
           type: "error",
           title: "Restart Failed",
-          message: stopRes.message || "Failed to stop Waydroid session during restart.",
+          message:
+            stopRes.message ||
+            "Failed to stop Waydroid session during restart.",
         });
         return;
       }
@@ -423,7 +439,8 @@ export default function App() {
         addToast({
           type: "warning",
           title: "Restart Pending",
-          message: "Restart was triggered, but the session is not yet reporting online.",
+          message:
+            "Restart was triggered, but the session is not yet reporting online.",
         });
       }
     } catch (e) {
@@ -446,7 +463,8 @@ export default function App() {
         addToast({
           type: "warning",
           title: "Operation In Progress",
-          message: "Wait for the current operation to finish before installing an APK.",
+          message:
+            "Wait for the current operation to finish before installing an APK.",
         });
         return;
       }
@@ -868,13 +886,22 @@ export default function App() {
   const handleApplyResolution = async ({ width, height, dpi }) => {
     try {
       if (width) {
-        await invoke("waydroid_prop_set", { key: "persist.waydroid.width", value: width });
+        await invoke("waydroid_prop_set", {
+          key: "persist.waydroid.width",
+          value: width,
+        });
       }
       if (height) {
-        await invoke("waydroid_prop_set", { key: "persist.waydroid.height", value: height });
+        await invoke("waydroid_prop_set", {
+          key: "persist.waydroid.height",
+          value: height,
+        });
       }
       if (dpi) {
-        await invoke("waydroid_prop_set", { key: "ro.sf.lcd_density", value: dpi });
+        await invoke("waydroid_prop_set", {
+          key: "ro.sf.lcd_density",
+          value: dpi,
+        });
       }
       await loadConfigs();
       addToast({
@@ -1098,7 +1125,11 @@ export default function App() {
     // Retrying must go back through the confirmation flow. The package plan or
     // the root scope may have changed since the first attempt, so a retry must
     // never call an installer command directly.
-    if (["gapps", "houdini", "multitouch", "init", "wipe"].includes(terminalTaskType)) {
+    if (
+      ["gapps", "houdini", "multitouch", "init", "wipe"].includes(
+        terminalTaskType
+      )
+    ) {
       setTerminalOpen(false);
     }
 
@@ -1294,7 +1325,8 @@ export default function App() {
             </div>
             <h3 className="dropzone-title">Drop APK to Install</h3>
             <p className="dropzone-desc">
-              Release your <code>.apk</code> file anywhere to automatically install it into Waydroid.
+              Release your <code>.apk</code> file anywhere to automatically
+              install it into Waydroid.
             </p>
             <div className="dropzone-pills">
               <span className="dropzone-pill">Instant Android Sideload</span>

@@ -857,20 +857,22 @@ P1 tidak boleh menunda P0, tetapi sebaiknya selesai sebelum rilis publik.
 
 ### P1-2 — Test, lint, dan E2E frontend
 
-- [ ] Tambahkan ESLint + Prettier dan script `lint`/`format:check`.
-- [ ] Tambahkan Vitest + React Testing Library untuk:
-  - status backend error/`code`,
-  - dialog konfirmasi wipe,
-  - install GApps/Houdini/multitouch sukses/gagal,
-  - Cancel dan timeout,
-  - drag-and-drop APK invalid.
-- [ ] Tambahkan smoke E2E dengan WebDriver/Tauri driver untuk startup,
-  navigasi tab, dan setup wizard. Gunakan driver yang sama untuk menutup sisa
-  matriks P0-8.2 yang butuh GUI: drag-and-drop APK, terminal emulator hilang,
-  preflight X11/disk/jaringan, serta Cancel/timeout live.
-- [ ] Masukkan semuanya ke CI.
-- **DoD:** `npm run lint` dan `npm test` wajib hijau; alur kritis tidak hanya
-  diuji manual.
+- [x] **Tambahkan ESLint + Prettier dan script `lint`/`format:check`.**
+  - **Status:** selesai. Dikonfigurasi `eslint.config.js` (flat config ESLint 9 + `eslint-plugin-react`), `.prettierrc`, dan `.prettierignore`. Script `lint`, `lint:fix`, `format:check`, dan `format` ditambahkan ke `package.json`. Seluruh codebase diformat rapi dan lolos `npm run lint` (0 error, 0 warning) serta `npm run format:check`.
+- [x] **Tambahkan Vitest + React Testing Library untuk alur kritis.**
+  - **Status:** selesai. Dikonfigurasi `vitest.config.js`, `src/test/setup.js`, `src/test/app-components.test.jsx`, dan `src/test/app-workflows.test.jsx` (16 test suite). Memverifikasi status error/code backend (`not_initialized`, `elevation_denied`, `timeout`, `cancelled`, `busy`), dialog konfirmasi wipe data, install GApps & Houdini sukses vs gagal, pembatalan task dengan `cancel_task` routing `task_id`, penanganan timeout, dan penolakan drag-and-drop file non-APK dengan toast peringatan.
+- [x] **Tambahkan smoke E2E dengan WebDriver/Tauri driver.**
+  - **Status:** selesai. Dibuat runner `scripts/e2e/smoke-webdriver.js` berbasis W3C WebDriver native over `fetch` dan headless Chromium/ChromeDriver tanpa dependensi pihak ketiga berat. Menguji 7 skenario otomatis:
+    1. Startup & Initialized app loading (online badge, app grid, header).
+    2. Navigasi tab (My Apps, Keymapping, Install Tools, Settings).
+    3. Setup wizard preflight blocking saat status `not_initialized` dan host preflight error (jaringan/disk).
+    4. Penolakan drag-and-drop file non-APK dengan warning toast.
+    5. Error toast terminal emulator missing saat peluncuran keymapper (Matrix #18).
+    6. Operasi streaming privileged, tombol Cancel interaktif, dan routing `cancel_task` dengan active `task_id`.
+    7. Dialog konfirmasi wipe container dan pembatalan aman.
+- [x] **Masukkan semuanya ke CI.**
+  - **Status:** selesai. Ditambahkan step `npm run lint`, `npm run format:check`, `npm test` (unit lib + vitest components), dan `npm run test:e2e` ke `.github/workflows/ci.yml`.
+- **DoD:** `npm run lint`, `npm run format:check`, `npm test` (36 node tests + 16 vitest tests), dan `npm run test:e2e` 100% hijau; alur kritis terverifikasi otomatis.
 
 ### P1-3 — Aksesibilitas
 

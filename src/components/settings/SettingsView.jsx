@@ -49,7 +49,9 @@ export default function SettingsView({
           <div className="settings-card-text">
             <h3>Android Shared Storage</h3>
             <p>
-              Direct bridge to <code>/sdcard/</code> (internal shared storage). Transfer APKs, ROMs, OBB game data, and screenshots between Linux and Android seamlessly.
+              Direct bridge to <code>/sdcard/</code> (internal shared storage).
+              Transfer APKs, ROMs, OBB game data, and screenshots between Linux
+              and Android seamlessly.
             </p>
           </div>
         </div>
@@ -79,7 +81,9 @@ export default function SettingsView({
             <div className="toggle-info">
               <h4>Multi-Window Mode</h4>
               <p>
-                Runs each Android app in its own free-floating native desktop window (ideal for multitasking) instead of a single mobile screen frame.
+                Runs each Android app in its own free-floating native desktop
+                window (ideal for multitasking) instead of a single mobile
+                screen frame.
               </p>
             </div>
             <button
@@ -100,7 +104,8 @@ export default function SettingsView({
             <div className="toggle-info">
               <h4>Invert Display Colors</h4>
               <p>
-                Inverts Android container surface color channels. Can be used to force dark mode on stubborn light-theme apps.
+                Inverts Android container surface color channels. Can be used to
+                force dark mode on stubborn light-theme apps.
               </p>
             </div>
             <button
@@ -122,7 +127,8 @@ export default function SettingsView({
       <div className="glass-panel">
         <h3>Advanced Properties Manager</h3>
         <p>
-          Set custom Android system properties using <code>waydroid prop set &lt;key&gt; &lt;val&gt;</code>.
+          Set custom Android system properties using{" "}
+          <code>waydroid prop set &lt;key&gt; &lt;val&gt;</code>.
         </p>
 
         <form onSubmit={onPropSet} className="prop-form">
@@ -141,12 +147,17 @@ export default function SettingsView({
               placeholder="Value (e.g. 1920)"
               required
             />
-            <button type="submit" className="btn btn-primary btn-apply" disabled={busy}>
+            <button
+              type="submit"
+              className="btn btn-primary btn-apply"
+              disabled={busy}
+            >
               Apply Property
             </button>
           </div>
           <span className="prop-form-hint">
-            Tip: Common keys include <code>persist.waydroid.width</code>, <code>persist.waydroid.height</code>, <code>ro.sf.lcd_density</code>
+            Tip: Common keys include <code>persist.waydroid.width</code>,{" "}
+            <code>persist.waydroid.height</code>, <code>ro.sf.lcd_density</code>
           </span>
         </form>
       </div>
@@ -163,7 +174,9 @@ export default function SettingsView({
           <div className="settings-card-text">
             <h3>Diagnostic & System Logs</h3>
             <p>
-              Inspect the live <code>/var/lib/waydroid/waydroid.log</code> file to diagnose crashes, container boot failures, or graphic driver errors.
+              Inspect the live <code>/var/lib/waydroid/waydroid.log</code> file
+              to diagnose crashes, container boot failures, or graphic driver
+              errors.
             </p>
           </div>
         </div>
@@ -180,7 +193,9 @@ export default function SettingsView({
           <div>
             <h3>Danger Zone: Factory Reset</h3>
             <p>
-              Completely wipe all Waydroid container data, downloaded games, GApps modules, and user configurations. This resets Waydroid to a clean initial state.
+              Completely wipe all Waydroid container data, downloaded games,
+              GApps modules, and user configurations. This resets Waydroid to a
+              clean initial state.
             </p>
           </div>
         </div>

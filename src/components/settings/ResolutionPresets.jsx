@@ -19,7 +19,8 @@ export const PRESETS = [
     dpi: "280",
     ratio: "16:9 Landscape",
     icon: Tablet,
-    description: "Standard widescreen layout for PUBG, Free Fire, and MOBA games.",
+    description:
+      "Standard widescreen layout for PUBG, Free Fire, and MOBA games.",
     tag: "Recommended",
   },
   {
@@ -30,7 +31,8 @@ export const PRESETS = [
     dpi: "240",
     ratio: "16:9 Landscape",
     icon: Tv,
-    description: "Lightweight widescreen, ideal for high FPS or lower-end GPUs.",
+    description:
+      "Lightweight widescreen, ideal for high FPS or lower-end GPUs.",
   },
   {
     id: "phone_portrait",
@@ -40,7 +42,8 @@ export const PRESETS = [
     dpi: "420",
     ratio: "9:16 Portrait",
     icon: Smartphone,
-    description: "Vertical phone format, ideal for TikTok, Reels, and portrait games.",
+    description:
+      "Vertical phone format, ideal for TikTok, Reels, and portrait games.",
   },
   {
     id: "desktop_2k",
@@ -121,13 +124,11 @@ export default function ResolutionPresets({
   const isCurrentActive = (preset) => {
     if (!currentWidth || !currentHeight) return false;
     if (preset.id === "custom") {
-      return (
-        !PRESETS.some(
-          (p) =>
-            p.id !== "custom" &&
-            p.width === currentWidth &&
-            p.height === currentHeight
-        )
+      return !PRESETS.some(
+        (p) =>
+          p.id !== "custom" &&
+          p.width === currentWidth &&
+          p.height === currentHeight
       );
     }
     return (
@@ -171,11 +172,14 @@ export default function ResolutionPresets({
                   ? `${currentWidth} × ${currentHeight}`
                   : "Auto / Default"}
               </strong>
-              {currentDpi && <span className="res-dpi-tag">{currentDpi} DPI</span>}
+              {currentDpi && (
+                <span className="res-dpi-tag">{currentDpi} DPI</span>
+              )}
             </span>
           </div>
           <p>
-            Choose a visual display format optimized for mobile gaming, tablet multi-tasking, or desktop streaming.
+            Choose a visual display format optimized for mobile gaming, tablet
+            multi-tasking, or desktop streaming.
           </p>
         </div>
       </div>
@@ -229,7 +233,9 @@ export default function ResolutionPresets({
                       <span className="preset-dpi">{preset.dpi} DPI</span>
                     </>
                   ) : (
-                    <span className="preset-custom-label">Bespoke dimensions</span>
+                    <span className="preset-custom-label">
+                      Bespoke dimensions
+                    </span>
                   )}
                 </div>
                 <p className="preset-description">{preset.description}</p>
@@ -249,7 +255,9 @@ export default function ResolutionPresets({
       {/* Custom Inputs Form (Visible when Custom is selected or to refine values) */}
       {selectedPresetId === "custom" && (
         <div className="custom-res-form-panel">
-          <h5 className="custom-res-title">Custom Dimensions & Pixel Density</h5>
+          <h5 className="custom-res-title">
+            Custom Dimensions & Pixel Density
+          </h5>
           <div className="custom-res-inputs">
             <div className="res-input-group">
               <label>Width (px)</label>
@@ -317,7 +325,9 @@ export default function ResolutionPresets({
       <div className="res-apply-bar">
         <div className="res-apply-notice">
           <p>
-            ℹ️ Changes to display resolution and DPI require a <strong>restart of the Waydroid session</strong> to take visual effect in Android.
+            ℹ️ Changes to display resolution and DPI require a{" "}
+            <strong>restart of the Waydroid session</strong> to take visual
+            effect in Android.
           </p>
         </div>
 
@@ -339,15 +349,21 @@ export default function ResolutionPresets({
             type="button"
             className="btn btn-primary btn-apply-res"
             onClick={handleApply}
-            disabled={disabled || isApplying || isUnchanged || !customWidth || !customHeight}
+            disabled={
+              disabled ||
+              isApplying ||
+              isUnchanged ||
+              !customWidth ||
+              !customHeight
+            }
           >
             <Check size={16} />
             <span>
               {isApplying
                 ? "Applying..."
                 : isUnchanged
-                ? "Saved & Active"
-                : `Apply ${customWidth} × ${customHeight}`}
+                  ? "Saved & Active"
+                  : `Apply ${customWidth} × ${customHeight}`}
             </span>
           </button>
         </div>

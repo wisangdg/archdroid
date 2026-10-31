@@ -1,5 +1,13 @@
 import React from "react";
-import { Download, CheckCircle2, AlertTriangle, HelpCircle, Layers, Cpu, Puzzle } from "lucide-react";
+import {
+  Download,
+  CheckCircle2,
+  AlertTriangle,
+  HelpCircle,
+  Layers,
+  Cpu,
+  Puzzle,
+} from "lucide-react";
 
 export default function InstallToolsView({
   gappsStatus,
@@ -25,17 +33,9 @@ export default function InstallToolsView({
           </span>
         );
       case "not_installed":
-        return (
-          <span className="badge-pill badge-neutral">
-            Not Installed
-          </span>
-        );
+        return <span className="badge-pill badge-neutral">Not Installed</span>;
       default:
-        return (
-          <span className="badge-pill badge-neutral">
-            Checking...
-          </span>
-        );
+        return <span className="badge-pill badge-neutral">Checking...</span>;
     }
   };
 
@@ -45,7 +45,9 @@ export default function InstallToolsView({
       <div className="info-banner">
         <HelpCircle size={20} className="info-icon" />
         <div className="info-text">
-          <strong>Addon Injection System</strong>: These tools inject custom packages directly into the Waydroid Android root image. Administrator (root) privileges will be requested via Polkit/Sudo.
+          <strong>Addon Injection System</strong>: These tools inject custom
+          packages directly into the Waydroid Android root image. Administrator
+          (root) privileges will be requested via Polkit/Sudo.
         </div>
       </div>
 
@@ -63,16 +65,23 @@ export default function InstallToolsView({
                 {renderStatusBadge(gappsStatus)}
               </div>
               <p>
-                Injects Google Play Store, Play Services, and Google Services Framework
-                into the Android container to allow downloading apps directly.
+                Injects Google Play Store, Play Services, and Google Services
+                Framework into the Android container to allow downloading apps
+                directly.
               </p>
             </div>
           </div>
 
           <div className="tool-card-footer">
-            <span className="tool-requirement-hint">Root required • waydroid_script (48dbfaf)</span>
+            <span className="tool-requirement-hint">
+              Root required • waydroid_script (48dbfaf)
+            </span>
             <button
-              className={gappsStatus === "installed" ? "btn btn-outline" : "btn btn-primary"}
+              className={
+                gappsStatus === "installed"
+                  ? "btn btn-outline"
+                  : "btn btn-primary"
+              }
               onClick={onInstallGApps}
               disabled={installing || gappsStatus === "installed"}
             >
@@ -103,15 +112,24 @@ export default function InstallToolsView({
                 {renderStatusBadge(houdiniStatus)}
               </div>
               <p>
-                Translates ARM and ARM64 native binaries on x86_64 processors. Crucial for playing modern Android 3D mobile games (PUBG, Genshin Impact, Roblox, etc.) that do not provide native x86 libraries.
+                Translates ARM and ARM64 native binaries on x86_64 processors.
+                Crucial for playing modern Android 3D mobile games (PUBG,
+                Genshin Impact, Roblox, etc.) that do not provide native x86
+                libraries.
               </p>
             </div>
           </div>
 
           <div className="tool-card-footer">
-            <span className="tool-requirement-hint">Root required • waydroid_script (48dbfaf)</span>
+            <span className="tool-requirement-hint">
+              Root required • waydroid_script (48dbfaf)
+            </span>
             <button
-              className={houdiniStatus === "installed" ? "btn btn-outline" : "btn btn-primary"}
+              className={
+                houdiniStatus === "installed"
+                  ? "btn btn-outline"
+                  : "btn btn-primary"
+              }
               onClick={onInstallHoudini}
               disabled={installing || houdiniStatus === "installed"}
             >
@@ -142,12 +160,13 @@ export default function InstallToolsView({
                 {renderStatusBadge(multitouchStatus)}
               </div>
               <p>
-                Declares the multitouch capabilities of Waydroid's touchscreen in the vendor
-                partition. Google Play hides every app that requires a feature the device never
-                declares — Plants vs Zombies 2 requires
-                <code>android.hardware.touchscreen.multitouch</code> — and it reports that with the
-                same &ldquo;isn&apos;t compatible with this version&rdquo; message an ARM
-                translation problem produces.
+                Declares the multitouch capabilities of Waydroid's touchscreen
+                in the vendor partition. Google Play hides every app that
+                requires a feature the device never declares — Plants vs Zombies
+                2 requires
+                <code>android.hardware.touchscreen.multitouch</code> — and it
+                reports that with the same &ldquo;isn&apos;t compatible with
+                this version&rdquo; message an ARM translation problem produces.
               </p>
             </div>
           </div>
@@ -159,7 +178,11 @@ export default function InstallToolsView({
                 : "Root required • Vendor overlay"}
             </span>
             <button
-              className={multitouchStatus === "installed" ? "btn btn-outline" : "btn btn-primary"}
+              className={
+                multitouchStatus === "installed"
+                  ? "btn btn-outline"
+                  : "btn btn-primary"
+              }
               onClick={onInstallMultitouch}
               disabled={installing || multitouchStatus === "installed"}
             >
@@ -172,7 +195,9 @@ export default function InstallToolsView({
                 <>
                   <Download size={17} />
                   <span>
-                    {multitouchStatus === "partial" ? "Reinstall" : "Declare Touch Features"}
+                    {multitouchStatus === "partial"
+                      ? "Reinstall"
+                      : "Declare Touch Features"}
                   </span>
                 </>
               )}

@@ -22,7 +22,11 @@ test("package-installing actions preview the distro packages before confirming",
       new RegExp(`previewPackageInstall\\(\\s*"${action}"\\s*\\)`),
       `${handler} does not preview the ${action} package install`
     );
-    assert.match(body, /packagePreview:\s*preview/, `${handler} drops the preview`);
+    assert.match(
+      body,
+      /packagePreview:\s*preview/,
+      `${handler} drops the preview`
+    );
     assert.match(
       body,
       /executeInstall\w+\(preview\.packages\)|executeInitWaydroid\(preview\.packages\)/,
@@ -38,7 +42,11 @@ test("installer commands receive the approved package list", () => {
     const index = app.indexOf(`runStreamingTask("${command}"`);
     assert.ok(index > 0, `${command} is never streamed`);
     const body = app.slice(index, index + 400);
-    assert.match(body, /args:\s*\{\s*approvedPackages\s*\}/, `${command} sends no approval`);
+    assert.match(
+      body,
+      /args:\s*\{\s*approvedPackages\s*\}/,
+      `${command} sends no approval`
+    );
   }
 });
 
@@ -53,9 +61,21 @@ test("the app forwards the reviewed package preview to the modal", () => {
 
 test("confirmation modal shows the package list and exact command", () => {
   const modal = read("src/components/ui/ConfirmModal.jsx");
-  assert.match(modal, /packagePreview\.packages/, "package list is never rendered");
-  assert.match(modal, /packagePreview\.command/, "exact command is never rendered");
-  assert.match(modal, /No system packages will be installed/, "empty plan is not explained");
+  assert.match(
+    modal,
+    /packagePreview\.packages/,
+    "package list is never rendered"
+  );
+  assert.match(
+    modal,
+    /packagePreview\.command/,
+    "exact command is never rendered"
+  );
+  assert.match(
+    modal,
+    /No system packages will be installed/,
+    "empty plan is not explained"
+  );
 });
 
 test("installers refuse to run without an approved package list", () => {
@@ -63,7 +83,10 @@ test("installers refuse to run without an approved package list", () => {
   for (const command of ["waydroid_init", "install_gapps", "install_houdini"]) {
     const index = rust.indexOf(`async fn ${command}(`);
     assert.ok(index > 0, `${command} not found`);
-    const body = rust.slice(index, rust.indexOf("#[tauri::command]", index + 1));
+    const body = rust.slice(
+      index,
+      rust.indexOf("#[tauri::command]", index + 1)
+    );
     assert.match(
       body,
       /approved_install_packages\(/,

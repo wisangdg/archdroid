@@ -32,7 +32,10 @@ export default function ProcessStepper({
                   ) : stepStatus === "failed" ? (
                     <AlertCircle size={14} className="stepper-icon-failed" />
                   ) : stepStatus === "active" ? (
-                    <Loader2 size={14} className="stepper-icon-spinner spinner" />
+                    <Loader2
+                      size={14}
+                      className="stepper-icon-spinner spinner"
+                    />
                   ) : (
                     <span className="stepper-number">{idx + 1}</span>
                   )}

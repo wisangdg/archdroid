@@ -20,7 +20,9 @@ const REQUIRED_DIRECTIVES = [
 ];
 
 function hostsIn(policy) {
-  return [...policy.matchAll(/\b(?:https?|wss?):\/\/([^\s;]+)/g)].map((match) => match[1]);
+  return [...policy.matchAll(/\b(?:https?|wss?):\/\/([^\s;]+)/g)].map(
+    (match) => match[1]
+  );
 }
 
 test("the production CSP is set and keeps every required directive", () => {
@@ -38,7 +40,10 @@ test("the production CSP only allows Tauri IPC, not internet hosts", () => {
 test("dev CSP adds Vite and HMR without weakening production", () => {
   assert.notEqual(devCsp, csp);
   assert.ok(devCsp.includes("ws://localhost:5173"), "HMR needs its WebSocket");
-  assert.ok(devCsp.includes("http://localhost:5173"), "dev assets come from Vite");
+  assert.ok(
+    devCsp.includes("http://localhost:5173"),
+    "dev assets come from Vite"
+  );
   assert.deepEqual(hostsIn(devCsp), [
     "ipc.localhost",
     "localhost:5173",
@@ -48,6 +53,12 @@ test("dev CSP adds Vite and HMR without weakening production", () => {
 
 test("no remote font or stylesheet is imported", () => {
   const css = read("../index.css");
-  assert.ok(!/@import\s+url\(\s*['"]?https?:/i.test(css), "remote @import found");
-  assert.ok(!/fonts\.googleapis|fonts\.gstatic/i.test(css), "Google Fonts found");
+  assert.ok(
+    !/@import\s+url\(\s*['"]?https?:/i.test(css),
+    "remote @import found"
+  );
+  assert.ok(
+    !/fonts\.googleapis|fonts\.gstatic/i.test(css),
+    "Google Fonts found"
+  );
 });

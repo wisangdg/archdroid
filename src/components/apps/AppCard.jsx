@@ -1,7 +1,13 @@
 import React, { useState } from "react";
 import { Trash2, Play } from "lucide-react";
 
-export default function AppCard({ app, onLaunch, onUninstall, onContextMenu, disabled = false }) {
+export default function AppCard({
+  app,
+  onLaunch,
+  onUninstall,
+  onContextMenu,
+  disabled = false,
+}) {
   const [imgError, setImgError] = useState(false);
 
   return (
@@ -28,7 +34,9 @@ export default function AppCard({ app, onLaunch, onUninstall, onContextMenu, dis
               onError={() => setImgError(true)}
             />
           ) : (
-            <span className="app-icon-fallback" role="img" aria-label="App">🤖</span>
+            <span className="app-icon-fallback" role="img" aria-label="App">
+              🤖
+            </span>
           )}
         </div>
         <div className="app-launch-overlay">
@@ -38,8 +46,12 @@ export default function AppCard({ app, onLaunch, onUninstall, onContextMenu, dis
 
       {/* App Meta */}
       <div className="app-meta">
-        <span className="app-name" title={app.name}>{app.name}</span>
-        <span className="app-package" title={app.package}>{app.package}</span>
+        <span className="app-name" title={app.name}>
+          {app.name}
+        </span>
+        <span className="app-package" title={app.package}>
+          {app.package}
+        </span>
       </div>
 
       {/* Quick Uninstall Overlay Button */}

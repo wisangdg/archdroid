@@ -120,8 +120,10 @@ export default function SetupWizard({ onInitWaydroid, installing }) {
 
         <h2 className="setup-title">Android System Image Required</h2>
         <p className="setup-description">
-          Your Linux machine is ready to host Waydroid, but the base Android system container has not been initialized yet.
-          Click below to download the official LineageOS image (~1 GB) and configure your emulator automatically.
+          Your Linux machine is ready to host Waydroid, but the base Android
+          system container has not been initialized yet. Click below to download
+          the official LineageOS image (~1 GB) and configure your emulator
+          automatically.
         </p>
 
         <div className="setup-specs-list">
@@ -146,7 +148,8 @@ export default function SetupWizard({ onInitWaydroid, installing }) {
               <div>
                 <h3>Preflight Checks</h3>
                 <p>
-                  Host dependencies are verified before root access is requested.
+                  Host dependencies are verified before root access is
+                  requested.
                 </p>
               </div>
             </div>
@@ -195,10 +198,14 @@ export default function SetupWizard({ onInitWaydroid, installing }) {
                         {badgeLabel(item.status)}
                       </span>
                     </div>
-                    <span className="setup-preflight-item-value">{item.value}</span>
+                    <span className="setup-preflight-item-value">
+                      {item.value}
+                    </span>
                     <p className="setup-preflight-item-detail">{item.detail}</p>
                     {item.remediation && (
-                      <code className="setup-preflight-fix">{item.remediation}</code>
+                      <code className="setup-preflight-fix">
+                        {item.remediation}
+                      </code>
                     )}
                   </li>
                 );
@@ -212,9 +219,7 @@ export default function SetupWizard({ onInitWaydroid, installing }) {
               className="setup-preflight-toggle"
               onClick={() => setShowAll((value) => !value)}
             >
-              {showAll
-                ? "Show only issues"
-                : `Show all ${items.length} checks`}
+              {showAll ? "Show only issues" : `Show all ${items.length} checks`}
             </button>
           )}
 
@@ -237,7 +242,11 @@ export default function SetupWizard({ onInitWaydroid, installing }) {
           }
         >
           <Download size={20} />
-          <span>{installing ? "Initializing System..." : "Initialize Android Emulator"}</span>
+          <span>
+            {installing
+              ? "Initializing System..."
+              : "Initialize Android Emulator"}
+          </span>
         </button>
       </div>
     </div>

@@ -63,9 +63,10 @@ function handlerCommands() {
     }
     const entry = line.match(/^([a-z_][a-z0-9_]*),?$/);
     if (entry) {
-      (attributes.includes('feature = "dev-commands"') ? gated : registered).push(
-        entry[1]
-      );
+      (attributes.includes('feature = "dev-commands"')
+        ? gated
+        : registered
+      ).push(entry[1]);
       attributes = "";
     } else if (line !== "" && !line.startsWith("//")) {
       attributes = "";
@@ -107,12 +108,15 @@ test("root-altering operations require explicit confirmation before execution", 
     { handler: "handleWipeData", command: "waydroid_wipe" },
   ];
 
-  for (const { handler, command } of rootOperations) {
+  for (const { handler } of rootOperations) {
     const handlerIndex = appSource.indexOf(`const ${handler} =`);
     assert.ok(handlerIndex > 0, `${handler} not found in App.jsx`);
 
     // Verify the handler opens a confirmation modal before running the streaming task
-    const nextFunctionIndex = appSource.indexOf("const handle", handlerIndex + 1);
+    const nextFunctionIndex = appSource.indexOf(
+      "const handle",
+      handlerIndex + 1
+    );
     const handlerBody = appSource.slice(
       handlerIndex,
       nextFunctionIndex > 0 ? nextFunctionIndex : handlerIndex + 1500

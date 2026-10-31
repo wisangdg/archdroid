@@ -72,10 +72,15 @@ export default function TerminalModal({
 
   const handleDownloadLogs = () => {
     try {
-      const blob = new Blob([logs.join("\n")], { type: "text/plain;charset=utf-8" });
+      const blob = new Blob([logs.join("\n")], {
+        type: "text/plain;charset=utf-8",
+      });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
-      const dateStr = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+      const dateStr = new Date()
+        .toISOString()
+        .replace(/[:.]/g, "-")
+        .slice(0, 19);
       link.href = url;
       link.download = `archdroid-${taskType}-${dateStr}.log`;
       document.body.appendChild(link);
@@ -91,7 +96,9 @@ export default function TerminalModal({
 
   return (
     <div className="terminal-overlay">
-      <div className={`glass-panel terminal-modal ${hasStepper ? "with-stepper" : ""}`}>
+      <div
+        className={`glass-panel terminal-modal ${hasStepper ? "with-stepper" : ""}`}
+      >
         {/* Modal Header */}
         <div className="terminal-header">
           <div className="terminal-title-wrap">
@@ -100,10 +107,10 @@ export default function TerminalModal({
                 progress.isCancelled
                   ? "badge-cancelled"
                   : progress.isFailed
-                  ? "badge-failed"
-                  : progress.isCompleted
-                  ? "badge-done"
-                  : "badge-running"
+                    ? "badge-failed"
+                    : progress.isCompleted
+                      ? "badge-done"
+                      : "badge-running"
               }`}
             >
               {installing ? (
@@ -125,12 +132,12 @@ export default function TerminalModal({
                 {installing
                   ? "Task running in background..."
                   : progress.isCancelled
-                  ? "Operation cancelled"
-                  : progress.isFailed
-                  ? "Process encountered errors"
-                  : progress.isCompleted
-                  ? "Finished successfully"
-                  : "Task Complete"}
+                    ? "Operation cancelled"
+                    : progress.isFailed
+                      ? "Process encountered errors"
+                      : progress.isCompleted
+                        ? "Finished successfully"
+                        : "Task Complete"}
               </span>
             </div>
           </div>
@@ -221,8 +228,8 @@ export default function TerminalModal({
                 progress.isFailed
                   ? "status-failed"
                   : progress.isCompleted
-                  ? "status-completed"
-                  : "status-active"
+                    ? "status-completed"
+                    : "status-active"
               }`}
             >
               <div className="status-card-header">
@@ -230,12 +237,12 @@ export default function TerminalModal({
                   {progress.isCancelled
                     ? "Operation Cancelled"
                     : progress.isFailed
-                    ? "Execution Failed"
-                    : progress.isCompleted
-                    ? "All Stages Completed"
-                    : `Stage ${progress.activeStepIndex + 1} of ${progress.steps.length}: ${
-                        progress.steps[progress.activeStepIndex]?.label
-                      }`}
+                      ? "Execution Failed"
+                      : progress.isCompleted
+                        ? "All Stages Completed"
+                        : `Stage ${progress.activeStepIndex + 1} of ${progress.steps.length}: ${
+                            progress.steps[progress.activeStepIndex]?.label
+                          }`}
                 </span>
                 {installing && (
                   <span className="status-live-indicator">
@@ -252,14 +259,15 @@ export default function TerminalModal({
                 <div className="status-failure-advice">
                   {progress.isCancelled ? (
                     <>
-                      <strong>Operation Cancelled:</strong> The process was stopped by user request.
-                      No modifications were completed.
+                      <strong>Operation Cancelled:</strong> The process was
+                      stopped by user request. No modifications were completed.
                     </>
                   ) : (
                     <>
-                      <strong>Troubleshooting:</strong> Root authentication may have been rejected,
-                      or packages could not be reached. Ensure polkit authentication is configured or
-                      check internet connectivity.
+                      <strong>Troubleshooting:</strong> Root authentication may
+                      have been rejected, or packages could not be reached.
+                      Ensure polkit authentication is configured or check
+                      internet connectivity.
                     </>
                   )}
                 </div>
@@ -277,9 +285,17 @@ export default function TerminalModal({
               onClick={() => setShowConsole(!showConsole)}
             >
               <Terminal size={15} />
-              <span>{showConsole ? "Hide Detailed Console" : "Show Detailed Console Output"}</span>
+              <span>
+                {showConsole
+                  ? "Hide Detailed Console"
+                  : "Show Detailed Console Output"}
+              </span>
               <span className="console-lines-badge">{logs.length} lines</span>
-              {showConsole ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+              {showConsole ? (
+                <ChevronUp size={15} />
+              ) : (
+                <ChevronDown size={15} />
+              )}
             </button>
           </div>
         )}
@@ -300,10 +316,10 @@ export default function TerminalModal({
                     line.includes("[ERROR]")
                       ? "log-error"
                       : line.includes("[SUCCESS]")
-                      ? "log-success"
-                      : line.includes("[SYSTEM]")
-                      ? "log-system"
-                      : ""
+                        ? "log-success"
+                        : line.includes("[SYSTEM]")
+                          ? "log-system"
+                          : ""
                   }`}
                 >
                   {line}
@@ -317,7 +333,9 @@ export default function TerminalModal({
         <div className="terminal-footer">
           <div className="terminal-footer-meta">
             <FileText size={14} className="meta-icon" />
-            <span className="terminal-lines-count">{logs.length} log lines stream captured</span>
+            <span className="terminal-lines-count">
+              {logs.length} log lines stream captured
+            </span>
           </div>
 
           <div className="terminal-footer-actions">

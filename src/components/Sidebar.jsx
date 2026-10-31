@@ -9,9 +9,20 @@ import {
   Cpu,
 } from "lucide-react";
 
-export default function Sidebar({ activeTab, setActiveTab, appCount, status, onOpenSharedFolder }) {
+export default function Sidebar({
+  activeTab,
+  setActiveTab,
+  appCount,
+  status,
+  onOpenSharedFolder,
+}) {
   const navItems = [
-    { id: "home", label: "My Apps", icon: MonitorPlay, badge: appCount > 0 ? appCount : null },
+    {
+      id: "home",
+      label: "My Apps",
+      icon: MonitorPlay,
+      badge: appCount > 0 ? appCount : null,
+    },
     { id: "keymap", label: "Keymapping", icon: Gamepad2 },
     { id: "install", label: "Install Tools", icon: Download },
     { id: "settings", label: "Settings", icon: Settings },
@@ -59,12 +70,14 @@ export default function Sidebar({ activeTab, setActiveTab, appCount, status, onO
         <div className="engine-status-card">
           <div className="engine-status-row">
             <span className="engine-status-label">Engine Status</span>
-            <span className={`status-pill-mini ${status === "online" ? "online" : "offline"}`}>
+            <span
+              className={`status-pill-mini ${status === "online" ? "online" : "offline"}`}
+            >
               <span className="status-dot"></span>
               {status === "online" ? "Online" : "Offline"}
             </span>
           </div>
-          <button 
+          <button
             className="btn-sidebar-quick-action"
             onClick={onOpenSharedFolder}
             title="Open Android Shared Folder"

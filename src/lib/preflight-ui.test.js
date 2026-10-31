@@ -19,12 +19,24 @@ test("setup wizard runs the host preflight and renders remediation", () => {
     "wizard does not call the preflight command"
   );
   assert.match(source, /item\.remediation/, "wizard never renders remediation");
-  assert.match(source, /setup-preflight-fix/, "remediation has no rendered block");
+  assert.match(
+    source,
+    /setup-preflight-fix/,
+    "remediation has no rendered block"
+  );
 });
 
 test("setup wizard blocks initialization when a required dependency is missing", () => {
   const source = read("src/components/setup/SetupWizard.jsx");
   assert.match(source, /blocksInitialization/, "no blocking predicate");
-  assert.match(source, /package_manager/, "package manager fallback is ignored");
-  assert.match(source, /disabled=\{!canInitialize\}/, "init button is never gated");
+  assert.match(
+    source,
+    /package_manager/,
+    "package manager fallback is ignored"
+  );
+  assert.match(
+    source,
+    /disabled=\{!canInitialize\}/,
+    "init button is never gated"
+  );
 });

@@ -2,35 +2,79 @@ export const TASK_STEP_CONFIGS = {
   gapps: [
     { id: "elevate", label: "Root Access", description: "Polkit elevation" },
     { id: "deps", label: "Dependencies", description: "System packages" },
-    { id: "repo", label: "Source & Lock", description: "waydroid_script checkout" },
-    { id: "env", label: "Python Venv", description: "Isolated environment & wheels" },
-    { id: "inject", label: "Injecting GApps", description: "Writing to rootfs" },
+    {
+      id: "repo",
+      label: "Source & Lock",
+      description: "waydroid_script checkout",
+    },
+    {
+      id: "env",
+      label: "Python Venv",
+      description: "Isolated environment & wheels",
+    },
+    {
+      id: "inject",
+      label: "Injecting GApps",
+      description: "Writing to rootfs",
+    },
     { id: "done", label: "Ready", description: "Installation complete" },
   ],
   houdini: [
     { id: "elevate", label: "Root Access", description: "Polkit elevation" },
     { id: "deps", label: "Dependencies", description: "System packages" },
-    { id: "repo", label: "Source & Lock", description: "waydroid_script checkout" },
-    { id: "env", label: "Python Venv", description: "Isolated environment & wheels" },
-    { id: "inject", label: "Installing Houdini", description: "ARM translation bridge" },
+    {
+      id: "repo",
+      label: "Source & Lock",
+      description: "waydroid_script checkout",
+    },
+    {
+      id: "env",
+      label: "Python Venv",
+      description: "Isolated environment & wheels",
+    },
+    {
+      id: "inject",
+      label: "Installing Houdini",
+      description: "ARM translation bridge",
+    },
     { id: "done", label: "Ready", description: "ARM support active" },
   ],
   init: [
     { id: "elevate", label: "Root Access", description: "Polkit elevation" },
-    { id: "pkg", label: "Preflight & Packages", description: "System dependencies" },
-    { id: "download", label: "Download Image", description: "Android system image" },
+    {
+      id: "pkg",
+      label: "Preflight & Packages",
+      description: "System dependencies",
+    },
+    {
+      id: "download",
+      label: "Download Image",
+      description: "Android system image",
+    },
     { id: "init", label: "Initialize", description: "Configuring container" },
     { id: "done", label: "Ready", description: "Ready to launch" },
   ],
   phantom: [
-    { id: "repo", label: "Source Checkout", description: "Cloning pinned Phantom repo" },
-    { id: "build", label: "Compile & Install", description: "Building binaries as user" },
+    {
+      id: "repo",
+      label: "Source Checkout",
+      description: "Cloning pinned Phantom repo",
+    },
+    {
+      id: "build",
+      label: "Compile & Install",
+      description: "Building binaries as user",
+    },
     { id: "done", label: "Ready", description: "Phantom ready" },
   ],
   wipe: [
     { id: "elevate", label: "Root Access", description: "Polkit elevation" },
     { id: "stop", label: "Stop Session", description: "Halting container" },
-    { id: "wipe", label: "Wiping Storage", description: "Cleaning /var/lib/waydroid" },
+    {
+      id: "wipe",
+      label: "Wiping Storage",
+      description: "Cleaning /var/lib/waydroid",
+    },
     { id: "done", label: "Wipe Complete", description: "Clean state restored" },
   ],
 };
@@ -71,8 +115,8 @@ export function detectStepProgress(taskType, logs = [], taskResult = null) {
       errorMessage: isCancelled
         ? taskResult?.message || "Operation was cancelled by user."
         : isFailed
-        ? taskResult?.message || "Operation failed."
-        : null,
+          ? taskResult?.message || "Operation failed."
+          : null,
     };
   }
 
@@ -87,7 +131,8 @@ export function detectStepProgress(taskType, logs = [], taskResult = null) {
     const errorLine = logs.find(
       (l) => l.includes("[ERROR]") || l.includes("Failed:")
     );
-    errorMessage = taskResult?.message || errorLine || "The process terminated with errors.";
+    errorMessage =
+      taskResult?.message || errorLine || "The process terminated with errors.";
   }
 
   if (isCompleted) {
@@ -120,7 +165,10 @@ export function detectStepProgress(taskType, logs = [], taskResult = null) {
           currentMessage = line;
           break;
         }
-        if (line.includes("Cloning pinned") || line.includes("waydroid_script")) {
+        if (
+          line.includes("Cloning pinned") ||
+          line.includes("waydroid_script")
+        ) {
           activeIndex = 2;
           currentMessage = line;
           break;
@@ -180,7 +228,10 @@ export function detectStepProgress(taskType, logs = [], taskResult = null) {
           break;
         }
       } else if (taskType === "init") {
-        if (line.includes("Initializing Waydroid") || line.includes("waydroid init")) {
+        if (
+          line.includes("Initializing Waydroid") ||
+          line.includes("waydroid init")
+        ) {
           activeIndex = 3;
           currentMessage = line;
           break;

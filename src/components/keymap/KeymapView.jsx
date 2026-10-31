@@ -1,7 +1,18 @@
 import React from "react";
-import { Gamepad2, Play, Download, Keyboard, MousePointer, ShieldCheck } from "lucide-react";
+import {
+  Gamepad2,
+  Play,
+  Download,
+  Keyboard,
+  MousePointer,
+  ShieldCheck,
+} from "lucide-react";
 
-export default function KeymapView({ onRunPhantom, onInstallPhantom, installing }) {
+export default function KeymapView({
+  onRunPhantom,
+  onInstallPhantom,
+  installing,
+}) {
   return (
     <div className="keymap-view-container">
       {/* Hero Showcase Card */}
@@ -15,7 +26,10 @@ export default function KeymapView({ onRunPhantom, onInstallPhantom, installing 
         <div className="keymap-hero-content">
           <h2>Phantom Keymapper for Linux</h2>
           <p>
-            Experience PC-grade controls for mobile games. <strong>Phantom</strong> is an ultra-fast, native Wayland keymapper designed specifically for Waydroid that translates keyboard strokes and mouse movements directly into Android multi-touch gestures.
+            Experience PC-grade controls for mobile games.{" "}
+            <strong>Phantom</strong> is an ultra-fast, native Wayland keymapper
+            designed specifically for Waydroid that translates keyboard strokes
+            and mouse movements directly into Android multi-touch gestures.
           </p>
 
           <div className="keymap-actions">
@@ -47,7 +61,10 @@ export default function KeymapView({ onRunPhantom, onInstallPhantom, installing 
             <Keyboard size={22} />
           </div>
           <h4>WASD & Custom Binds</h4>
-          <p>Assign discrete touch coordinates or directional joysticks to any keyboard keys.</p>
+          <p>
+            Assign discrete touch coordinates or directional joysticks to any
+            keyboard keys.
+          </p>
         </div>
 
         <div className="glass-panel keymap-feature-item">
@@ -55,7 +72,10 @@ export default function KeymapView({ onRunPhantom, onInstallPhantom, installing 
             <MousePointer size={22} />
           </div>
           <h4>FPS Mouse Look & Aim</h4>
-          <p>Lock cursor to enable 360-degree camera panning for shooter games like Free Fire & PUBG.</p>
+          <p>
+            Lock cursor to enable 360-degree camera panning for shooter games
+            like Free Fire & PUBG.
+          </p>
         </div>
 
         <div className="glass-panel keymap-feature-item">
@@ -63,7 +83,10 @@ export default function KeymapView({ onRunPhantom, onInstallPhantom, installing 
             <ShieldCheck size={22} />
           </div>
           <h4>Zero Ban Risk</h4>
-          <p>Operates outside the Android container via native Linux uinput without modifying APK binaries.</p>
+          <p>
+            Operates outside the Android container via native Linux uinput
+            without modifying APK binaries.
+          </p>
         </div>
       </div>
     </div>

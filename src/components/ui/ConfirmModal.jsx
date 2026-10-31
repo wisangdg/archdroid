@@ -1,5 +1,12 @@
 import React, { useEffect } from "react";
-import { AlertTriangle, AlertOctagon, Package, Trash2, ShieldAlert, X } from "lucide-react";
+import {
+  AlertTriangle,
+  AlertOctagon,
+  Package,
+  Trash2,
+  ShieldAlert,
+  X,
+} from "lucide-react";
 
 export default function ConfirmModal({
   isOpen,
@@ -52,9 +59,7 @@ export default function ConfirmModal({
         aria-labelledby="confirm-modal-title"
       >
         <div className="confirm-modal-header">
-          <div className="confirm-icon-wrap">
-            {renderIcon()}
-          </div>
+          <div className="confirm-icon-wrap">{renderIcon()}</div>
           <button
             type="button"
             className="btn-icon-close"
@@ -66,7 +71,9 @@ export default function ConfirmModal({
         </div>
 
         <div className="confirm-modal-body">
-          <h3 id="confirm-modal-title" className="confirm-modal-title">{title}</h3>
+          <h3 id="confirm-modal-title" className="confirm-modal-title">
+            {title}
+          </h3>
           <p className="confirm-modal-desc">{description}</p>
           {packagePreview && (
             <div className="confirm-package-preview">
@@ -103,11 +110,7 @@ export default function ConfirmModal({
         </div>
 
         <div className="confirm-modal-actions">
-          <button
-            type="button"
-            className="btn btn-outline"
-            onClick={onCancel}
-          >
+          <button type="button" className="btn btn-outline" onClick={onCancel}>
             {cancelText}
           </button>
           <button

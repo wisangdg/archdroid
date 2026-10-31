@@ -50,9 +50,13 @@ export default function Header({
 
       <div className="header-controls">
         {/* Status Badge */}
-        <div className={`status-badge ${status === "online" ? "status-online" : "status-offline"}`}>
+        <div
+          className={`status-badge ${status === "online" ? "status-online" : "status-offline"}`}
+        >
           <div className="status-dot"></div>
-          <span className="status-text">{status === "online" ? "Engine Running" : "Engine Stopped"}</span>
+          <span className="status-text">
+            {status === "online" ? "Engine Running" : "Engine Stopped"}
+          </span>
         </div>
 
         {/* Engine Control Actions */}

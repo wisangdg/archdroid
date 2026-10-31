@@ -47,7 +47,9 @@ const FORBIDDEN_SINKS = [
 function sourceFiles() {
   const dir = fileURLToPath(new URL("src/", projectRoot));
   return readdirSync(dir, { recursive: true, withFileTypes: true })
-    .filter((entry) => entry.isFile() && /\.(?:jsx?|tsx?|html)$/.test(entry.name))
+    .filter(
+      (entry) => entry.isFile() && /\.(?:jsx?|tsx?|html)$/.test(entry.name)
+    )
     .filter((entry) => !entry.name.endsWith(".test.js"))
     .map((entry) => join(entry.parentPath ?? entry.path, entry.name));
 }
@@ -65,7 +67,10 @@ test("no shell, filesystem, HTTP, or process plugin is exposed", () => {
     assert.ok(!cargo.includes(name), `${name} is a backend dependency`);
   }
   for (const name of FORBIDDEN_PACKAGES) {
-    assert.ok(!(name in (pkg.dependencies ?? {})), `${name} is a frontend dependency`);
+    assert.ok(
+      !(name in (pkg.dependencies ?? {})),
+      `${name} is a frontend dependency`
+    );
   }
   for (const permission of capabilities.permissions) {
     assert.ok(
@@ -89,7 +94,10 @@ test("the webview never renders HTML from strings", () => {
 });
 
 test("the UI loads no remote content", () => {
-  const files = [...sourceFiles(), fileURLToPath(new URL("index.html", projectRoot))];
+  const files = [
+    ...sourceFiles(),
+    fileURLToPath(new URL("index.html", projectRoot)),
+  ];
   for (const file of files) {
     const source = readFileSync(file, "utf8");
     assert.ok(!/https?:\/\//.test(source), `${file} references a remote URL`);

@@ -14,7 +14,15 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "test": "node --test src/lib/*.test.js",
+    "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix",
+    "format:check": "prettier --check \"src/**/*.{js,jsx,css,html,json}\"",
+    "format": "prettier --write \"src/**/*.{js,jsx,css,html,json}\"",
+    "test:unit": "node --test src/lib/*.test.js",
+    "test:component": "vitest run",
+    "test:e2e": "node scripts/e2e/smoke-webdriver.js",
+    "test": "node --test src/lib/*.test.js && vitest run",
+    "test:all": "node --test src/lib/*.test.js && vitest run && node scripts/e2e/smoke-webdriver.js",
     "preview": "vite preview",
     "tauri": "tauri",
     "build:bundles": "NO_STRIP=1 tauri build",
@@ -30,10 +38,18 @@
     "react-dom": "^18.2.0"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.5",
     "@tauri-apps/cli": "^2.11.4",
+    "@testing-library/react": "^16.3.3",
     "@types/react": "^18.2.66",
     "@types/react-dom": "^18.2.22",
     "@vitejs/plugin-react": "^4.2.1",
-    "vite": "^5.2.0"
+    "eslint": "^9.39.5",
+    "eslint-plugin-react": "^7.37.5",
+    "globals": "^17.13.0",
+    "jsdom": "^30.1.3",
+    "prettier": "^3.9.10",
+    "vite": "^5.2.0",
+    "vitest": "^2.1.9"
   }
 }

@@ -1,5 +1,11 @@
 import React from "react";
-import { CheckCircle2, AlertCircle, AlertTriangle, Info, X } from "lucide-react";
+import {
+  CheckCircle2,
+  AlertCircle,
+  AlertTriangle,
+  Info,
+  X,
+} from "lucide-react";
 
 export default function ToastContainer({ toasts, onDismiss }) {
   if (!toasts || toasts.length === 0) return null;
@@ -25,9 +31,7 @@ export default function ToastContainer({ toasts, onDismiss }) {
           key={toast.id}
           className={`toast-item toast-${toast.type || "info"}`}
         >
-          <div className="toast-icon-wrapper">
-            {renderIcon(toast.type)}
-          </div>
+          <div className="toast-icon-wrapper">{renderIcon(toast.type)}</div>
 
           <div className="toast-content">
             {toast.title && <h5 className="toast-title">{toast.title}</h5>}

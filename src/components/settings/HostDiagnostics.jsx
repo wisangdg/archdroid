@@ -108,7 +108,8 @@ export default function HostDiagnostics() {
             </button>
           </div>
           <p>
-            Verifies Linux kernel modules, display protocol, GPU passthrough, and virtualization compatibility for Waydroid.
+            Verifies Linux kernel modules, display protocol, GPU passthrough,
+            and virtualization compatibility for Waydroid.
           </p>
         </div>
       </div>
@@ -116,7 +117,10 @@ export default function HostDiagnostics() {
       {/* Diagnostics Cards Grid */}
       <div className="diag-grid">
         {error ? (
-          <div className="diag-loading-placeholder" style={{ borderColor: "rgba(239, 68, 68, 0.4)", color: "#f87171" }}>
+          <div
+            className="diag-loading-placeholder"
+            style={{ borderColor: "rgba(239, 68, 68, 0.4)", color: "#f87171" }}
+          >
             <AlertCircle size={18} />
             <span>Diagnostics scan failed: {error}</span>
           </div>

@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
-import { Plus, Search, X, PackagePlus, AlertCircle, Filter } from "lucide-react";
+import { Plus, Search, X, PackagePlus, AlertCircle } from "lucide-react";
 import AppCard from "./AppCard";
 import ContextMenu from "./ContextMenu";
 
@@ -148,7 +148,8 @@ export default function MyAppsView({
 
         {searchQuery && (
           <span className="search-results-summary">
-            Found {filteredApps.length} match{filteredApps.length === 1 ? "" : "es"}
+            Found {filteredApps.length} match
+            {filteredApps.length === 1 ? "" : "es"}
           </span>
         )}
       </div>
@@ -175,7 +176,7 @@ export default function MyAppsView({
         {/* Render App Cards */}
         {filteredApps.map((app) => (
           <AppCard
-            key={app.id}
+            key={app.package || app.id || app.name}
             app={app}
             onLaunch={onLaunchApp}
             onUninstall={onUninstallApp}
@@ -195,11 +196,18 @@ export default function MyAppsView({
             {categoryFilter === "all"
               ? "All Apps"
               : categoryFilter === "user"
-              ? "User Apps"
-              : "System"}
+                ? "User Apps"
+                : "System"}
             ".
           </p>
-          <div style={{ display: "flex", gap: "10px", justifyContent: "center", marginTop: "14px" }}>
+          <div
+            style={{
+              display: "flex",
+              gap: "10px",
+              justifyContent: "center",
+              marginTop: "14px",
+            }}
+          >
             {searchQuery && (
               <button
                 className="btn btn-outline btn-sm"
@@ -226,8 +234,9 @@ export default function MyAppsView({
           <div className="empty-library-content">
             <h3>No Android Apps Installed Yet</h3>
             <p>
-              Get started by clicking <strong>"Install APK"</strong> to sideload an APK file,
-              or head over to <strong>"Install Tools"</strong> to set up Google Play Store.
+              Get started by clicking <strong>"Install APK"</strong> to sideload
+              an APK file, or head over to <strong>"Install Tools"</strong> to
+              set up Google Play Store.
             </p>
           </div>
         </div>
