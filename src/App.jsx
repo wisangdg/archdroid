@@ -518,7 +518,7 @@ export default function App() {
         try {
           await runStreamingTask("waydroid_wipe", {
             taskType: "wipe",
-            title: "Factory Reset in Progress...",
+            title: "Factory Reset (Wiping Waydroid Data)",
           });
         } catch (e) {
           console.error("Wipe data error:", e);

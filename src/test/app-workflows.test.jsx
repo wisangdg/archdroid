@@ -471,7 +471,9 @@ describe("App state & workflow integration", () => {
 
     await waitFor(() => {
       expect(wipeInvoked).toBe(true);
-      expect(screen.getByText("Factory Reset in Progress...")).toBeTruthy();
+      expect(
+        screen.getByText("Factory Reset (Wiping Waydroid Data)")
+      ).toBeTruthy();
     });
   });
 
