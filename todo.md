@@ -1046,8 +1046,10 @@ Rilis hanya boleh diberi label production-ready jika:
 - [ ] Tidak ada installer root yang memakai dependency unpinned.
 - [ ] Artefak yang dipublikasikan sudah diuji install/uninstall dan punya
   checksum/signature.
-- [ ] CI di remote hijau dan menjadi required check.
-- [ ] README, LICENSE, SECURITY, PRIVACY, CHANGELOG, dan third-party notices
+- [x] CI di remote hijau dan menjadi required check (`check` wajib di `main`
+  sejak 1 Nov; force-push dan hapus branch diblokir; admin masih boleh push
+  langsung).
+- [x] README, LICENSE, SECURITY, PRIVACY, CHANGELOG, dan third-party notices
   tersedia.
 - [ ] Known limitations dan residual risk didokumentasikan, bukan disembunyikan.
 - [ ] Tidak ada bug P0/P1 terbuka yang belum diterima secara eksplisit.

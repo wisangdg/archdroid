@@ -39,6 +39,9 @@ Rollback: pasang kembali paket versi sebelumnya yang sudah terverifikasi;
 - [ ] Publikasikan fingerprint di kanal kedua selain repo: deskripsi halaman
       GitHub Releases/profil pemilik, dan kunci di keyserver (`keys.openpgp.org`).
       Fingerprint yang hanya ada di repo tidak melindungi bila repo dibobol.
+      Sebagian: fingerprint sudah ada di release notes
+      [v0.1.1](https://github.com/wisangdg/archdroid/releases/tag/v0.1.1);
+      profil pemilik dan keyserver belum.
 
 ### Rotasi
 1. Buat kunci baru, tandatangani pengumuman rotasi dengan kunci lama.
