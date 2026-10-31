@@ -116,7 +116,11 @@ export function detectStepProgress(taskType, logs = []) {
 
       if (
         line.includes("Installing required dependencies") ||
+        line.includes("Installing required extraction tools") ||
         line.includes("pacman -S") ||
+        line.includes("apt-get install") ||
+        line.includes("dnf install") ||
+        line.includes("zypper") ||
         line.includes("Stopping Waydroid")
       ) {
         activeIndex = 1;

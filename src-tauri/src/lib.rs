@@ -15,6 +15,7 @@ mod capabilities;
 #[cfg(feature = "dev-commands")]
 mod device;
 mod error;
+mod platform;
 mod waydroid;
 
 use error::AppError;
@@ -866,13 +867,35 @@ fn check_host_diagnostics() -> DiagnosticsReport {
 
 #[tauri::command]
 async fn waydroid_init(app: AppHandle) -> CommandResult {
-    let script = r#"
-set -e
-if ! command -v waydroid > /dev/null; then
-    echo "==> Installing Waydroid from the system repositories..."
-    pacman -S --noconfirm waydroid
+    let waydroid_missing =
+        resolve_program("waydroid").is_none() && trusted_program("waydroid").is_none();
+    let pm = platform::PackageManager::detect();
+
+    // Fast-fail before root elevation if Waydroid is missing on an unsupported distribution
+    if waydroid_missing && pm.is_none() {
+        return AppError::not_found(
+            "waydroid",
+            "Waydroid is not installed, and no supported package manager (pacman, apt-get, dnf, zypper) was found on this Linux distribution. Please install 'waydroid' manually using your distribution's package manager before initializing.",
+        )
+        .into();
+    }
+
+    let install_snippet = match (waydroid_missing, pm) {
+        (true, Some(pm)) => format!(
+            r#"if ! command -v waydroid > /dev/null; then
+    echo "==> Installing Waydroid from system repositories via {}..."
+    {}
 fi
-echo "==> Initializing Waydroid (this will download ~1GB of data)..."
+"#,
+            pm.name(),
+            pm.install_command(&["waydroid"])
+        ),
+        _ => String::new(),
+    };
+
+    let script = format!(
+        r#"set -e
+{install_snippet}echo "==> Initializing Waydroid (this will download ~1GB of data)..."
 if waydroid init; then
     echo ""
     echo "[SUCCESS] Waydroid initialized successfully!"
@@ -881,7 +904,7 @@ else
     exit 1
 fi
 "#
-    .to_string();
+    );
     stream_privileged_script(
         app,
         script,
@@ -1514,18 +1537,32 @@ test "$(git -C {repo} rev-parse HEAD)" = {rev}
     )
 }
 
-fn gapps_install_script() -> String {
+fn gapps_install_script(pm: Option<platform::PackageManager>) -> String {
+    let dep_install = match pm {
+        Some(pm) => format!(
+            r#"if ! command -v unsquashfs > /dev/null || ! command -v lzip > /dev/null; then
+    echo "[SYSTEM] Installing required extraction tools via {}..."
+    {}
+fi
+"#,
+            pm.name(),
+            pm.install_command(&["squashfs", "lzip"])
+        ),
+        None => r#"if ! command -v unsquashfs > /dev/null || ! command -v lzip > /dev/null; then
+    echo "[ERROR] unsquashfs and lzip are required to extract GApps." >&2
+    exit 1
+fi
+"#
+        .to_string(),
+    };
+
     format!(
         r#"set -eu
 if ! command -v git > /dev/null; then
     echo "[ERROR] git is required to download the pinned GApps helper." >&2
     exit 1
 fi
-if ! command -v unsquashfs > /dev/null || ! command -v lzip > /dev/null; then
-    echo "[SYSTEM] Installing required dependencies (squashfs-tools, lzip)..."
-    pacman -S --noconfirm squashfs-tools lzip
-fi
-rm -rf /tmp/gapps /tmp/waydroid
+{dep_install}rm -rf /tmp/gapps /tmp/waydroid
 repo="$ARCHDROID_WORK/waydroid_script"
 {checkout}
 {setup}
@@ -1539,23 +1576,38 @@ fi
 rm -rf /tmp/gapps /tmp/waydroid
 echo "[SUCCESS] GApps installation complete! Please Start Waydroid."
 "#,
+        dep_install = dep_install,
         checkout = pinned_git_checkout("\"$repo\"", WAYDROID_SCRIPT_URL, WAYDROID_SCRIPT_REV),
         setup = waydroid_script_python_setup(),
     )
 }
 
-fn houdini_install_script() -> String {
+fn houdini_install_script(pm: Option<platform::PackageManager>) -> String {
+    let dep_install = match pm {
+        Some(pm) => format!(
+            r#"if ! command -v unsquashfs > /dev/null || ! command -v lzip > /dev/null; then
+    echo "[SYSTEM] Installing required extraction tools via {}..."
+    {}
+fi
+"#,
+            pm.name(),
+            pm.install_command(&["squashfs", "lzip"])
+        ),
+        None => r#"if ! command -v unsquashfs > /dev/null || ! command -v lzip > /dev/null; then
+    echo "[ERROR] unsquashfs and lzip are required to extract libhoudini." >&2
+    exit 1
+fi
+"#
+        .to_string(),
+    };
+
     format!(
         r#"set -eu
 if ! command -v git > /dev/null; then
     echo "[ERROR] git is required to download the pinned libhoudini helper." >&2
     exit 1
 fi
-if ! command -v unsquashfs > /dev/null || ! command -v lzip > /dev/null; then
-    echo "[SYSTEM] Installing required dependencies (squashfs-tools, lzip)..."
-    pacman -S --noconfirm squashfs-tools lzip
-fi
-rm -rf /tmp/houdiniunpack /tmp/waydroid
+{dep_install}rm -rf /tmp/houdiniunpack /tmp/waydroid
 repo="$ARCHDROID_WORK/waydroid_script"
 {checkout}
 {setup}
@@ -1569,6 +1621,7 @@ fi
 rm -rf /tmp/houdiniunpack /tmp/waydroid
 echo "[SUCCESS] ARM Translation installation complete!"
 "#,
+        dep_install = dep_install,
         checkout = pinned_git_checkout("\"$repo\"", WAYDROID_SCRIPT_URL, WAYDROID_SCRIPT_REV),
         setup = waydroid_script_python_setup(),
     )
@@ -1600,9 +1653,23 @@ echo "[SUCCESS] Phantom Keymapper installed successfully!"
 
 #[tauri::command]
 async fn install_gapps(app: AppHandle) -> CommandResult {
+    let missing_squash =
+        resolve_program("unsquashfs").is_none() && trusted_program("unsquashfs").is_none();
+    let missing_lzip =
+        resolve_program("lzip").is_none() && trusted_program("lzip").is_none();
+    let pm = platform::PackageManager::detect();
+
+    if (missing_squash || missing_lzip) && pm.is_none() {
+        return AppError::not_found(
+            "squashfs-tools/lzip",
+            "Required extraction tools ('squashfs-tools' / 'lzip') are missing, and no supported package manager (pacman, apt-get, dnf, zypper) was found on this Linux distribution. Please install them manually before running the GApps installer.",
+        )
+        .into();
+    }
+
     stream_privileged_script(
         app,
-        gapps_install_script(),
+        gapps_install_script(pm),
         Completion::WriteMarker("gapps_installed"),
         waydroid::TIMEOUT_LONG,
     )
@@ -1612,9 +1679,23 @@ async fn install_gapps(app: AppHandle) -> CommandResult {
 
 #[tauri::command]
 async fn install_houdini(app: AppHandle) -> CommandResult {
+    let missing_squash =
+        resolve_program("unsquashfs").is_none() && trusted_program("unsquashfs").is_none();
+    let missing_lzip =
+        resolve_program("lzip").is_none() && trusted_program("lzip").is_none();
+    let pm = platform::PackageManager::detect();
+
+    if (missing_squash || missing_lzip) && pm.is_none() {
+        return AppError::not_found(
+            "squashfs-tools/lzip",
+            "Required extraction tools ('squashfs-tools' / 'lzip') are missing, and no supported package manager (pacman, apt-get, dnf, zypper) was found on this Linux distribution. Please install them manually before running the ARM Translation installer.",
+        )
+        .into();
+    }
+
     stream_privileged_script(
         app,
-        houdini_install_script(),
+        houdini_install_script(pm),
         Completion::WriteMarker("houdini_installed"),
         waydroid::TIMEOUT_LONG,
     )
@@ -2590,8 +2671,8 @@ mod tests {
 
     #[test]
     fn third_party_installers_are_pinned_and_use_private_workdirs() {
-        let gapps = gapps_install_script();
-        let houdini = houdini_install_script();
+        let gapps = gapps_install_script(Some(platform::PackageManager::Pacman));
+        let houdini = houdini_install_script(Some(platform::PackageManager::Pacman));
         assert!(gapps.contains("rm -rf /tmp/gapps /tmp/waydroid"));
         assert!(houdini.contains("rm -rf /tmp/houdiniunpack /tmp/waydroid"));
         for script in [&gapps, &houdini] {
@@ -2739,21 +2820,60 @@ mod tests {
 
     #[test]
     fn third_party_installers_are_valid_bash() {
-        for (name, script) in [
-            ("gapps", gapps_install_script()),
-            ("houdini", houdini_install_script()),
-            ("phantom", phantom_install_script()),
-        ] {
-            let output = Command::new("bash")
-                .args(["-n", "-c", &script])
-                .output()
-                .expect("failed to run bash");
-            assert!(
-                output.status.success(),
-                "{name} installer is not valid bash: {}",
-                String::from_utf8_lossy(&output.stderr)
-            );
+        let pms = [
+            Some(platform::PackageManager::Pacman),
+            Some(platform::PackageManager::Apt),
+            Some(platform::PackageManager::Dnf),
+            Some(platform::PackageManager::Zypper),
+            None,
+        ];
+        for pm in pms {
+            for (name, script) in [
+                ("gapps", gapps_install_script(pm)),
+                ("houdini", houdini_install_script(pm)),
+            ] {
+                let output = Command::new("bash")
+                    .args(["-n", "-c", &script])
+                    .output()
+                    .expect("failed to run bash");
+                assert!(
+                    output.status.success(),
+                    "{name} installer ({pm:?}) is not valid bash: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            }
         }
+
+        let phantom = phantom_install_script();
+        let output = Command::new("bash")
+            .args(["-n", "-c", &phantom])
+            .output()
+            .expect("failed to run bash");
+        assert!(
+            output.status.success(),
+            "phantom installer is not valid bash: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    fn installers_adapt_to_detected_package_manager() {
+        let pacman_gapps = gapps_install_script(Some(platform::PackageManager::Pacman));
+        assert!(pacman_gapps.contains("pacman -S --needed --noconfirm squashfs-tools lzip"));
+
+        let apt_gapps = gapps_install_script(Some(platform::PackageManager::Apt));
+        assert!(apt_gapps.contains("apt-get install -y --no-install-recommends squashfs-tools lzip"));
+
+        let dnf_gapps = gapps_install_script(Some(platform::PackageManager::Dnf));
+        assert!(dnf_gapps.contains("dnf install -y squashfs-tools lzip"));
+
+        let zypper_gapps = gapps_install_script(Some(platform::PackageManager::Zypper));
+        assert!(zypper_gapps.contains("zypper --non-interactive install --no-recommends squashfs lzip"));
+
+        let unsupported_gapps = gapps_install_script(None);
+        assert!(!unsupported_gapps.contains("pacman"));
+        assert!(!unsupported_gapps.contains("apt-get"));
+        assert!(unsupported_gapps.contains("[ERROR] unsquashfs and lzip are required"));
     }
 
     #[test]

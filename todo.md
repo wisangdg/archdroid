@@ -448,19 +448,29 @@ isolasi UI, lalu validasi rilis.
 
 ### P0-7 — Kontrak platform dan preflight dependency
 
-- [ ] **P0-7.1 — Putuskan target distro secara eksplisit.**
+- [x] **P0-7.1 — Putuskan target distro secara eksplisit.**
   - **Bukti:** `waydroid_init`, GApps, dan Houdini memanggil `pacman`, tetapi
     artefak yang dibangun adalah `.deb`. Ini kontrak produk yang saling
     bertentangan.
   - **Pilihan:**
-    - **Arch-only:** dokumentasikan Arch Linux + Waydroid + Wayland sebagai
-      target resmi; sediakan paket Arch/AUR; jangan publikasikan `.deb` sebagai
-      didukung.
     - **Multi-distro:** tambahkan `apt-get`/`dnf`/`zypper`, pemetaan paket,
       dan matriks uji; jangan asumsikan nama paket sama.
   - **DoD:** README menyebut target yang didukung dan tidak didukung; installer
     gagal cepat dengan pesan jelas pada distro yang tidak didukung, sebelum
     meminta root.
+  - **Status:** selesai. Diputuskan kontrak **Multi-distro** dengan deteksi package
+    manager otomatis di modul `src-tauri/src/platform.rs`:
+    (1) Mendukung Arch Linux (`pacman`), Debian/Ubuntu (`apt-get`), Fedora (`dnf`),
+    dan openSUSE (`zypper`);
+    (2) Pemetaan paket disesuaikan (misal: `squashfs-tools` pada Arch/Debian/Fedora
+    vs `squashfs` pada openSUSE);
+    (3) Flag instalasi non-interaktif minimalis (`--needed`, `--no-install-recommends`);
+    (4) Jika dependensi (`waydroid`, `squashfs-tools`/`lzip`) hilang pada distro yang
+    tidak didukung (Alpine/NixOS/Guix), installer gagal cepat (`fast-fail`) dengan
+    pesan error terstruktur **sebelum meminta izin root**;
+    (5) Dokumen kontrak distro terperinci ditulis di `README.md`;
+    (6) Stepper visual terminal (`stepConfigs.js`) disinkronkan untuk mengenali output
+    `apt-get install`, `dnf install`, dan `zypper`. Dilindungi unit test Rust & Node.js.
 
 - [ ] **P0-7.2 — Preflight dependency sebelum aksi.**
   - **Kerjakan:** deteksi `waydroid`, `adb` (android-tools), Wayland, `/dev/kvm`,
@@ -764,7 +774,7 @@ Tidak menjadi blocker rilis; kerjakan setelah P0/P1 stabil.
 |---|---|---|
 | Waydroid hanya satu container | Diterima | Dokumentasikan; jangan janjikan multi-instance. |
 | `waydroid_script` berjalan sebagai root | Tertutup | P0-6.1 (dependency hash-pinned), P0-6.2 (audit path, isolasi XDG_CACHE, dan pembersihan /tmp), dan P0-6.3 (dialog konfirmasi eksplisit UI sebelum prompt polkit/sudo) selesai. |
-| Distro target belum jelas | Terbuka | P0-7: pilih Arch-only atau multi-distro secara eksplisit. |
+| Distro target belum jelas | Tertutup | P0-7.1: multi-distro didukung eksplisit (Arch/pacman, Debian-Ubuntu/apt-get, Fedora/dnf, openSUSE/zypper); README mendokumentasikan target; installer fail-fast sebelum root pada distro yang tidak didukung. |
 | Belum ada uji live Waydroid/polkit | Terbuka | P0-8: VM disposable + bukti uji. |
 | CSP `null` dan font remote | Tertutup | P0-5.1/P0-5.2: CSP produksi aktif, `@import` Google Fonts dihapus; verifikasi DevTools di P0-8. |
 | Permission webview terlalu luas | Tertutup | P0-5.3: `core:default` diganti event listen/unlisten + `dialog:allow-open`, tanpa plugin shell/FS. |
