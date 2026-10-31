@@ -1076,6 +1076,17 @@ body {
   display: flex;
   align-items: center;
   gap: 18px;
+  /* Let long log/bundle lines wrap instead of widening the card. */
+  min-width: 0;
+}
+
+.settings-card-text {
+  min-width: 0;
+}
+
+.app-log-view {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .settings-card-icon {
