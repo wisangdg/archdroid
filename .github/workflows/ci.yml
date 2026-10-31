@@ -49,6 +49,12 @@ jobs:
           cargo test
           cargo test --features dev-commands
 
+      - name: Rust dependency audit
+        working-directory: src-tauri
+        run: |
+          cargo install cargo-audit --locked --version 0.22.2
+          cargo audit
+
       - name: Bundle build check
         run: |
           npm run build:bundles -- --bundles deb
