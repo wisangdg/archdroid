@@ -76,8 +76,11 @@ pub fn available() -> bool {
 /// incompatible package, success).
 pub fn install_apk(path: &str, cancel: Option<&AtomicBool>) -> Result<String> {
     with_device(true, |adb, serial| {
+        let before = launcher_entries();
         let argv = adb_install_args(serial, path);
-        waydroid::run_program(adb, &argv, TIMEOUT_LONG, cancel)
+        let output = waydroid::run_program(adb, &argv, TIMEOUT_LONG, cancel)?;
+        wait_for_launcher_change(&before, cancel);
+        Ok(output)
     })
 }
 
@@ -91,9 +94,66 @@ pub fn uninstall_app(package: &str, cancel: Option<&AtomicBool>) -> Result<Strin
         )));
     }
     with_device(true, |adb, serial| {
+        let before = launcher_entries();
         let argv = adb_uninstall_args(serial, package);
-        waydroid::run_program(adb, &argv, TIMEOUT_LONG, cancel)
+        let output = waydroid::run_program(adb, &argv, TIMEOUT_LONG, cancel)?;
+        wait_for_launcher_change(&before, cancel);
+        Ok(output)
     })
+}
+
+/// How long a package change may take to show up as a Waydroid launcher entry.
+const LAUNCHER_SETTLE: Duration = Duration::from_secs(10);
+
+/// `waydroid.*.desktop` names and mtimes. The app list is built from these
+/// files, which the Waydroid session writes a few seconds after Android reports
+/// the package change.
+fn launcher_entries_in(dir: &Path) -> Vec<(std::ffi::OsString, Option<std::time::SystemTime>)> {
+    let mut entries: Vec<_> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|entry| {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            name.starts_with("waydroid.") && name.ends_with(".desktop")
+        })
+        .map(|entry| {
+            let mtime = entry.metadata().and_then(|m| m.modified()).ok();
+            (entry.file_name(), mtime)
+        })
+        .collect();
+    entries.sort();
+    entries
+}
+
+fn launcher_entries() -> Vec<(std::ffi::OsString, Option<std::time::SystemTime>)> {
+    dirs::data_local_dir()
+        .map(|dir| launcher_entries_in(&dir.join("applications")))
+        .unwrap_or_default()
+}
+
+/// Keep the container resumed until the launcher entry is written (or a short
+/// deadline passes). Re-freezing right after `adb install` stopped Waydroid
+/// from writing the `.desktop` file, so a successful install never showed up
+/// in the app list until something else resumed the container.
+fn wait_for_launcher_change(
+    before: &[(std::ffi::OsString, Option<std::time::SystemTime>)],
+    cancel: Option<&AtomicBool>,
+) {
+    let deadline = Instant::now() + LAUNCHER_SETTLE;
+    while Instant::now() < deadline {
+        if cancel.is_some_and(|c| c.load(std::sync::atomic::Ordering::SeqCst)) {
+            return;
+        }
+        if launcher_entries() != before {
+            return;
+        }
+        thread::sleep(Duration::from_millis(250));
+    }
+    log::warn!(
+        "no Waydroid launcher entry changed within {LAUNCHER_SETTLE:?} after the package change"
+    );
 }
 
 fn adb_install_args(serial: &str, path: &str) -> Vec<String> {
@@ -532,6 +592,24 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir.join("adb_keys")
+    }
+
+    #[test]
+    fn launcher_snapshot_changes_when_a_waydroid_entry_appears_or_goes() {
+        let dir = key_file("launcher").parent().unwrap().to_path_buf();
+        std::fs::write(dir.join("other.desktop"), "x").unwrap();
+        let empty = launcher_entries_in(&dir);
+        assert!(empty.is_empty(), "only waydroid.*.desktop entries count");
+
+        let entry = dir.join("waydroid.org.fdroid.fdroid.desktop");
+        std::fs::write(&entry, "Name=F-Droid\n").unwrap();
+        let added = launcher_entries_in(&dir);
+        assert_eq!(added.len(), 1);
+        assert_ne!(added, empty);
+
+        std::fs::remove_file(&entry).unwrap();
+        assert_eq!(launcher_entries_in(&dir), empty);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
