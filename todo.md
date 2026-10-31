@@ -2,7 +2,8 @@
 
 > **Status: P0 SELESAI (Production Readiness Gate Tercapai).**
 > Seluruh item P0 (P0-1 s.d. P0-11) telah selesai, diverifikasi dengan test suite
-> (31 frontend test, 116 Rust test, 0 clippy warning), di-commit bersih ke git,
+> (85 frontend test, 124 Rust test, 0 clippy warning; diukur ulang 1 Nov),
+> di-commit bersih ke git,
 > dan lolos CI di remote GitHub Actions (`main` dan `pull_request`).
 > Dokumen ini adalah **gate rilis**, bukan roadmap fitur. Fitur di
 > [`docs/BACKEND-TODO.md`](docs/BACKEND-TODO.md) adalah backlog P1/P2 non-blocker.
@@ -52,16 +53,17 @@
   hang/timeout, cancel, cleanup workdir, dan marker “installed” tidak pernah
   ditulis untuk hasil gagal.
 - [x] `cargo fmt --check` lulus.
-- [x] `cargo test` lulus (diukur ulang 31 Okt): **116 test** pada build default
-  dan **135 test** dengan
+- [x] `cargo test` lulus (diukur ulang 1 Nov): **124 test** pada build default
+  dan **144 test** dengan
   `--features dev-commands` (termasuk test failure path P0-4.3, approval paket
   P0-7.3, dan verifikasi APK/adb P0-8.2).
 - [x] `cargo clippy --all-targets -- -D warnings` lulus, baik default maupun
   `--features dev-commands`.
-- [x] `npm test` lulus (diukur ulang 31 Okt): **29 test** di Node test runner
+- [x] `npm test` lulus (diukur ulang 1 Nov): **41 test** di Node test runner
   (isolasi event task, CSP/font config, audit permukaan webview, cakupan IPC,
-  preflight UI, approval paket, metadata paket, dan verifikasi artefak).
-  Angka di bagian lain dokumen (15/24/26) adalah snapshot lama.
+  preflight UI, approval paket, metadata paket, dan verifikasi artefak) dan
+  **44 test** Vitest (komponen, alur kritis, aksesibilitas, dan hook).
+  Angka di bagian bukti item lain adalah snapshot saat item itu selesai.
 - [x] `npm run build` lulus.
 - [x] P0-8.1: VM uji Arch disposable (QEMU/KVM) dengan Waydroid belum init,
   polkit, tooling, data uji, dan snapshot baseline; lihat
@@ -103,20 +105,20 @@
   live-nya (polkit prompt, installer, init, wipe) belum diuji di mesin ini;
   verifikasinya masuk P0-8.
 - [x] Kontrak distro sudah multi-distro (P0-7.1), dan klaim dukungan diselaraskan dengan bukti uji (P0-9.4): Tier 1 adalah Arch Linux (teruji live di QEMU/KVM); Debian/Ubuntu/Fedora/openSUSE diklasifikasikan sebagai Tier 2 (best-effort); rilis resmi hanya mempublikasikan artefak teruji (PKGBUILD lokal dan AppImage).
-- [ ] CI belum pernah berjalan di remote/PR (repo belum punya remote).
-- [ ] Belum ada lint frontend, test komponen, dan E2E; test frontend yang ada
-  adalah test string/config (`node --test`), bukan perilaku komponen.
+- [x] CI berjalan di remote GitHub Actions untuk `main` dan `pull_request`
+  (P0-10).
+- [x] Lint frontend, test komponen Vitest, dan E2E WebDriver sudah ada dan
+  berjalan di CI (P1-2).
 - [ ] Semua artefak sudah dibangun (`.pkg.tar.zst`, `.deb`, `.rpm`,
   AppImage), tetapi hanya `.pkg.tar.zst` yang diuji install/launch/uninstall
   (VM Arch).
-- [ ] `README.md` dan `LICENSE` (MIT) sudah ada; `SECURITY.md`, `PRIVACY.md`,
-  dan `CHANGELOG.md` belum. README belum punya bagian first run, uninstall,
-  troubleshooting, dan known limitations (P0-11.1).
-- [ ] Perubahan P0-5 s.d. P0-9 (38 berkas) belum di-commit (P0-10.4).
-- [ ] `npm audit` penuh masih melaporkan **7 vulnerability dev-only**
-  (4 high), terutama dari rantai Vite 5.4.21.
-- [ ] `cargo audit`/`cargo deny` belum pernah dijalankan (tool belum terpasang
-  di mesin pengembangan maupun di CI).
+- [x] `README.md` (first run, troubleshooting, uninstall, known limitations),
+  `LICENSE`, `SECURITY.md`, `PRIVACY.md`, `CHANGELOG.md`, dan `NOTICES.md`
+  tersedia (P0-11).
+- [x] Perubahan P0-5 s.d. P0-9 sudah di-commit per item (P0-10.4).
+- [x] `npm audit` penuh tinggal **6 moderate dev-only** (`minimatch` via
+  eslint) yang diterima; `npm audit --omit=dev` = 0 (P1-5).
+- [x] `cargo audit` berjalan di CI (P1-5); `cargo deny` belum dipakai.
 
 **Kesimpulan:** build dan test backend sudah sehat, tetapi aplikasi belum layak
 disebut production-ready sampai seluruh **P0** di bawah selesai dan diverifikasi
@@ -1011,7 +1013,7 @@ Tidak menjadi blocker rilis; kerjakan setelah P0/P1 stabil.
 | Log dapat memuat argumen sensitif | Tertutup | P1-6: script tidak di-log, pesan diredaksi. |
 | Command IPC tanpa UI (shell Android arbitrer, tulis root) | Tertutup | P0-5.4: command tanpa UI di-gate di feature `dev-commands` dan tidak ada di build default. |
 | Operasi non-streaming bisa bentrok dengan wipe/init | Tertutup | P0-3.4: semua operasi state-changing memakai `TaskGuard` dan ditolak `busy`. |
-| Vite 5 dev dependency rentan | Terbuka | P1-5; tidak masuk runtime bundle, tetapi build tooling. |
+| Dev dependency rentan | Diterima | P1-5: upgrade ke Vite 8/Vitest 5; tersisa 6 moderate dev-only (`minimatch` via eslint), tidak masuk runtime bundle. Lihat `docs/DEPENDENCY-SECURITY.md`. |
 | Pekerjaan P0-5..P0-9 belum di-commit | Tertutup | P0-10.4: seluruh perubahan di-commit per item secara bersih. |
 | Metadata/judul memakai merek LDPlayer dan namespace GitHub yang belum dimiliki | Tertutup | P0-11.5: judul dan metadata dibersihkan, namespace dan repo diselaraskan ke `wisangdg/archdroid`, disclaimer merek dagang ditambahkan. |
 | Tanpa telemetry | Diterima | Support mengandalkan log yang diekspor pengguna. |
@@ -1020,18 +1022,16 @@ Tidak menjadi blocker rilis; kerjakan setelah P0/P1 stabil.
 
 ## 6. Urutan eksekusi yang disarankan
 
-1. **P0-10.4**: commit pekerjaan P0-3 s.d. P0-9 yang masih menggantung.
-2. **P0-9.4**: turunkan klaim dukungan distro ke yang teruji, atau siapkan VM
-   non-Arch dan uji `.deb`/`.rpm`/AppImage.
-3. **P0-11**: README lengkap, `SECURITY`/`PRIVACY`/`CHANGELOG`, link relatif
-   (P0-11.6), dan pembersihan merek/URL (P0-11.5). Buat remote GitHub yang
-   sebenarnya agar URL metadata valid.
-4. **P0-10**: CI di remote, pin action SHA, `cargo audit`/`cargo deny`, dan
-   bundle build.
-5. **Sisa P0-8**: verifikasi CSP di DevTools runtime dan item non-teruji di
+Selesai: P0-10.4 (commit), P0-9.4 (klaim distro), P0-11 (dokumen, merek,
+link relatif), P0-10 (CI remote, `cargo audit`, bundle build), dan P1
+(reliability, test/lint/E2E, a11y, logging, data lifecycle). Refactor
+`lib.rs`/`App.jsx` menjadi modul dan hook juga selesai (1 Nov).
+
+Sisa:
+
+1. **Sisa P0-8**: verifikasi CSP di DevTools runtime dan item non-teruji di
    `docs/P0-8.2-MATRIX-RESULTS.md`.
-6. **P1**: frontend reliability, test/lint/E2E, a11y, logging, data lifecycle.
-7. **P2**: fitur dan polish.
+2. **P2**: fitur dan polish.
 
 ---
 
