@@ -685,7 +685,7 @@ isolasi UI, lalu validasi rilis.
     dan workflow belum pernah hijau.
   - **DoD:** PR dan `main` menjalankan workflow yang required; hasilnya hijau.
 
-- [ ] **P0-10.2 — Tambahkan pemeriksaan backend/build yang hilang.**
+- [x] **P0-10.2 — Tambahkan pemeriksaan backend/build yang hilang.**
   - **Kerjakan:** frontend build (`npm ci` + `npm run build`), `cargo fmt
     --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`,
     `cargo clippy`/`cargo test` dengan `--features dev-commands` (kode yang
@@ -693,8 +693,9 @@ isolasi UI, lalu validasi rilis.
     `npm audit --omit=dev`, dan pengecekan lockfile. Pemeriksaan lint/test
     frontend ditambahkan bersama P1-2.
   - **DoD:** dependency rentan dan bundle yang gagal build memblokir PR rilis.
+  - **Bukti selesai:** ditambahkan di `.github/workflows/ci.yml`: `cargo clippy --all-targets --features dev-commands`, `cargo test --features dev-commands`, `npm audit --omit=dev`, bundle build check (`npm run build:bundles -- --bundles deb`).
 
-- [ ] **P0-10.3 — Pin GitHub Actions ke commit SHA.**
+- [x] **P0-10.3 — Pin GitHub Actions ke commit SHA.**
   - **Bukti:** `ci.yml` memakai tag bergerak (`actions/checkout@v4`,
     `actions/setup-node@v4`, `dtolnay/rust-toolchain@stable`) dan tidak
     mendeklarasikan blok `permissions:`.
@@ -702,8 +703,9 @@ isolasi UI, lalu validasi rilis.
     workflow.
   - **DoD:** action pihak ketiga tidak bisa berubah tanpa review; token CI
     hanya punya izin baca.
+  - **Bukti selesai:** di `.github/workflows/ci.yml`: ditambahkan `permissions: contents: read` di level workflow; action dipin ke commit SHA (`actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683`, `actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5a1`, `dtolnay/rust-toolchain@7b7640457d930a38d363e8c7f861602957381862`).
 
-- [ ] **P0-10.4 — Commit dan review perubahan yang masih menggantung.**
+- [x] **P0-10.4 — Commit dan review perubahan yang masih menggantung.**
   - **Bukti:** `git status` menunjukkan 26 berkas termodifikasi dan 12 path
     baru (`LICENSE`, `packaging/`, `scripts/`, `docs/P0-8.*`, `docs/P0-9.1-*`,
     `docs/VERIFY-RELEASE.md`, 5 test baru di `src/lib/`) yang belum
@@ -718,6 +720,13 @@ isolasi UI, lalu validasi rilis.
     `dist-release/` sudah di-ignore; periksa dengan `git status --ignored`).
   - **DoD:** `git status` bersih; setiap item P0 bercentang menunjuk commit;
     `cargo test`, `npm test`, dan `npm run build` hijau pada HEAD.
+  - **Bukti selesai:** seluruh perubahan dipecah menjadi commit bersih:
+    - `0610463`: `feat(security): enforce production CSP, offline fonts, and IPC command gating (P0-5.1..P0-5.4)`
+    - `fb7363e`: `feat(security): preview and approve distro packages before root elevation (P0-7.3)`
+    - `25cceb7`: `test(validation): add QEMU test VM, live matrix validation, and cancellation UI fix (P0-8.1..P0-8.3)`
+    - `5f2931d`: `feat(packaging): multi-target packaging, bundle metadata, release signing, and honest support contract (P0-9.1..P0-9.4)`
+    - `bbc0f13`: `ci: configure remote CI with pinned action SHAs, full test matrix, and permissions (P0-10.2, P0-10.3)`
+    `git status` bersih; `cargo test`, `npm test`, dan `npm run build` 100% hijau pada HEAD.
 
 ### P0-11 — Dokumentasi rilis, lisensi, dan privasi
 
