@@ -73,7 +73,7 @@ Sumber fitur: hasil RE LDPlayer 9 (`~/Downloads/ldplayer-re/ANALYSIS-LDPlayer-CL
   *DoD:* `cargo test` naik dari 7 → ≥15 test, tanpa butuh root. → **selesai**: **27** test, semuanya tanpa root (`/bin/echo`, `/bin/sh`, `/bin/sleep` dipakai sebagai stub).
 
 - [x] **P2 S — Package manager multi-distro**
-  Tiga script installer sebelumnya hardcode `pacman` (`waydroid_init`, `install_gapps`, `install_houdini`). Modul `platform::PackageManager` kini mendeteksi `pacman|apt-get|dnf|zypper`, memetakan paket per distro (mis. `squashfs-tools` vs `squashfs`), menggunakan flag non-interaktif minimalis (`--needed`, `--no-install-recommends`), dan melakukan fast-fail sebelum prompt root jika dependensi kurang pada distro yang tidak didukung.
+  Tiga script installer sebelumnya hardcode `pacman` (`waydroid_init`, `install_gapps`, `install_houdini`). Modul `platform::PackageManager` kini mendeteksi `pacman|apt-get|dnf|zypper`, memetakan paket per distro (mis. `squashfs-tools` vs `squashfs`), menggunakan flag non-interaktif minimalis (`--needed`, `--no-install-recommends`), dan melakukan fast-fail sebelum prompt root jika dependensi kurang pada distro yang tidak didukung. Sejak P0-7.3 paket tidak pernah dipasang diam-diam: `preview_package_install` menampilkan daftar paket dan command persis di dialog konfirmasi, UI mengirim daftar yang disetujui, dan backend menolaknya bila tidak lengkap atau berisi paket di luar rencana.
   *DoD:* modul `platform.rs`; test pemilihan dan pemetaan paket per distro; README mendokumentasikan target yang didukung dan tidak didukung. → **selesai** (P0-7.1 / P2).
 
 ### Temuan baru saat mengerjakan §1 (diverifikasi dari sumber waydroid 1.6.3)

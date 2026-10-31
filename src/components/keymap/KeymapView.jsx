@@ -22,7 +22,7 @@ export default function KeymapView({ onRunPhantom, onInstallPhantom, installing 
             <button
               className="btn btn-primary btn-glow"
               onClick={onRunPhantom}
-              title="Launch Phantom in terminal"
+              title="Launch Phantom Keymapper"
             >
               <Play size={18} fill="currentColor" />
               <span>Launch Keymapper</span>

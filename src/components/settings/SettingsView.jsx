@@ -25,6 +25,7 @@ export default function SettingsView({
   onApplyResolution,
   engineRunning = false,
   onRestartEngine,
+  busy = false,
 }) {
   return (
     <div className="settings-view-container">
@@ -36,6 +37,7 @@ export default function SettingsView({
         onApplyResolution={onApplyResolution}
         engineRunning={engineRunning}
         onRestartEngine={onRestartEngine}
+        disabled={busy}
       />
 
       {/* Shared Folder */}
@@ -84,6 +86,7 @@ export default function SettingsView({
               type="button"
               className={`toggle-switch ${multiWindow ? "active" : ""}`}
               onClick={onToggleMultiWindow}
+              disabled={busy}
               aria-label="Toggle Multi-Window Mode"
             >
               <div className="toggle-switch-handle">
@@ -104,6 +107,7 @@ export default function SettingsView({
               type="button"
               className={`toggle-switch ${invertColors ? "active" : ""}`}
               onClick={onToggleInvertColors}
+              disabled={busy}
               aria-label="Toggle Invert Colors"
             >
               <div className="toggle-switch-handle">
@@ -137,7 +141,7 @@ export default function SettingsView({
               placeholder="Value (e.g. 1920)"
               required
             />
-            <button type="submit" className="btn btn-primary btn-apply">
+            <button type="submit" className="btn btn-primary btn-apply" disabled={busy}>
               Apply Property
             </button>
           </div>

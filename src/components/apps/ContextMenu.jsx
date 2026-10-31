@@ -8,6 +8,7 @@ export default function ContextMenu({
   onLaunch,
   onCopyPackage,
   onUninstall,
+  disabled = false,
 }) {
   const menuRef = useRef(null);
 
@@ -63,6 +64,7 @@ export default function ContextMenu({
           onLaunch(app.package);
           onClose();
         }}
+        disabled={disabled}
       >
         <Play size={15} fill="currentColor" />
         <span>Launch App</span>
@@ -89,6 +91,7 @@ export default function ContextMenu({
           onUninstall(app.package, app.name);
           onClose();
         }}
+        disabled={disabled}
       >
         <Trash2 size={15} />
         <span>Uninstall App</span>

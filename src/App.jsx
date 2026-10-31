@@ -39,6 +39,10 @@ export default function App() {
   // ID of the streaming task currently shown in the terminal. Events from any
   // other task (a late finish, or a non-modal background write) are ignored.
   const activeTaskId = useRef(null);
+  // Whether the backend actually emitted `cmd-started` for the current request.
+  // A preflight error returns before any event, so the terminal must be closed
+  // and the error shown instead of leaving it stuck on "Awaiting...".
+  const taskStartedRef = useRef(false);
 
   // In-App Toast State
   const [toasts, setToasts] = useState([]);
@@ -81,7 +85,23 @@ export default function App() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
-  const runStreamingTask = async (command, { taskType, title }) => {
+  // Ask the backend which distro packages the action would install. The modal
+  // shows this list and the exact command; the same list is sent back as the
+  // approval token, and the backend re-validates it before requesting root.
+  const previewPackageInstall = async (action) => {
+    try {
+      return await invoke("preview_package_install", { action });
+    } catch (err) {
+      addToast({
+        type: "error",
+        title: "Package Preview Failed",
+        message: err?.message || String(err),
+      });
+      return null;
+    }
+  };
+
+  const runStreamingTask = async (command, { taskType, title, args } = {}) => {
     if (operationInFlight.current) {
       addToast({
         type: "warning",
@@ -93,6 +113,7 @@ export default function App() {
 
     operationInFlight.current = true;
     activeTaskId.current = null;
+    taskStartedRef.current = false;
     setInstalling(true);
     setTerminalTaskType(taskType);
     setTerminalTitle(title);
@@ -100,7 +121,7 @@ export default function App() {
     setTerminalOpen(true);
 
     try {
-      const result = await invoke(command);
+      const result = await invoke(command, args);
       if (result?.status === "error" && result.code === "busy") {
         operationInFlight.current = false;
         activeTaskId.current = null;
@@ -109,6 +130,16 @@ export default function App() {
           type: "warning",
           title: "Operation In Progress",
           message: result.message || "Another operation is already running.",
+        });
+      } else if (result?.status === "error" && !taskStartedRef.current) {
+        operationInFlight.current = false;
+        activeTaskId.current = null;
+        setInstalling(false);
+        setTerminalOpen(false);
+        addToast({
+          type: "error",
+          title: "Operation Failed",
+          message: result.message || `${title} could not start.`,
         });
       }
       return result;
@@ -135,6 +166,7 @@ export default function App() {
 
     const unlistenStarted = listen("cmd-started", (event) => {
       if (operationInFlight.current) {
+        taskStartedRef.current = true;
         activeTaskId.current = event.payload.task_id;
       }
     });
@@ -366,6 +398,9 @@ export default function App() {
             message: `${fileName} installed successfully!`,
           });
           loadApps();
+          // Waydroid writes the new desktop entry asynchronously; reload once
+          // more so the card appears without restarting the app.
+          setTimeout(loadApps, 1000);
         } else {
           addToast({
             type: "error",
@@ -532,6 +567,9 @@ export default function App() {
               message: `${name} was uninstalled successfully.`,
             });
             await loadApps();
+            // Waydroid removes the desktop entry asynchronously after the
+            // package manager finishes, so refresh once more after a short delay.
+            setTimeout(loadApps, 1000);
           } else {
             addToast({
               type: "error",
@@ -551,11 +589,12 @@ export default function App() {
     });
   };
 
-  const executeInstallGApps = async () => {
+  const executeInstallGApps = async (approvedPackages = []) => {
     try {
       await runStreamingTask("install_gapps", {
         taskType: "gapps",
         title: "Installing Google Play Services (GApps)",
+        args: { approvedPackages },
       });
     } catch (e) {
       console.error("GApps install error:", e);
@@ -567,7 +606,10 @@ export default function App() {
     }
   };
 
-  const handleInstallGApps = () => {
+  const handleInstallGApps = async () => {
+    const preview = await previewPackageInstall("gapps");
+    if (!preview) return;
+
     setConfirmModal({
       isOpen: true,
       title: "Install Google Play Services (Root Required)",
@@ -580,18 +622,20 @@ export default function App() {
       confirmText: "Proceed & Authorize Root",
       confirmVariant: "primary",
       iconType: "shield",
+      packagePreview: preview,
       onConfirm: async () => {
         setConfirmModal((prev) => ({ ...prev, isOpen: false }));
-        await executeInstallGApps();
+        await executeInstallGApps(preview.packages);
       },
     });
   };
 
-  const executeInstallHoudini = async () => {
+  const executeInstallHoudini = async (approvedPackages = []) => {
     try {
       await runStreamingTask("install_houdini", {
         taskType: "houdini",
         title: "Installing ARM Translation (libhoudini)",
+        args: { approvedPackages },
       });
     } catch (e) {
       console.error("Houdini install error:", e);
@@ -603,7 +647,10 @@ export default function App() {
     }
   };
 
-  const handleInstallHoudini = () => {
+  const handleInstallHoudini = async () => {
+    const preview = await previewPackageInstall("houdini");
+    if (!preview) return;
+
     setConfirmModal({
       isOpen: true,
       title: "Install ARM Translation Layer (Root Required)",
@@ -616,9 +663,10 @@ export default function App() {
       confirmText: "Proceed & Authorize Root",
       confirmVariant: "primary",
       iconType: "shield",
+      packagePreview: preview,
       onConfirm: async () => {
         setConfirmModal((prev) => ({ ...prev, isOpen: false }));
-        await executeInstallHoudini();
+        await executeInstallHoudini(preview.packages);
       },
     });
   };
@@ -862,12 +910,20 @@ export default function App() {
 
   const handleRunPhantom = async () => {
     try {
-      await invoke("run_phantom");
-      addToast({
-        type: "info",
-        title: "Keymapper Launched",
-        message: "Phantom keymapper started in terminal window.",
-      });
+      const res = await invoke("run_phantom");
+      if (res.status === "success") {
+        addToast({
+          type: "info",
+          title: "Keymapper Launched",
+          message: res.message || "Phantom Keymapper started.",
+        });
+      } else {
+        addToast({
+          type: "error",
+          title: "Keymapper Error",
+          message: res.message || "Could not launch the Phantom keymapper.",
+        });
+      }
     } catch (e) {
       console.error("Run Phantom error:", e);
       addToast({
@@ -878,11 +934,12 @@ export default function App() {
     }
   };
 
-  const executeInitWaydroid = async () => {
+  const executeInitWaydroid = async (approvedPackages = []) => {
     try {
       await runStreamingTask("waydroid_init", {
         taskType: "init",
         title: "Initializing Waydroid System Image",
+        args: { approvedPackages },
       });
     } catch (e) {
       console.error("Init Waydroid error:", e);
@@ -894,7 +951,10 @@ export default function App() {
     }
   };
 
-  const handleInitWaydroid = () => {
+  const handleInitWaydroid = async () => {
+    const preview = await previewPackageInstall("init");
+    if (!preview) return;
+
     setConfirmModal({
       isOpen: true,
       title: "Initialize Waydroid Container (Root Required)",
@@ -907,9 +967,10 @@ export default function App() {
       confirmText: "Initialize & Authorize Root",
       confirmVariant: "primary",
       iconType: "shield",
+      packagePreview: preview,
       onConfirm: async () => {
         setConfirmModal((prev) => ({ ...prev, isOpen: false }));
-        await executeInitWaydroid();
+        await executeInitWaydroid(preview.packages);
       },
     });
   };
@@ -943,18 +1004,25 @@ export default function App() {
   };
 
   const handleRetryTask = () => {
+    // Retrying must go back through the confirmation flow. The package plan or
+    // the root scope may have changed since the first attempt, so a retry must
+    // never call an installer command directly.
+    if (["gapps", "houdini", "multitouch", "init", "wipe"].includes(terminalTaskType)) {
+      setTerminalOpen(false);
+    }
+
     switch (terminalTaskType) {
       case "gapps":
-        executeInstallGApps();
+        handleInstallGApps();
         break;
       case "houdini":
-        executeInstallHoudini();
+        handleInstallHoudini();
         break;
       case "multitouch":
-        executeInstallMultitouch();
+        handleInstallMultitouch();
         break;
       case "init":
-        executeInitWaydroid();
+        handleInitWaydroid();
         break;
       case "phantom":
         handleInstallPhantom();
@@ -1117,6 +1185,7 @@ export default function App() {
         confirmText={confirmModal.confirmText}
         confirmVariant={confirmModal.confirmVariant}
         iconType={confirmModal.iconType}
+        packagePreview={confirmModal.packagePreview}
         onConfirm={confirmModal.onConfirm}
         onCancel={() => setConfirmModal((prev) => ({ ...prev, isOpen: false }))}
       />

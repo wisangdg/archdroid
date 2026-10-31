@@ -80,6 +80,7 @@ export default function ResolutionPresets({
   onApplyResolution,
   engineRunning = false,
   onRestartEngine,
+  disabled = false,
 }) {
   const [selectedPresetId, setSelectedPresetId] = useState("tablet_1080p");
   const [customWidth, setCustomWidth] = useState(currentWidth || "1920");
@@ -326,6 +327,7 @@ export default function ResolutionPresets({
               type="button"
               className="btn btn-outline btn-sm"
               onClick={onRestartEngine}
+              disabled={disabled}
               title="Restart session immediately"
             >
               <RotateCw size={14} />
@@ -337,7 +339,7 @@ export default function ResolutionPresets({
             type="button"
             className="btn btn-primary btn-apply-res"
             onClick={handleApply}
-            disabled={isApplying || isUnchanged || !customWidth || !customHeight}
+            disabled={disabled || isApplying || isUnchanged || !customWidth || !customHeight}
           >
             <Check size={16} />
             <span>

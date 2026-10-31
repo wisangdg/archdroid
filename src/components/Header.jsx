@@ -10,6 +10,7 @@ export default function Header({
   onStop,
   onRestart,
   isOperating,
+  busy = false,
 }) {
   const getHeaderInfo = () => {
     switch (activeTab) {
@@ -61,7 +62,7 @@ export default function Header({
               <button
                 className="btn btn-primary btn-glow"
                 onClick={onStart}
-                disabled={isOperating}
+                disabled={isOperating || busy}
                 title="Start Waydroid Session"
               >
                 <Play size={17} fill="currentColor" />
@@ -72,7 +73,7 @@ export default function Header({
                 <button
                   className="btn btn-outline"
                   onClick={onRestart}
-                  disabled={isOperating}
+                  disabled={isOperating || busy}
                   title="Restart Waydroid Session"
                 >
                   <RotateCw size={16} />
@@ -81,7 +82,7 @@ export default function Header({
                 <button
                   className="btn btn-danger"
                   onClick={onStop}
-                  disabled={isOperating}
+                  disabled={isOperating || busy}
                   title="Stop Waydroid Session"
                 >
                   <Square size={16} fill="currentColor" />

@@ -20,6 +20,7 @@ export default function MyAppsView({
   onInstallApk,
   onUninstallApp,
   onCopyPackage,
+  busy = false,
 }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all"); // 'all' | 'user' | 'system'
@@ -108,6 +109,7 @@ export default function MyAppsView({
         <button
           className="btn btn-primary btn-install-top"
           onClick={onInstallApk}
+          disabled={busy}
           title="Install an APK from your computer"
         >
           <PackagePlus size={18} />
@@ -156,9 +158,10 @@ export default function MyAppsView({
         {/* Dashed Quick Install Card */}
         <div
           className="app-card dashed"
-          onClick={onInstallApk}
+          onClick={busy ? undefined : onInstallApk}
           role="button"
-          tabIndex={0}
+          tabIndex={busy ? -1 : 0}
+          aria-disabled={busy}
         >
           <div className="dashed-icon-circle">
             <Plus size={32} />
@@ -177,6 +180,7 @@ export default function MyAppsView({
             onLaunch={onLaunchApp}
             onUninstall={onUninstallApp}
             onContextMenu={handleOpenContextMenu}
+            disabled={busy}
           />
         ))}
       </div>
@@ -238,6 +242,7 @@ export default function MyAppsView({
           onLaunch={onLaunchApp}
           onCopyPackage={onCopyPackage}
           onUninstall={onUninstallApp}
+          disabled={busy}
         />
       )}
     </div>

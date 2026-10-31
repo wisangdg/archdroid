@@ -1,13 +1,13 @@
 import React, { useState } from "react";
 import { Trash2, Play } from "lucide-react";
 
-export default function AppCard({ app, onLaunch, onUninstall, onContextMenu }) {
+export default function AppCard({ app, onLaunch, onUninstall, onContextMenu, disabled = false }) {
   const [imgError, setImgError] = useState(false);
 
   return (
     <div
       className="app-card"
-      onClick={() => onLaunch(app.package)}
+      onClick={disabled ? undefined : () => onLaunch(app.package)}
       onContextMenu={(e) => {
         if (onContextMenu) {
           e.preventDefault();
@@ -47,6 +47,7 @@ export default function AppCard({ app, onLaunch, onUninstall, onContextMenu }) {
         type="button"
         className="btn-uninstall-overlay"
         onClick={(e) => onUninstall(e, app.package, app.name)}
+        disabled={disabled}
         title={`Uninstall ${app.name}`}
       >
         <Trash2 size={15} />
