@@ -1,4 +1,5 @@
 import React from "react";
+import pkg from "../../package.json";
 import {
   MonitorPlay,
   Gamepad2,
@@ -75,7 +76,7 @@ export default function Sidebar({ activeTab, setActiveTab, appCount, status, onO
 
         <div className="sidebar-version-tag">
           <Cpu size={13} />
-          <span>ArchDroid v0.1.0 • Linux</span>
+          <span>{`ArchDroid v${pkg.version} • Linux`}</span>
         </div>
       </div>
     </aside>

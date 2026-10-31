@@ -21,6 +21,7 @@ export default function TerminalModal({
   title,
   taskType = "logs", // 'gapps' | 'houdini' | 'init' | 'phantom' | 'wipe' | 'logs'
   logs = [],
+  taskResult = null,
   installing,
   terminalRef,
   onClose,
@@ -45,10 +46,10 @@ export default function TerminalModal({
   };
   const [showConsole, setShowConsole] = useState(false);
 
-  // Compute step progress from logs
+  // Compute step progress from logs and structured taskResult
   const progress = useMemo(() => {
-    return detectStepProgress(taskType, logs);
-  }, [taskType, logs]);
+    return detectStepProgress(taskType, logs, taskResult);
+  }, [taskType, logs, taskResult]);
 
   // If viewing logs or if process failed/cancelled, ensure console is visible
   useEffect(() => {
@@ -96,7 +97,9 @@ export default function TerminalModal({
           <div className="terminal-title-wrap">
             <div
               className={`terminal-icon-badge ${
-                progress.isFailed
+                progress.isCancelled
+                  ? "badge-cancelled"
+                  : progress.isFailed
                   ? "badge-failed"
                   : progress.isCompleted
                   ? "badge-done"
@@ -105,6 +108,8 @@ export default function TerminalModal({
             >
               {installing ? (
                 <Loader2 size={18} className="spinner" />
+              ) : progress.isCancelled ? (
+                <Ban size={18} />
               ) : progress.isFailed ? (
                 <AlertTriangle size={18} />
               ) : progress.isCompleted ? (
@@ -119,6 +124,8 @@ export default function TerminalModal({
               <span className="terminal-status-text">
                 {installing
                   ? "Task running in background..."
+                  : progress.isCancelled
+                  ? "Operation cancelled"
                   : progress.isFailed
                   ? "Process encountered errors"
                   : progress.isCompleted

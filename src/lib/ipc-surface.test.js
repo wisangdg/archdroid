@@ -19,7 +19,6 @@ const DEV_COMMANDS = [
   "waydroid_getprop_all",
   "waydroid_adb_cmd",
   "waydroid_version",
-  "waydroid_cancel",
 ];
 
 function frontendFiles() {

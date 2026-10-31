@@ -491,17 +491,13 @@ async fn off_main_thread(work: impl FnOnce() -> CommandResult + Send + 'static) 
 /// installer is rejected with `busy` instead of corrupting the image.
 async fn run_exclusive<F>(label: &'static str, work: F) -> CommandResult
 where
-    F: FnOnce() -> CommandResult + Send + 'static,
+    F: FnOnce(&TaskGuard) -> CommandResult + Send + 'static,
 {
     let task = match TaskGuard::start(label) {
         Ok(task) => task,
         Err(error) => return error.into(),
     };
-    off_main_thread(move || {
-        let _task = task;
-        work()
-    })
-    .await
+    off_main_thread(move || work(&task)).await
 }
 
 #[tauri::command]
@@ -561,7 +557,7 @@ fn live_shell(args: &[&str]) -> Option<String> {
 #[tauri::command]
 async fn waydroid_start() -> CommandResult {
     // Start the Waydroid session; an optional scheduler hint (e.g. ananicy-cpp) can be added later
-    run_exclusive("session start", || {
+    run_exclusive("session start", |_| {
         match waydroid::Waydroid::detect()
             .and_then(|waydroid| waydroid.session_start(waydroid::SESSION_START_GRACE_SECS))
         {
@@ -576,23 +572,13 @@ async fn waydroid_start() -> CommandResult {
 async fn waydroid_stop() -> CommandResult {
     // A failed exit is a failure again: this used to report success for any
     // spawn, so a refused stop looked like a stopped session.
-    run_exclusive("session stop", || {
+    run_exclusive("session stop", |_| {
         match waydroid::Waydroid::detect().and_then(|waydroid| waydroid.session_stop()) {
             Ok(_) => CommandResult::success(),
             Err(error) => error.into(),
         }
     })
     .await
-}
-
-/// Best effort kill of a cancellable long operation (`app install|remove`).
-/// Succeeds even when there was nothing running, so a Cancel button can stay
-/// simple.
-#[cfg(feature = "dev-commands")]
-#[tauri::command]
-fn waydroid_cancel() -> CommandResult {
-    waydroid::request_cancel();
-    CommandResult::success()
 }
 
 /// Stop the streaming task that owns `task_id`.
@@ -609,7 +595,13 @@ fn cancel_task(task_id: String) -> CommandResult {
 }
 
 #[tauri::command]
-fn get_waydroid_apps() -> Vec<AppInfo> {
+async fn get_waydroid_apps() -> Vec<AppInfo> {
+    tauri::async_runtime::spawn_blocking(collect_waydroid_apps_sync)
+        .await
+        .unwrap_or_default()
+}
+
+fn collect_waydroid_apps_sync() -> Vec<AppInfo> {
     let mut apps = Vec::new();
     if let Some(mut path) = dirs::data_local_dir() {
         path.push("applications");
@@ -700,29 +692,34 @@ fn apk_looks_installable(path: &str) -> error::Result<()> {
 /// Android package manager and `adb uninstall` reports the real result. Without
 /// adb, `waydroid app install/remove` is used, and the obvious non-APK case is
 /// rejected before the CLI can report a false success.
-fn install_apk_blocking(path: String) -> error::Result<()> {
+fn install_apk_blocking(path: String, cancel: Option<&AtomicBool>) -> error::Result<()> {
     apk_looks_installable(&path)?;
     if adb::available() {
-        adb::install_apk(&path)?;
+        adb::install_apk(&path, cancel)?;
     } else {
-        waydroid::Waydroid::detect()?.app_install(&path)?;
+        waydroid::Waydroid::detect()?.app_install(&path, cancel)?;
     }
     Ok(())
 }
 
-fn uninstall_app_blocking(package: String) -> error::Result<()> {
+fn uninstall_app_blocking(package: String, cancel: Option<&AtomicBool>) -> error::Result<()> {
     let waydroid = waydroid::Waydroid::detect()?;
     if adb::available() {
-        adb::uninstall_app(&package)?;
+        adb::uninstall_app(&package, cancel)?;
         return Ok(());
     }
 
     // Waydroid 1.6.3 `app remove` can exit 0 while the platform service logs
     // "Failed with code: -3" and leaves the package installed. The list is the
     // only proof, so never report success without it.
-    waydroid.app_remove(&package)?;
+    waydroid.app_remove(&package, cancel)?;
     let mut last_error = None;
     for _ in 0..5 {
+        if cancel.is_some_and(|c| c.load(Ordering::SeqCst)) {
+            return Err(AppError::CancelRequested {
+                program: "waydroid".to_string(),
+            });
+        }
         match waydroid.app_list() {
             Ok(list) => {
                 if !waydroid::package_names(&list).contains(&package) {
@@ -746,18 +743,32 @@ fn uninstall_app_blocking(package: String) -> error::Result<()> {
 }
 
 #[tauri::command]
-async fn waydroid_install_apk(path: String) -> CommandResult {
-    run_exclusive("APK install", move || match install_apk_blocking(path) {
-        Ok(()) => CommandResult::success(),
-        Err(error) => error.into(),
+async fn waydroid_install_apk(app: AppHandle, path: String) -> CommandResult {
+    let task = match TaskGuard::start("APK install") {
+        Ok(task) => task,
+        Err(error) => return error.into(),
+    };
+    emit_started(&app, task.id());
+    off_main_thread(move || {
+        let cancel = task.cancel_flag();
+        match install_apk_blocking(path, Some(&cancel)) {
+            Ok(()) => CommandResult::success(),
+            Err(error) => error.into(),
+        }
     })
     .await
 }
 
 #[tauri::command]
-async fn waydroid_uninstall_app(package: String) -> CommandResult {
-    run_exclusive("app uninstall", move || {
-        match uninstall_app_blocking(package) {
+async fn waydroid_uninstall_app(app: AppHandle, package: String) -> CommandResult {
+    let task = match TaskGuard::start("app uninstall") {
+        Ok(task) => task,
+        Err(error) => return error.into(),
+    };
+    emit_started(&app, task.id());
+    off_main_thread(move || {
+        let cancel = task.cancel_flag();
+        match uninstall_app_blocking(package, Some(&cancel)) {
             Ok(()) => CommandResult::success(),
             Err(error) => error.into(),
         }
@@ -767,7 +778,7 @@ async fn waydroid_uninstall_app(package: String) -> CommandResult {
 
 #[tauri::command]
 async fn waydroid_launch_app(package: String) -> CommandResult {
-    run_exclusive("app launch", move || {
+    run_exclusive("app launch", move |_| {
         match waydroid::Waydroid::detect().and_then(|waydroid| waydroid.app_launch(&package)) {
             Ok(_) => CommandResult::success(),
             Err(error) => error.into(),
@@ -780,7 +791,7 @@ async fn waydroid_launch_app(package: String) -> CommandResult {
 async fn waydroid_prop_set(key: String, value: String) -> CommandResult {
     run_exclusive(
         "property update",
-        move || match waydroid::Waydroid::detect()
+        move |_| match waydroid::Waydroid::detect()
             .and_then(|waydroid| waydroid.prop_set(&key, &value))
         {
             Ok(_) => CommandResult::success(),
@@ -1322,7 +1333,11 @@ fn phantom_disk_preflight() -> Result<(), AppError> {
 }
 
 #[tauri::command]
-fn open_shared_folder() -> CommandResult {
+async fn open_shared_folder() -> CommandResult {
+    off_main_thread(open_shared_folder_sync).await
+}
+
+fn open_shared_folder_sync() -> CommandResult {
     let mut path = match dirs::data_local_dir() {
         Some(dir) => dir,
         None => {
@@ -1484,14 +1499,20 @@ fn collect_diagnostics() -> DiagnosticsReport {
     }
 
     // 5. Waydroid Container Service
-    let output = Command::new("systemctl")
-        .arg("is-active")
-        .arg("waydroid-container")
-        .output();
-
-    let service_active = output
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim() == "active")
-        .unwrap_or(false);
+    let service_active = if let Some(systemctl) =
+        resolve_program("systemctl").or_else(|| trusted_program("systemctl"))
+    {
+        waydroid::run_program(
+            &systemctl,
+            &["is-active".to_string(), "waydroid-container".to_string()],
+            3,
+            None,
+        )
+        .map(|stdout| stdout.trim() == "active")
+        .unwrap_or(false)
+    } else {
+        false
+    };
 
     if service_active {
         items.push(DiagnosticItem {
@@ -2314,6 +2335,7 @@ async fn profile_apply(app: AppHandle, profile: device::DeviceProfile) -> Comman
             Ok(task) => task,
             Err(error) => return error.into(),
         };
+        emit_started(&app, task.id());
         if let Err(error) = device::save_to(&device::config_path(), &profile) {
             return AppError::Io(error).into();
         }
@@ -2787,7 +2809,11 @@ async fn install_phantom(app: AppHandle) -> CommandResult {
 }
 
 #[tauri::command]
-fn run_phantom() -> CommandResult {
+async fn run_phantom() -> CommandResult {
+    off_main_thread(run_phantom_sync).await
+}
+
+fn run_phantom_sync() -> CommandResult {
     // 1. Prefer phantom-gui directly without a terminal wrapper
     let gui_bin = resolve_program("phantom-gui")
         .or_else(|| trusted_program("phantom-gui"))
@@ -3706,8 +3732,6 @@ pub fn run() {
             waydroid_launch_app,
             waydroid_prop_set,
             waydroid_prop_get,
-            #[cfg(feature = "dev-commands")]
-            waydroid_cancel,
             cancel_task,
             waydroid_log,
             open_shared_folder,
@@ -4371,7 +4395,7 @@ mod tests {
             "app launch",
         ] {
             let result =
-                tauri::async_runtime::block_on(run_exclusive(label, CommandResult::success));
+                tauri::async_runtime::block_on(run_exclusive(label, |_| CommandResult::success()));
             assert_eq!(result.status, "error", "{label} must be rejected");
             assert_eq!(
                 result.code.as_deref(),
@@ -4389,8 +4413,9 @@ mod tests {
         }
 
         drop(privileged);
-        let result =
-            tauri::async_runtime::block_on(run_exclusive("session start", CommandResult::success));
+        let result = tauri::async_runtime::block_on(run_exclusive("session start", |_| {
+            CommandResult::success()
+        }));
         assert_eq!(result.status, "success", "the slot must be free again");
         assert_eq!(result.code, None);
     }

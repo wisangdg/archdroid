@@ -20,6 +20,7 @@
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
 use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -73,17 +74,17 @@ pub fn available() -> bool {
 /// Install an APK through adb. Unlike `waydroid app install`, this waits for
 /// the Android package manager and returns its real result (parse failure,
 /// incompatible package, success).
-pub fn install_apk(path: &str) -> Result<String> {
+pub fn install_apk(path: &str, cancel: Option<&AtomicBool>) -> Result<String> {
     with_device(true, |adb, serial| {
         let argv = adb_install_args(serial, path);
-        waydroid::run_program(adb, &argv, TIMEOUT_LONG, false)
+        waydroid::run_program(adb, &argv, TIMEOUT_LONG, cancel)
     })
 }
 
 /// Uninstall a package through adb. `waydroid app remove` can exit 0 while the
 /// platform service fails (`Failed with code: -3`), so adb is the authoritative
 /// path when it is available.
-pub fn uninstall_app(package: &str) -> Result<String> {
+pub fn uninstall_app(package: &str, cancel: Option<&AtomicBool>) -> Result<String> {
     if !is_valid_package(package) {
         return Err(AppError::invalid_input(format!(
             "Invalid Android package name: {package:?}"
@@ -91,7 +92,7 @@ pub fn uninstall_app(package: &str) -> Result<String> {
     }
     with_device(true, |adb, serial| {
         let argv = adb_uninstall_args(serial, package);
-        waydroid::run_program(adb, &argv, TIMEOUT_LONG, false)
+        waydroid::run_program(adb, &argv, TIMEOUT_LONG, cancel)
     })
 }
 
@@ -118,7 +119,7 @@ fn shell_mode(args: &[&str], allow_unfreeze: bool) -> Result<String> {
     with_device(allow_unfreeze, |adb, serial| {
         let mut argv = vec!["-s".to_string(), serial.to_string(), "shell".to_string()];
         argv.extend(args.iter().map(|arg| (*arg).to_string()));
-        waydroid::run_program(adb, &argv, TIMEOUT_QUICK, false)
+        waydroid::run_program(adb, &argv, TIMEOUT_QUICK, None)
     })
 }
 
@@ -300,7 +301,7 @@ fn dbus_container(method: &str) -> Result<String> {
         "/ContainerManager".to_string(),
         format!("id.waydro.ContainerManager.{method}"),
     ];
-    waydroid::run_program(&dbus, &args, 10, false)
+    waydroid::run_program(&dbus, &args, 10, None)
 }
 
 fn unfreeze_container() -> Result<()> {
@@ -329,7 +330,7 @@ fn parse_device_state<'a>(devices: &'a str, serial: &str) -> Option<&'a str> {
 }
 
 fn device_state(adb: &Path, serial: &str) -> Result<Option<String>> {
-    let output = waydroid::run_program(adb, &["devices".to_string()], 5, false)?;
+    let output = waydroid::run_program(adb, &["devices".to_string()], 5, None)?;
     Ok(parse_device_state(&output, serial).map(str::to_string))
 }
 
@@ -340,9 +341,9 @@ fn reconnect(adb: &Path, serial: &str) {
         adb,
         &["disconnect".to_string(), serial.to_string()],
         5,
-        false,
+        None,
     );
-    let _ = waydroid::run_program(adb, &["connect".to_string(), serial.to_string()], 5, false);
+    let _ = waydroid::run_program(adb, &["connect".to_string(), serial.to_string()], 5, None);
 }
 
 fn ensure_device(adb: &Path, serial: &str) -> Result<()> {
@@ -399,7 +400,7 @@ fn authorize_host(adb: &Path, serial: &str) -> Result<()> {
         // The adb server read its host key set at startup; a key generated
         // afterwards is not used until the server restarts. The next state poll
         // starts it again.
-        let _ = waydroid::run_program(adb, &["kill-server".to_string()], 5, false);
+        let _ = waydroid::run_program(adb, &["kill-server".to_string()], 5, None);
     }
 
     log::info!(
@@ -455,7 +456,7 @@ fn host_public_key(adb: &Path) -> Result<(String, bool)> {
         adb,
         &["keygen".to_string(), private.to_string_lossy().to_string()],
         10,
-        false,
+        None,
     ) {
         // Do not leave a half-generated pair behind: the next attempt would
         // otherwise trip the "private exists, public missing" guard above.

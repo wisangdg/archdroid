@@ -791,51 +791,53 @@ P1 tidak boleh menunda P0, tetapi sebaiknya selesai sebelum rilis publik.
 
 ### P1-1 — Kebenaran state dan command frontend
 
-- [ ] Gunakan `CommandResult.code` (`not_found`, `not_initialized`,
+- [x] Gunakan `CommandResult.code` (`not_found`, `not_initialized`,
   `elevation_denied`, `timeout`, `cancelled`, dan seterusnya) di
   `src/App.jsx`; hapus pencocokan pesan string seperti `includes("No such file")`.
-- [ ] Periksa `status` hasil `invoke` untuk command non-streaming. `invoke`
+- [x] Periksa `status` hasil `invoke` untuk command non-streaming. `invoke`
   tidak melempar exception untuk `CommandResult` berstatus `error`, sehingga
-  saat ini kegagalan diabaikan: `handleStart`/`handleStop`/`handleRestart`
+  sebelumnya kegagalan diabaikan: `handleStart`/`handleStop`/`handleRestart`
   (Restart selalu menampilkan toast “Engine Restarted”), `handleLaunchApp`,
   `toggleConfig` (toggle UI berubah walau `prop_set` gagal),
-  `handleRunPhantom`, dan `open_shared_folder`.
-- [ ] Turunkan status `ProcessStepper`/`stepConfigs.js` dari payload
+  `handleRunPhantom`, dan `open_shared_folder`. Sekarang semuanya memeriksa
+  `res?.status === "success"` vs `"error"` sebelum memperbarui state atau
+  menampilkan toast sukses.
+- [x] Turunkan status `ProcessStepper`/`stepConfigs.js` dari payload
   `cmd-finished` (`success`/`code`), bukan dari pencocokan teks log
   (`includes("failed")`, `"Wipe complete!"`); output pihak ketiga yang memuat
-  kata “failed” saat ini bisa membuat stepper menampilkan error palsu.
-- [ ] **Temuan live P0-8.2 (F6):** Cancel yang sah menampilkan
-  `EXECUTION FAILED` + “Root authentication may have been rejected…” karena
-  stepper/pesan troubleshooting diturunkan dari teks log, bukan code
-  `cancelled` dari `cmd-finished`. Bukti: `gui-cancel-early.png` dan
-  `docs/P0-8.2-MATRIX-RESULTS.md` F6.
-- [ ] Kembalikan Cancel untuk install/remove APK: masukkan operasi itu ke
-  `TaskGuard` + `cancel_task`, lalu hapus flag global `waydroid::CANCEL` dan
-  command `waydroid_cancel` agar hanya ada satu mekanisme cancel.
-- [ ] Bila `profile_apply` dihubungkan ke UI: command ini memegang
-  `TaskGuard` dan mengirim `cmd-output`/`cmd-finished`, tetapi tidak mengirim
-  `cmd-started`, sehingga frontend membuang semua event-nya dan Cancel tidak
-  punya `task_id`. Kirim `cmd-started` seperti `stream_privileged_script`.
-- [ ] Perbaiki `checkStatus()`: saat command error karena Waydroid tidak ada,
-  jangan otomatis menyetel `isInitialized = true`; bedakan “belum terpasang”,
-  “belum init”, dan “offline”.
-- [ ] Ganti `setTimeout` tetap pada start/stop/restart dengan polling
-  `waydroid_status_json`/`booted` sampai state benar atau timeout.
-- [ ] Cegah polling 5 detik yang tumpang tindih; batalkan request lama dan
-  jangan biarkan respons lama menimpa state baru.
-- [ ] Jadikan `run_phantom()` async/detached dan verifikasi terminal benar-benar
-  ditemukan; saat ini `.output()` dapat menunggu terminal ditutup.
-- [ ] Pindahkan `check_host_diagnostics()`, `open_shared_folder()`,
-  `get_waydroid_apps()`, dan `run_phantom()` dari main thread (semuanya
-  `fn` sinkron, jadi dijalankan Tauri di main thread); beri timeout pada
-  `systemctl`/`xdg-open`.
-- [ ] Tangani `dirs::data_local_dir() == None` di `open_shared_folder()`; jangan
-  membuat path relatif di current directory.
-- [ ] Sinkronkan `src/components/terminal/stepConfigs.js` dengan output aktual;
-  label “Cloning/Updating” dan “pacman -S” sudah tidak sesuai dengan script
-  pinned saat ini.
-- [ ] Ambil versi UI dari sumber tunggal (mis. `package.json`/Tauri), jangan
-  hardcode `v0.1.0` di `Sidebar.jsx`.
+  kata “failed” tidak lagi membuat stepper menampilkan error palsu bila
+  `taskResult.success === true`.
+- [x] **Temuan live P0-8.2 (F6):** Cancel yang sah tidak lagi menampilkan
+  `EXECUTION FAILED` + “Root authentication may have been rejected…”.
+  `TerminalModal.jsx` dan `stepConfigs.js` memeriksa `taskResult.code === 'cancelled'`,
+  menampilkan badge `Cancelled`, label `Operation was cancelled by user`, dan
+  menghilangkan troubleshooting error palsu.
+- [x] Kembalikan Cancel untuk install/remove APK: operasi tersebut kini berjalan
+  di bawah `TaskGuard` + `cancel_task` dengan flag cancel per-task, dan flag
+  global `waydroid::CANCEL` serta command `waydroid_cancel` telah dihapus.
+- [x] Bila `profile_apply` dihubungkan ke UI: `profile_apply` memanggil
+  `emit_started(&app, task.id())` sebelum menjalankan operasi, sehingga
+  frontend dapat menerima event dan pembatalan memiliki `task_id` yang valid.
+- [x] Perbaiki `checkStatus()`: saat command error karena Waydroid tidak ada,
+  tidak lagi otomatis menyetel `isInitialized = true`; membedakan `not_found`
+  (belum terpasang), `not_initialized` (belum init), dan offline/online.
+- [x] Ganti `setTimeout` tetap pada start/stop/restart dengan polling
+  `pollStatusUntil(target, maxAttempts, intervalMs)` sampai state benar
+  atau timeout.
+- [x] Cegah polling 5 detik yang tumpang tindih dengan guard `statusCheckInFlight`.
+- [x] Jadikan `run_phantom()` async/detached lewat `spawn_blocking` + `.spawn()`,
+  memvalidasi keberadaan terminal emulator yang didukung, dan mengembalikan
+  `CommandResult` berstatus terstruktur.
+- [x] Pindahkan `check_host_diagnostics()`, `open_shared_folder()`,
+  `get_waydroid_apps()`, dan `run_phantom()` dari main thread; beri timeout 3 detik
+  pada `systemctl` di `check_host_diagnostics()` dan spawn detached pada `xdg-open`.
+- [x] Tangani `dirs::data_local_dir() == None` di `open_shared_folder()`; mengembalikan
+  `AppError::not_found` terstruktur daripada membuat path relatif di current directory.
+- [x] Sinkronkan `src/components/terminal/stepConfigs.js` dengan output aktual;
+  langkah disesuaikan dengan script checkout/venv pinned, dan tracking langkah
+  dipetakan secara akurat per-`taskType`.
+- [x] Ambil versi UI dari sumber tunggal (`package.json`), hapus hardcoded
+  `v0.1.0` di `Sidebar.jsx`.
 - [x] **Temuan live P0-8.2 (F1):** `waydroid app remove` di Waydroid 1.6.3
   exit 0 sambil menulis `Failed with code: -3` dan paket tetap ada.
   **Selesai:** `waydroid_uninstall_app` memakai `adb uninstall` bila adb
@@ -850,6 +852,8 @@ P1 tidak boleh menunda P0, tetapi sebaiknya selesai sebelum rilis publik.
   file non-APK tetap ditolak sebelum CLI. Test regresi ditambahkan. Bukti:
   F2 di `docs/P0-8.2-MATRIX-RESULTS.md`.
 - **DoD:** semua state transisi punya test; tidak ada toast sukses prematur.
+  (Lolos 36 test frontend, 116 test backend, 135 test backend dev-commands,
+  0 clippy warning, cargo fmt lulus).
 
 ### P1-2 — Test, lint, dan E2E frontend
 

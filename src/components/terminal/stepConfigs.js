@@ -1,31 +1,30 @@
 export const TASK_STEP_CONFIGS = {
   gapps: [
     { id: "elevate", label: "Root Access", description: "Polkit elevation" },
-    { id: "deps", label: "Dependencies", description: "squashfs & lzip" },
-    { id: "repo", label: "Download Script", description: "waydroid_script" },
-    { id: "env", label: "Python Venv", description: "Virtual environment" },
+    { id: "deps", label: "Dependencies", description: "System packages" },
+    { id: "repo", label: "Source & Lock", description: "waydroid_script checkout" },
+    { id: "env", label: "Python Venv", description: "Isolated environment & wheels" },
     { id: "inject", label: "Injecting GApps", description: "Writing to rootfs" },
     { id: "done", label: "Ready", description: "Installation complete" },
   ],
   houdini: [
     { id: "elevate", label: "Root Access", description: "Polkit elevation" },
-    { id: "deps", label: "Dependencies", description: "squashfs & lzip" },
-    { id: "repo", label: "Download Script", description: "waydroid_script" },
-    { id: "env", label: "Python Venv", description: "Virtual environment" },
+    { id: "deps", label: "Dependencies", description: "System packages" },
+    { id: "repo", label: "Source & Lock", description: "waydroid_script checkout" },
+    { id: "env", label: "Python Venv", description: "Isolated environment & wheels" },
     { id: "inject", label: "Installing Houdini", description: "ARM translation bridge" },
     { id: "done", label: "Ready", description: "ARM support active" },
   ],
   init: [
     { id: "elevate", label: "Root Access", description: "Polkit elevation" },
-    { id: "pkg", label: "Packages", description: "System repositories" },
-    { id: "download", label: "Download Image", description: "LineageOS rootfs (~1GB)" },
-    { id: "init", label: "Initialize", description: "Setting up container" },
+    { id: "pkg", label: "Preflight & Packages", description: "System dependencies" },
+    { id: "download", label: "Download Image", description: "Android system image" },
+    { id: "init", label: "Initialize", description: "Configuring container" },
     { id: "done", label: "Ready", description: "Ready to launch" },
   ],
   phantom: [
-    { id: "elevate", label: "Root Access", description: "Polkit elevation" },
-    { id: "repo", label: "Clone / Pull", description: "GitHub repository" },
-    { id: "build", label: "Install Script", description: "Compiling keymapper" },
+    { id: "repo", label: "Source Checkout", description: "Cloning pinned Phantom repo" },
+    { id: "build", label: "Compile & Install", description: "Building binaries as user" },
     { id: "done", label: "Ready", description: "Phantom ready" },
   ],
   wipe: [
@@ -36,37 +35,46 @@ export const TASK_STEP_CONFIGS = {
   ],
 };
 
-export function detectStepProgress(taskType, logs = []) {
+export function detectStepProgress(taskType, logs = [], taskResult = null) {
   const steps = TASK_STEP_CONFIGS[taskType] || [];
+  const logText = logs.join("\n");
+
+  // Prefer structured result from cmd-finished when available
+  const isCancelled = taskResult
+    ? taskResult.code === "cancelled" || taskResult.code === "cancelled_by_user"
+    : logText.includes("[CANCELLED]") ||
+      logText.includes("was cancelled") ||
+      logText.includes("Operation cancelled");
+
+  const isCompleted = taskResult
+    ? taskResult.success === true
+    : !isCancelled &&
+      (logText.includes("[SUCCESS]") ||
+        logText.includes("[PROCESS COMPLETED SUCCESSFULLY]") ||
+        logText.includes("Wipe complete!"));
+
+  const isFailed = taskResult
+    ? taskResult.success === false && !isCancelled
+    : !isCancelled &&
+      (logText.includes("[ERROR]") ||
+        logText.includes("Failed to install") ||
+        logText.includes("[PROCESS FINISHED WITH ERRORS]"));
+
   if (steps.length === 0) {
     return {
       steps: [],
       activeStepIndex: 0,
-      isFailed: false,
-      isCompleted: false,
+      isCancelled,
+      isFailed,
+      isCompleted,
       currentMessage: logs[logs.length - 1] || "",
-      errorMessage: null,
+      errorMessage: isCancelled
+        ? taskResult?.message || "Operation was cancelled by user."
+        : isFailed
+        ? taskResult?.message || "Operation failed."
+        : null,
     };
   }
-
-  const logText = logs.join("\n");
-  const isCancelled =
-    logText.includes("[CANCELLED]") ||
-    logText.includes("was cancelled") ||
-    logText.includes("Operation cancelled");
-
-  const isFailed =
-    !isCancelled &&
-    (logText.includes("[ERROR]") ||
-      logText.includes("failed!") ||
-      logText.includes("Failed to install") ||
-      logText.includes("[PROCESS FINISHED WITH ERRORS]"));
-
-  const isCompleted =
-    !isCancelled &&
-    (logText.includes("[SUCCESS]") ||
-      logText.includes("[PROCESS COMPLETED SUCCESSFULLY]") ||
-      logText.includes("Wipe complete!"));
 
   let activeIndex = 0;
   let currentMessage = "Initiating task...";
@@ -74,77 +82,127 @@ export function detectStepProgress(taskType, logs = []) {
 
   if (isCancelled) {
     currentMessage = "Operation was cancelled by user.";
-    errorMessage = "Operation was cancelled by user.";
+    errorMessage = taskResult?.message || "Operation was cancelled by user.";
   } else if (isFailed) {
     const errorLine = logs.find(
-      (l) => l.includes("[ERROR]") || l.includes("failed") || l.includes("Failed")
+      (l) => l.includes("[ERROR]") || l.includes("Failed:")
     );
-    errorMessage = errorLine || "The process terminated with errors.";
+    errorMessage = taskResult?.message || errorLine || "The process terminated with errors.";
   }
 
-  // Check from latest step backwards
   if (isCompleted) {
     activeIndex = steps.length - 1;
     currentMessage = "Task finished successfully!";
+  } else if (isCancelled) {
+    currentMessage = "Operation was cancelled by user.";
   } else {
+    // Scan logs backwards to find the current active step based on taskType
     for (let i = logs.length - 1; i >= 0; i--) {
       const line = logs[i];
       if (!line) continue;
 
-      if (
-        line.includes("Injecting GApps") ||
-        line.includes("Installing ARM Translation") ||
-        line.includes("Initializing Waydroid") ||
-        line.includes("Running install script") ||
-        line.includes("Wiping Waydroid data")
-      ) {
-        activeIndex = Math.min(steps.length - 2, 4);
-        currentMessage = line;
-        break;
-      }
-
-      if (
-        line.includes("Installing Python requirements") ||
-        line.includes("Setting up Python") ||
-        line.includes("pip install")
-      ) {
-        activeIndex = 3;
-        currentMessage = line;
-        break;
-      }
-
-      if (
-        line.includes("Downloading Waydroid Script") ||
-        line.includes("Cloning waydroid_script") ||
-        line.includes("Cloning Phantom") ||
-        line.includes("Updating Phantom")
-      ) {
-        activeIndex = 2;
-        currentMessage = line;
-        break;
-      }
-
-      if (
-        line.includes("Installing required dependencies") ||
-        line.includes("Installing required extraction tools") ||
-        line.includes("pacman -S") ||
-        line.includes("apt-get install") ||
-        line.includes("dnf install") ||
-        line.includes("zypper") ||
-        line.includes("Stopping Waydroid")
-      ) {
-        activeIndex = 1;
-        currentMessage = line;
-        break;
-      }
-
-      if (
-        line.includes("Requesting root access") ||
-        line.includes("Elevated shell started")
-      ) {
-        activeIndex = 0;
-        currentMessage = line;
-        break;
+      if (taskType === "gapps" || taskType === "houdini") {
+        if (
+          line.includes("Injecting GApps") ||
+          line.includes("Installing ARM Translation") ||
+          line.includes("libhoudini")
+        ) {
+          activeIndex = 4;
+          currentMessage = line;
+          break;
+        }
+        if (
+          line.includes("Setting up isolated Python venv") ||
+          line.includes("Installing Python requirements") ||
+          line.includes("pip install")
+        ) {
+          activeIndex = 3;
+          currentMessage = line;
+          break;
+        }
+        if (line.includes("Cloning pinned") || line.includes("waydroid_script")) {
+          activeIndex = 2;
+          currentMessage = line;
+          break;
+        }
+        if (
+          line.includes("Installing dependencies") ||
+          line.includes("pacman") ||
+          line.includes("apt") ||
+          line.includes("dnf") ||
+          line.includes("zypper")
+        ) {
+          activeIndex = 1;
+          currentMessage = line;
+          break;
+        }
+        if (
+          line.includes("Requesting root access") ||
+          line.includes("Elevated shell started")
+        ) {
+          activeIndex = 0;
+          currentMessage = line;
+          break;
+        }
+      } else if (taskType === "phantom") {
+        if (
+          line.includes("Running Phantom installer") ||
+          line.includes("Compiling") ||
+          line.includes("cargo") ||
+          line.includes("Building")
+        ) {
+          activeIndex = 1;
+          currentMessage = line;
+          break;
+        }
+        if (line.includes("Cloning pinned") || line.includes("git")) {
+          activeIndex = 0;
+          currentMessage = line;
+          break;
+        }
+      } else if (taskType === "wipe") {
+        if (line.includes("Wiping Waydroid")) {
+          activeIndex = 2;
+          currentMessage = line;
+          break;
+        }
+        if (line.includes("Stopping Waydroid")) {
+          activeIndex = 1;
+          currentMessage = line;
+          break;
+        }
+        if (
+          line.includes("Requesting root access") ||
+          line.includes("Elevated shell started")
+        ) {
+          activeIndex = 0;
+          currentMessage = line;
+          break;
+        }
+      } else if (taskType === "init") {
+        if (line.includes("Initializing Waydroid") || line.includes("waydroid init")) {
+          activeIndex = 3;
+          currentMessage = line;
+          break;
+        }
+        if (line.includes("Downloading") || line.includes("system.img")) {
+          activeIndex = 2;
+          currentMessage = line;
+          break;
+        }
+        if (line.includes("Preflight") || line.includes("package")) {
+          activeIndex = 1;
+          currentMessage = line;
+          break;
+        }
+        if (
+          line.includes("Requesting root access") ||
+          line.includes("Elevated shell started")
+        ) {
+          activeIndex = 0;
+          currentMessage = line;
+          break;
+        }
       }
     }
   }

@@ -63,7 +63,9 @@ export default function App() {
   const [terminalLogs, setTerminalLogs] = useState([]);
   const [terminalTitle, setTerminalTitle] = useState("");
   const [terminalTaskType, setTerminalTaskType] = useState("logs");
+  const [terminalTaskResult, setTerminalTaskResult] = useState(null);
   const terminalRef = useRef(null);
+  const statusCheckInFlight = useRef(false);
 
   // Config State
   const [multiWindow, setMultiWindow] = useState(false);
@@ -118,6 +120,7 @@ export default function App() {
     setTerminalTaskType(taskType);
     setTerminalTitle(title);
     setTerminalLogs([]);
+    setTerminalTaskResult(null);
     setTerminalOpen(true);
 
     try {
@@ -185,6 +188,7 @@ export default function App() {
       // clear the single-flight flag of the task that replaced it.
       if (!isEventForTask(event.payload, activeTaskId.current)) return;
       activeTaskId.current = null;
+      setTerminalTaskResult({ success, code, message });
       setTerminalLogs((prev) => [
         ...prev,
         success
@@ -260,7 +264,9 @@ export default function App() {
     }
   };
 
-  const checkStatus = async () => {
+  const checkStatus = useCallback(async () => {
+    if (statusCheckInFlight.current) return;
+    statusCheckInFlight.current = true;
     try {
       const res = await invoke("waydroid_status");
       if (res.status === "success" && res.data && res.data.includes("RUNNING")) {
@@ -273,12 +279,7 @@ export default function App() {
         }
       } else {
         setStatus("offline");
-        if (
-          res.message &&
-          (res.message.includes("Cannot locate waydroid config") ||
-            res.message.includes("command not found") ||
-            res.message.includes("No such file"))
-        ) {
+        if (res.code === "not_found" || res.code === "not_initialized") {
           setIsInitialized(false);
         } else {
           setIsInitialized(true);
@@ -287,8 +288,29 @@ export default function App() {
     } catch (e) {
       console.error("Status check failed:", e);
       setStatus("offline");
+    } finally {
+      statusCheckInFlight.current = false;
     }
-  };
+  }, []);
+
+  const pollStatusUntil = useCallback(
+    async (targetStatus, maxAttempts = 15, intervalMs = 400) => {
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, intervalMs));
+        const res = await invoke("waydroid_status");
+        const isRunning =
+          res.status === "success" && res.data && res.data.includes("RUNNING");
+        const current = isRunning ? "online" : "offline";
+        if (current === targetStatus) {
+          await checkStatus();
+          return true;
+        }
+      }
+      await checkStatus();
+      return false;
+    },
+    [checkStatus]
+  );
 
   const handleStart = async () => {
     setIsOperating(true);
@@ -298,11 +320,25 @@ export default function App() {
       message: "Initializing Waydroid Android session...",
     });
     try {
-      await invoke("waydroid_start");
-      setTimeout(() => {
-        checkStatus();
+      const res = await invoke("waydroid_start");
+      if (res?.status === "error") {
         setIsOperating(false);
-      }, 2000);
+        addToast({
+          type: "error",
+          title: "Start Failed",
+          message: res.message || "Failed to start Waydroid session.",
+        });
+        return;
+      }
+      const online = await pollStatusUntil("online", 15);
+      setIsOperating(false);
+      if (!online) {
+        addToast({
+          type: "warning",
+          title: "Session Slow to Start",
+          message: "Start command was sent, but the session is not yet reporting online.",
+        });
+      }
     } catch (e) {
       console.error("Failed to start Waydroid:", e);
       addToast({
@@ -322,11 +358,18 @@ export default function App() {
       message: "Halting Waydroid session...",
     });
     try {
-      await invoke("waydroid_stop");
-      setTimeout(() => {
-        checkStatus();
+      const res = await invoke("waydroid_stop");
+      if (res?.status === "error") {
         setIsOperating(false);
-      }, 2000);
+        addToast({
+          type: "error",
+          title: "Stop Failed",
+          message: res.message || "Failed to stop Waydroid session.",
+        });
+        return;
+      }
+      await pollStatusUntil("offline", 10);
+      setIsOperating(false);
     } catch (e) {
       console.error("Failed to stop Waydroid:", e);
       addToast({
@@ -346,19 +389,43 @@ export default function App() {
       message: "Cycling Waydroid session...",
     });
     try {
-      await invoke("waydroid_stop");
-      setTimeout(async () => {
-        await invoke("waydroid_start");
-        setTimeout(() => {
-          checkStatus();
-          setIsOperating(false);
-          addToast({
-            type: "success",
-            title: "Engine Restarted",
-            message: "Waydroid session is back online.",
-          });
-        }, 2000);
-      }, 1500);
+      const stopRes = await invoke("waydroid_stop");
+      if (stopRes?.status === "error") {
+        setIsOperating(false);
+        addToast({
+          type: "error",
+          title: "Restart Failed",
+          message: stopRes.message || "Failed to stop Waydroid session during restart.",
+        });
+        return;
+      }
+      await pollStatusUntil("offline", 8);
+
+      const startRes = await invoke("waydroid_start");
+      if (startRes?.status === "error") {
+        setIsOperating(false);
+        addToast({
+          type: "error",
+          title: "Restart Failed",
+          message: startRes.message || "Failed to restart Waydroid session.",
+        });
+        return;
+      }
+      const online = await pollStatusUntil("online", 15);
+      setIsOperating(false);
+      if (online) {
+        addToast({
+          type: "success",
+          title: "Engine Restarted",
+          message: "Waydroid session is back online.",
+        });
+      } else {
+        addToast({
+          type: "warning",
+          title: "Restart Pending",
+          message: "Restart was triggered, but the session is not yet reporting online.",
+        });
+      }
     } catch (e) {
       console.error("Failed to restart Waydroid:", e);
       addToast({
@@ -500,13 +567,21 @@ export default function App() {
 
   const handleLaunchApp = async (pkg) => {
     try {
-      await invoke("waydroid_launch_app", { package: pkg });
-      addToast({
-        type: "info",
-        title: "Launching",
-        message: `Opening ${pkg}...`,
-        duration: 2500,
-      });
+      const res = await invoke("waydroid_launch_app", { package: pkg });
+      if (res?.status === "success") {
+        addToast({
+          type: "info",
+          title: "Launching",
+          message: `Opening ${pkg}...`,
+          duration: 2500,
+        });
+      } else {
+        addToast({
+          type: "error",
+          title: "Launch Failed",
+          message: res?.message || `Failed to launch ${pkg}.`,
+        });
+      }
     } catch (e) {
       console.error("Launch app error:", e);
       addToast({
@@ -733,13 +808,21 @@ export default function App() {
 
   const handleOpenSharedFolder = async () => {
     try {
-      await invoke("open_shared_folder");
-      addToast({
-        type: "info",
-        title: "Shared Folder Opened",
-        message: "Opened Android shared media storage in file manager.",
-        duration: 3000,
-      });
+      const res = await invoke("open_shared_folder");
+      if (res?.status === "success") {
+        addToast({
+          type: "info",
+          title: "Shared Folder Opened",
+          message: "Opened Android shared media storage in file manager.",
+          duration: 3000,
+        });
+      } else {
+        addToast({
+          type: "error",
+          title: "Failed to Open Folder",
+          message: res?.message || "Could not open shared media folder.",
+        });
+      }
     } catch (e) {
       console.error("Open shared folder error:", e);
       addToast({
@@ -843,14 +926,22 @@ export default function App() {
   const toggleConfig = async (key, currentValue, setter, label) => {
     const newValue = currentValue ? "false" : "true";
     try {
-      await invoke("waydroid_prop_set", { key, value: newValue });
-      setter(!currentValue);
-      addToast({
-        type: "info",
-        title: "Config Updated",
-        message: `${label || key} set to ${!currentValue ? "ON" : "OFF"}.`,
-        duration: 2500,
-      });
+      const res = await invoke("waydroid_prop_set", { key, value: newValue });
+      if (res?.status === "success") {
+        setter(!currentValue);
+        addToast({
+          type: "info",
+          title: "Config Updated",
+          message: `${label || key} set to ${!currentValue ? "ON" : "OFF"}.`,
+          duration: 2500,
+        });
+      } else {
+        addToast({
+          type: "error",
+          title: "Config Toggle Failed",
+          message: res?.message || `Failed to update ${label || key}.`,
+        });
+      }
     } catch (e) {
       console.error(`Failed to toggle config ${key}:`, e);
       addToast({
@@ -1170,9 +1261,13 @@ export default function App() {
         title={terminalTitle}
         taskType={terminalTaskType}
         logs={terminalLogs}
+        taskResult={terminalTaskResult}
         installing={installing}
         terminalRef={terminalRef}
-        onClose={() => setTerminalOpen(false)}
+        onClose={() => {
+          setTerminalOpen(false);
+          setTerminalTaskResult(null);
+        }}
         onRetry={handleRetryTask}
         onCancel={handleCancelTask}
       />

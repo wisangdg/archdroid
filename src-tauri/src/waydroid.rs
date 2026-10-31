@@ -75,24 +75,6 @@ const FAILURE_MARKERS: [&str; 6] = [
 /// up (still running) before we report success and hand it to a reaper thread.
 pub const SESSION_START_GRACE_SECS: u64 = 5;
 
-// ponytail: satu flag global untuk semua operasi panjang — UI menjalankan satu
-// operasi panjang pada satu waktu (guard isOperating). Registry Child per-task
-// hanya kalau operasi paralel nanti benar-benar dibutuhkan.
-static CANCEL: AtomicBool = AtomicBool::new(false);
-
-/// Ask the running long operation (`app install|remove`) to stop; its child is
-/// killed within one poll tick (~20ms).
-#[cfg(any(test, feature = "dev-commands"))]
-pub fn request_cancel() {
-    CANCEL.store(true, Ordering::SeqCst);
-}
-
-/// Every cancellable run clears the flag first, so a stale request from a
-/// previous operation cannot kill a new one.
-fn cancel_requested() -> bool {
-    CANCEL.load(Ordering::SeqCst)
-}
-
 /// Does this output mean "the image was never initialised"?
 pub fn looks_uninitialized(text: &str) -> bool {
     let lower = text.to_ascii_lowercase();
@@ -240,13 +222,17 @@ impl Waydroid {
     /// Both pipes are drained on reader threads so a chatty command cannot
     /// deadlock on a full pipe while we wait for it to exit.
     pub fn run(&self, args: &[String], timeout_secs: u64) -> Result<String> {
-        run_program(&self.program, args, timeout_secs, false)
+        run_program(&self.program, args, timeout_secs, None)
     }
 
-    /// Same as [`run`], but a [`request_cancel`] call kills the child.
-    pub fn run_cancellable(&self, args: &[String], timeout_secs: u64) -> Result<String> {
-        CANCEL.store(false, Ordering::SeqCst);
-        run_program(&self.program, args, timeout_secs, true)
+    /// Same as [`run`], but checks an optional cancellation flag to kill the child.
+    pub fn run_cancellable(
+        &self,
+        args: &[String],
+        timeout_secs: u64,
+        cancel: Option<&AtomicBool>,
+    ) -> Result<String> {
+        run_program(&self.program, args, timeout_secs, cancel)
     }
 
     #[cfg(feature = "dev-commands")]
@@ -342,12 +328,12 @@ impl Waydroid {
         self.run(&argv_app_list(), TIMEOUT_NORMAL)
     }
 
-    pub fn app_install(&self, path: &str) -> Result<String> {
-        self.run_cancellable(&argv_app_install(path), TIMEOUT_LONG)
+    pub fn app_install(&self, path: &str, cancel: Option<&AtomicBool>) -> Result<String> {
+        self.run_cancellable(&argv_app_install(path), TIMEOUT_LONG, cancel)
     }
 
-    pub fn app_remove(&self, package: &str) -> Result<String> {
-        self.run_cancellable(&argv_app_remove(package), TIMEOUT_LONG)
+    pub fn app_remove(&self, package: &str, cancel: Option<&AtomicBool>) -> Result<String> {
+        self.run_cancellable(&argv_app_remove(package), TIMEOUT_LONG, cancel)
     }
 
     pub fn app_launch(&self, package: &str) -> Result<String> {
@@ -385,13 +371,13 @@ impl Waydroid {
 /// Run a child with a deadline, draining both pipes on reader threads.
 ///
 /// Shared with `adb.rs`: `adb shell` gets the same timeout and "exit 0 is not
-/// success" handling as every waydroid action. `cancellable` opts into the
-/// [`request_cancel`] flag (long operations only).
+/// success" handling as every waydroid action. `cancel` allows checking an
+/// atomic cancellation flag (long operations only).
 pub(crate) fn run_program(
     program_path: &Path,
     args: &[String],
     timeout_secs: u64,
-    cancellable: bool,
+    cancel: Option<&AtomicBool>,
 ) -> Result<String> {
     let program = program_path.to_string_lossy().to_string();
     let started = Instant::now();
@@ -433,13 +419,13 @@ pub(crate) fn run_program(
         match child.try_wait() {
             Ok(Some(status)) => break status,
             Ok(None) => {
-                if (cancellable && cancel_requested()) || Instant::now() >= deadline {
-                    let cancelled = cancellable && cancel_requested();
+                let is_cancelled = cancel.is_some_and(|c| c.load(Ordering::SeqCst));
+                if is_cancelled || Instant::now() >= deadline {
                     let _ = child.kill();
                     let _ = child.wait();
                     let _ = stdout_reader.join();
                     let _ = stderr_reader.join();
-                    return if cancelled {
+                    return if is_cancelled {
                         log::warn!("{program} {:?} cancelled after {timeout_secs}s", args);
                         Err(AppError::CancelRequested { program })
                     } else {
@@ -754,13 +740,15 @@ exit 0"#,
     #[test]
     fn a_cancel_request_kills_a_running_child() {
         let tool = Waydroid::with_program("/bin/sleep");
-        let killer = thread::spawn(|| {
+        let cancel = std::sync::Arc::new(AtomicBool::new(false));
+        let cancel_clone = cancel.clone();
+        let killer = thread::spawn(move || {
             thread::sleep(Duration::from_millis(200));
-            request_cancel();
+            cancel_clone.store(true, Ordering::SeqCst);
         });
         let started = Instant::now();
         let error = tool
-            .run_cancellable(&["30".to_string()], TIMEOUT_LONG)
+            .run_cancellable(&["30".to_string()], TIMEOUT_LONG, Some(&cancel))
             .unwrap_err();
         killer.join().unwrap();
         assert_eq!(error.code(), code::CANCELLED, "{error}");
@@ -770,12 +758,13 @@ exit 0"#,
         );
     }
 
-    /// A stale cancel request must not kill the next operation.
+    /// A stale cancel request from another flag must not kill the operation.
     #[test]
     fn a_cancellable_run_ignores_a_stale_cancel_request() {
-        request_cancel();
+        let _stale_cancel = AtomicBool::new(true);
+        let active_cancel = AtomicBool::new(false);
         let tool = Waydroid::with_program("/bin/echo");
-        let output = tool.run_cancellable(&["ok".to_string()], TIMEOUT_QUICK);
+        let output = tool.run_cancellable(&["ok".to_string()], TIMEOUT_QUICK, Some(&active_cancel));
         assert_eq!(output.unwrap().trim(), "ok");
     }
 
