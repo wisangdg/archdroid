@@ -1,6 +1,6 @@
 # Maintainer: Wisang Drillian Geni <https://github.com/wisangdg/archdroid>
 pkgname=archdroid-bin
-pkgver=0.1.0
+pkgver=0.1.1
 pkgrel=1
 pkgdesc="Modern desktop front-end for Waydroid"
 arch=('x86_64')

@@ -1,7 +1,7 @@
 {
   "name": "archdroid",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "ArchDroid - Modern Android emulator manager for Linux, powered by Waydroid",
   "license": "MIT",
   "author": "Wisang Drillian Geni <gwisang45@gmail.com>",

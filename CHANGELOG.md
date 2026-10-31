@@ -5,6 +5,16 @@ Format ini mengacu pada [Keep a Changelog](https://keepachangelog.com/id/1.0.0/)
 
 ---
 
+## [0.1.1] - 2026-11-01
+
+Rilis pertama yang dipublikasikan. Artefak 0.1.0 tidak pernah dirilis: smoke test live di VM menemukan bug pembersihan pada Cancel/timeout task root.
+
+### Diperbaiki
+- Cancel atau timeout pada task root (GApps, Houdini, multitouch, init, wipe) kini benar-benar menghapus direktori kerja privat `/var/tmp/archdroid.*`. Sebelumnya `set -e` membuat trap berhenti sebelum `rm -rf`, sehingga unduhan dan venv milik root tertinggal.
+- Task root yang dibatalkan kini berhenti di tempat; skrip tidak lagi melanjutkan ke perintah root berikutnya setelah sinyal.
+- Progress bar installer (tqdm/pip) tidak lagi tampil rusak (`â▯▯`): output kini didekode sebagai UTF-8 per baris, bukan per byte.
+- Modal terminal tidak lagi meluap dari jendela 1100×720, sehingga tombol Cancel di header dan tombol di footer selalu terlihat.
+
 ## [0.1.0] - 2026-11-01
 
 ### Ditambahkan
