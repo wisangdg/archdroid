@@ -28,18 +28,22 @@ pub struct AppInfo {
     pub icon: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct DiagnosticItem {
     pub key: String,
     pub title: String,
     pub status: String,
     pub value: String,
     pub detail: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remediation: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct DiagnosticsReport {
     pub items: Vec<DiagnosticItem>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub package_manager: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -698,9 +702,371 @@ fi
         .into_command_result()
 }
 
+fn check_network_connectivity() -> bool {
+    let targets = [
+        "1.1.1.1:53".parse::<std::net::SocketAddr>().unwrap(),
+        "8.8.8.8:53".parse::<std::net::SocketAddr>().unwrap(),
+    ];
+    for target in &targets {
+        if std::net::TcpStream::connect_timeout(target, std::time::Duration::from_secs(1)).is_ok() {
+            return true;
+        }
+    }
+    false
+}
+
+fn check_available_disk_space_kb(path: &Path) -> Option<u64> {
+    let probe_path = if path.exists() {
+        path
+    } else if let Some(parent) = path.parent() {
+        if parent.exists() {
+            parent
+        } else {
+            Path::new("/")
+        }
+    } else {
+        Path::new("/")
+    };
+
+    let output = Command::new("df")
+        .args(["-Pk", probe_path.to_str().unwrap_or("/")])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for line in stdout.lines().skip(1) {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() >= 4 {
+            if let Ok(avail) = parts[3].parse::<u64>() {
+                return Some(avail);
+            }
+        }
+    }
+    None
+}
+
+fn format_disk_space(kb: u64) -> String {
+    if kb >= 1_048_576 {
+        format!("{:.1} GB Free", kb as f64 / 1_048_576.0)
+    } else {
+        format!("{:.0} MB Free", kb as f64 / 1024.0)
+    }
+}
+
+fn check_python_venv_available() -> (bool, bool) {
+    let has_python3 = resolve_program("python3").is_some() || trusted_program("python3").is_some();
+    if !has_python3 {
+        return (false, false);
+    }
+    let has_venv = Command::new("python3")
+        .args(["-c", "import venv, ensurepip"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    (true, has_venv)
+}
+
+/// Root scripts run with `SAFE_PATH`, so preflight must not accept a `python3`
+/// from a user-writable directory that disappears after elevation.
+fn check_trusted_python_venv() -> (bool, bool) {
+    let Some(python) = trusted_program("python3") else {
+        return (false, false);
+    };
+    let has_venv = Command::new(python)
+        .args(["-c", "import venv, ensurepip"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    (true, has_venv)
+}
+
+fn find_terminal_emulator() -> Option<String> {
+    if let Ok(term) = std::env::var("TERMINAL") {
+        let trimmed = term.trim();
+        if !trimmed.is_empty()
+            && (resolve_program(trimmed).is_some() || trusted_program(trimmed).is_some())
+        {
+            return Some(trimmed.to_string());
+        }
+    }
+    let candidates = [
+        "konsole",
+        "alacritty",
+        "gnome-terminal",
+        "foot",
+        "kitty",
+        "ghostty",
+        "xfce4-terminal",
+        "xterm",
+    ];
+    for candidate in candidates {
+        if resolve_program(candidate).is_some() || trusted_program(candidate).is_some() {
+            return Some(candidate.to_string());
+        }
+    }
+    None
+}
+
+fn has_elevation_tool() -> Option<&'static str> {
+    if resolve_program("pkexec").is_some() || trusted_program("pkexec").is_some() {
+        Some("pkexec")
+    } else if resolve_program("sudo").is_some() || trusted_program("sudo").is_some() {
+        Some("sudo")
+    } else {
+        None
+    }
+}
+
+fn has_program(name: &str) -> bool {
+    resolve_program(name).is_some() || trusted_program(name).is_some()
+}
+
+/// Android SDK root, preferring the environment variables the upstream Phantom
+/// build script already understands.
+fn android_sdk_root() -> Option<PathBuf> {
+    for key in ["ANDROID_SDK_ROOT", "ANDROID_HOME"] {
+        if let Some(value) = std::env::var_os(key) {
+            let path = PathBuf::from(value);
+            if path.is_dir() {
+                return Some(path);
+            }
+        }
+    }
+    let home = std::env::var_os("HOME").map(PathBuf::from)?;
+    let path = home.join("Android/Sdk");
+    path.is_dir().then_some(path)
+}
+
+/// `android.jar` from `ANDROID_JAR` or a platform under the Android SDK.
+fn find_android_jar() -> Option<PathBuf> {
+    if let Some(value) = std::env::var_os("ANDROID_JAR") {
+        let path = PathBuf::from(value);
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+    let platforms = android_sdk_root()?.join("platforms");
+    let mut candidates: Vec<PathBuf> = std::fs::read_dir(platforms)
+        .ok()?
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path().join("android.jar"))
+        .filter(|path| path.is_file())
+        .collect();
+    candidates.sort();
+    candidates.pop()
+}
+
+/// `d8` from `D8`, PATH, the SDK build-tools, or cmdline-tools.
+fn find_d8() -> Option<PathBuf> {
+    if let Some(value) = std::env::var_os("D8") {
+        let path = PathBuf::from(value);
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+    if let Some(path) = resolve_program("d8").or_else(|| trusted_program("d8")) {
+        return Some(path);
+    }
+    let sdk = android_sdk_root()?;
+    if let Ok(entries) = std::fs::read_dir(sdk.join("build-tools")) {
+        let mut candidates: Vec<PathBuf> = entries
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.path().join("d8"))
+            .filter(|path| path.is_file())
+            .collect();
+        candidates.sort();
+        if let Some(path) = candidates.pop() {
+            return Some(path);
+        }
+    }
+    let cmdline_d8 = sdk.join("cmdline-tools/latest/bin/d8");
+    cmdline_d8.is_file().then_some(cmdline_d8)
+}
+
+/// Generic dependency names shared by the GApps and ARM Translation installers.
+/// Root scripts run with `SAFE_PATH`, so only trusted system locations count.
+fn gapps_missing_dependencies() -> Vec<&'static str> {
+    let mut missing = Vec::new();
+    if trusted_program("git").is_none() {
+        missing.push("git");
+    }
+    let (has_python3, has_venv) = check_trusted_python_venv();
+    if !has_python3 {
+        missing.push("python3");
+    } else if !has_venv {
+        missing.push("python3-venv");
+    }
+    if trusted_program("unsquashfs").is_none() {
+        missing.push("squashfs");
+    }
+    if trusted_program("lzip").is_none() {
+        missing.push("lzip");
+    }
+    missing
+}
+
+/// Both GApps and Houdini modify an existing Android image. Refuse before the
+/// root prompt when the image is absent: the upstream script cannot repair that.
+fn require_initialized_waydroid(action: &str) -> Result<(), AppError> {
+    if trusted_program("waydroid").is_none() {
+        return Err(AppError::not_found(
+            "waydroid",
+            &format!("Waydroid must be installed in a system path before {action}."),
+        ));
+    }
+    if !waydroid::is_initialized() {
+        return Err(AppError::not_initialized(format!(
+            "Waydroid is not initialized. Run the setup wizard or `sudo waydroid init` before {action}."
+        )));
+    }
+    Ok(())
+}
+
+fn installer_preflight(pm: Option<platform::PackageManager>, action: &str) -> Result<(), AppError> {
+    if has_elevation_tool().is_none() {
+        return Err(AppError::elevation_denied(
+            "No root elevation tool (pkexec or sudo) found on host. Cannot perform administrative operations.",
+        ));
+    }
+    if !check_network_connectivity() {
+        return Err(AppError::command_failed(format!(
+            "No internet connection detected. Internet access is required to {action}."
+        )));
+    }
+    require_initialized_waydroid(action)?;
+    if let Some(kb) = check_available_disk_space_kb(Path::new("/var/lib/waydroid")) {
+        if kb < 500_000 {
+            return Err(AppError::command_failed(format!(
+                "Insufficient disk space: only {:.0} MB available. {} requires at least 500 MB.",
+                kb as f64 / 1024.0,
+                action
+            )));
+        }
+    }
+    let missing = gapps_missing_dependencies();
+    if !missing.is_empty() && pm.is_none() {
+        let names = missing.join(", ");
+        return Err(AppError::not_found(
+            &names,
+            &format!(
+                "Required dependencies ({names}) are missing, and no supported package manager (pacman, apt-get, dnf, zypper) was found on this Linux distribution. Please install them manually before {action}."
+            ),
+        ));
+    }
+    Ok(())
+}
+
+/// Phantom builds Rust binaries and an Android server jar as the desktop user.
+/// None of these can be fixed after the build starts, so collect them first.
+fn phantom_missing_dependencies() -> (Vec<&'static str>, Vec<&'static str>) {
+    let mut packages = Vec::new();
+    let mut sdk = Vec::new();
+    if !has_program("git") {
+        packages.push("git");
+    }
+    if !has_program("cargo") {
+        packages.push("cargo");
+    }
+    if !has_program("javac") || !has_program("jar") {
+        packages.push("jdk");
+    }
+    if !has_program("sed") {
+        packages.push("sed");
+    }
+    if !has_program("install") {
+        packages.push("coreutils");
+    }
+    if find_d8().is_none() {
+        sdk.push("d8");
+    }
+    if find_android_jar().is_none() {
+        sdk.push("android.jar");
+    }
+    (packages, sdk)
+}
+
+fn phantom_dependency_error(
+    packages: &[&'static str],
+    sdk: &[&'static str],
+    pm: Option<platform::PackageManager>,
+) -> AppError {
+    let mut names = packages.to_vec();
+    names.extend(sdk.iter().copied());
+
+    let mut hints = Vec::new();
+    if !packages.is_empty() {
+        match pm {
+            Some(pm) => hints.push(format!(
+                "Install missing packages with: {}",
+                pm.user_install_command(packages)
+            )),
+            None => hints.push(format!(
+                "Install missing packages ({}) with your distribution's package manager.",
+                packages.join(", ")
+            )),
+        }
+    }
+    if sdk.contains(&"d8") {
+        hints.push(
+            "Install Android SDK command-line tools so `d8` is on PATH, or set D8=/path/to/d8."
+                .to_string(),
+        );
+    }
+    if sdk.contains(&"android.jar") {
+        hints.push(
+            "Install an Android platform with sdkmanager (for example `sdkmanager \"platforms;android-34\"`), or set ANDROID_JAR=/path/to/android.jar."
+                .to_string(),
+        );
+    }
+
+    AppError::not_found(
+        &names.join(", "),
+        &format!(
+            "Phantom requires missing dependencies: {}. {}",
+            names.join(", "),
+            hints.join(" ")
+        ),
+    )
+}
+
+fn phantom_preflight(pm: Option<platform::PackageManager>) -> Result<(), AppError> {
+    let (packages, sdk) = phantom_missing_dependencies();
+    if packages.is_empty() && sdk.is_empty() {
+        return Ok(());
+    }
+    Err(phantom_dependency_error(&packages, &sdk, pm))
+}
+
+fn phantom_disk_preflight() -> Result<(), AppError> {
+    let home = std::env::var_os("HOME").map(PathBuf::from).ok_or_else(|| {
+        AppError::not_found("HOME", "Cannot determine the desktop home directory.")
+    })?;
+    if let Some(kb) = check_available_disk_space_kb(&home) {
+        if kb < 1_000_000 {
+            return Err(AppError::command_failed(format!(
+                "Insufficient disk space in {}: only {:.0} MB available. Phantom needs about 1 GB to build its Rust binaries and Android server jar.",
+                home.display(),
+                kb as f64 / 1024.0
+            )));
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn open_shared_folder() -> CommandResult {
-    let mut path = dirs::data_local_dir().unwrap_or_default();
+    let mut path = match dirs::data_local_dir() {
+        Some(dir) => dir,
+        None => {
+            return AppError::not_found(
+                "local data directory",
+                "Cannot determine XDG local data directory.",
+            )
+            .into();
+        }
+    };
     path.push("waydroid");
     path.push("data");
     path.push("media");
@@ -709,8 +1075,16 @@ fn open_shared_folder() -> CommandResult {
     // Create folder if it doesn't exist
     let _ = std::fs::create_dir_all(&path);
 
-    match Command::new("xdg-open").arg(&path).output() {
-        Ok(_) => CommandResult::success(),
+    if resolve_program("xdg-open").is_none() && trusted_program("xdg-open").is_none() {
+        return AppError::not_found(
+            "xdg-open",
+            "Install xdg-utils so a file manager can be asked to open the folder.",
+        )
+        .into();
+    }
+
+    match Command::new("xdg-open").arg(&path).spawn() {
+        Ok(_) => CommandResult::with_message("Opened shared media folder in file manager."),
         Err(error) => AppError::from_spawn(
             "xdg-open",
             "Install xdg-utils so a file manager can be asked to open the folder.",
@@ -720,8 +1094,8 @@ fn open_shared_folder() -> CommandResult {
     }
 }
 
-#[tauri::command]
-fn check_host_diagnostics() -> DiagnosticsReport {
+fn collect_diagnostics() -> DiagnosticsReport {
+    let pm = platform::PackageManager::detect();
     let mut items = Vec::new();
 
     // 1. Session Type (Wayland vs X11)
@@ -738,6 +1112,7 @@ fn check_host_diagnostics() -> DiagnosticsReport {
             value: "Wayland Native".to_string(),
             detail: "Wayland compositor detected. Waydroid runs with native direct rendering."
                 .to_string(),
+            remediation: None,
         });
     } else {
         items.push(DiagnosticItem {
@@ -746,6 +1121,7 @@ fn check_host_diagnostics() -> DiagnosticsReport {
             status: "warning".to_string(),
             value: "X11 Display".to_string(),
             detail: "Waydroid requires Wayland. Under X11, a nested compositor (Weston/cage) may be required.".to_string(),
+            remediation: Some("Run inside a Wayland compositor, or use cage: cage -- waydroid show-full-ui".to_string()),
         });
     }
 
@@ -765,6 +1141,7 @@ fn check_host_diagnostics() -> DiagnosticsReport {
                 status: "ok".to_string(),
                 value: "Hardware KVM Ready".to_string(),
                 detail: "/dev/kvm is available with read/write access.".to_string(),
+                remediation: None,
             });
         } else {
             items.push(DiagnosticItem {
@@ -772,7 +1149,8 @@ fn check_host_diagnostics() -> DiagnosticsReport {
                 title: "KVM Acceleration".to_string(),
                 status: "warning".to_string(),
                 value: "Permission Denied".to_string(),
-                detail: "KVM device exists but user lacks write permission. Run: sudo usermod -aG kvm $USER".to_string(),
+                detail: "KVM device exists but user lacks write permission.".to_string(),
+                remediation: Some("sudo usermod -aG kvm $USER".to_string()),
             });
         }
     } else {
@@ -784,6 +1162,9 @@ fn check_host_diagnostics() -> DiagnosticsReport {
             detail:
                 "/dev/kvm not found. Ensure Intel VT-x or AMD-V is enabled in motherboard BIOS."
                     .to_string(),
+            remediation: Some(
+                "Enable VT-x/AMD-V in BIOS and load kernel module: sudo modprobe kvm".to_string(),
+            ),
         });
     }
 
@@ -799,6 +1180,7 @@ fn check_host_diagnostics() -> DiagnosticsReport {
             status: "ok".to_string(),
             value: "Binder Nodes Active".to_string(),
             detail: "Android kernel inter-process communication drivers are active.".to_string(),
+            remediation: None,
         });
     } else {
         items.push(DiagnosticItem {
@@ -808,6 +1190,7 @@ fn check_host_diagnostics() -> DiagnosticsReport {
             value: "Managed by Daemon".to_string(),
             detail: "Binderfs will be mounted automatically when container daemon starts."
                 .to_string(),
+            remediation: None,
         });
     }
 
@@ -821,6 +1204,7 @@ fn check_host_diagnostics() -> DiagnosticsReport {
             value: "Direct Rendering (DRI)".to_string(),
             detail: "Hardware Direct Rendering Manager node is available for 3D graphics."
                 .to_string(),
+            remediation: None,
         });
     } else {
         items.push(DiagnosticItem {
@@ -829,6 +1213,7 @@ fn check_host_diagnostics() -> DiagnosticsReport {
             status: "warning".to_string(),
             value: "Software Rendering".to_string(),
             detail: "Hardware DRI node not found. Android graphics will fall back to software rendering.".to_string(),
+            remediation: Some("Install graphics drivers supporting DRI (Direct Rendering Infrastructure).".to_string()),
         });
     }
 
@@ -849,6 +1234,7 @@ fn check_host_diagnostics() -> DiagnosticsReport {
             status: "ok".to_string(),
             value: "Service Active".to_string(),
             detail: "waydroid-container.service is actively running in background.".to_string(),
+            remediation: None,
         });
     } else {
         items.push(DiagnosticItem {
@@ -859,16 +1245,367 @@ fn check_host_diagnostics() -> DiagnosticsReport {
             detail:
                 "Container daemon is inactive. It will start automatically when session starts."
                     .to_string(),
+            remediation: None,
         });
     }
 
-    DiagnosticsReport { items }
+    // 6. Waydroid CLI binary
+    let has_waydroid =
+        resolve_program("waydroid").is_some() || trusted_program("waydroid").is_some();
+    if has_waydroid {
+        items.push(DiagnosticItem {
+            key: "waydroid".to_string(),
+            title: "Waydroid Package".to_string(),
+            status: "ok".to_string(),
+            value: "Installed".to_string(),
+            detail: "Waydroid command-line tool is available in system PATH.".to_string(),
+            remediation: None,
+        });
+    } else {
+        items.push(DiagnosticItem {
+            key: "waydroid".to_string(),
+            title: "Waydroid Package".to_string(),
+            status: "error".to_string(),
+            value: "Not Installed".to_string(),
+            detail: "Waydroid command is missing. It must be installed before starting or initializing containers.".to_string(),
+            remediation: pm.map(|p| p.user_install_command(&["waydroid"])),
+        });
+    }
+
+    // 7. ADB / android-tools
+    let has_adb = resolve_program("adb").is_some() || trusted_program("adb").is_some();
+    if has_adb {
+        items.push(DiagnosticItem {
+            key: "adb".to_string(),
+            title: "Android Debug Bridge".to_string(),
+            status: "ok".to_string(),
+            value: "Installed".to_string(),
+            detail: "adb is available for unprivileged container queries and inspection."
+                .to_string(),
+            remediation: None,
+        });
+    } else {
+        items.push(DiagnosticItem {
+            key: "adb".to_string(),
+            title: "Android Debug Bridge".to_string(),
+            status: "info".to_string(),
+            value: "Not Installed".to_string(),
+            detail: "adb is optional but recommended for non-root container queries.".to_string(),
+            remediation: pm.map(|p| p.user_install_command(&["adb"])),
+        });
+    }
+
+    // 8. Root Elevation Tool (polkit / sudo)
+    if let Some(tool) = has_elevation_tool() {
+        items.push(DiagnosticItem {
+            key: "elevation".to_string(),
+            title: "Privilege Elevation".to_string(),
+            status: "ok".to_string(),
+            value: match tool {
+                "pkexec" => "Polkit (pkexec)".to_string(),
+                _ => "sudo".to_string(),
+            },
+            detail: format!(
+                "Authentication agent '{tool}' is available for administrative operations."
+            ),
+            remediation: None,
+        });
+    } else {
+        items.push(DiagnosticItem {
+            key: "elevation".to_string(),
+            title: "Privilege Elevation".to_string(),
+            status: "error".to_string(),
+            value: "Missing".to_string(),
+            detail: "Neither pkexec nor sudo was found. Administrative operations will fail."
+                .to_string(),
+            remediation: pm.map(|p| p.user_install_command(&["polkit"])),
+        });
+    }
+
+    // 9. Git
+    let has_git = resolve_program("git").is_some() || trusted_program("git").is_some();
+    if has_git {
+        items.push(DiagnosticItem {
+            key: "git".to_string(),
+            title: "Git Version Control".to_string(),
+            status: "ok".to_string(),
+            value: "Installed".to_string(),
+            detail: "git is available to download pinned third-party helper checkouts.".to_string(),
+            remediation: None,
+        });
+    } else {
+        items.push(DiagnosticItem {
+            key: "git".to_string(),
+            title: "Git Version Control".to_string(),
+            status: "warning".to_string(),
+            value: "Not Installed".to_string(),
+            detail: "git is required by GApps, ARM Translation, and Phantom installers."
+                .to_string(),
+            remediation: pm.map(|p| p.user_install_command(&["git"])),
+        });
+    }
+
+    // 10. Python 3 & venv
+    let (has_py, has_venv) = check_python_venv_available();
+    if has_py && has_venv {
+        items.push(DiagnosticItem {
+            key: "python".to_string(),
+            title: "Python 3 & venv".to_string(),
+            status: "ok".to_string(),
+            value: "Ready".to_string(),
+            detail: "Python 3 and venv module are ready for isolated script execution.".to_string(),
+            remediation: None,
+        });
+    } else if has_py {
+        items.push(DiagnosticItem {
+            key: "python".to_string(),
+            title: "Python 3 & venv".to_string(),
+            status: "error".to_string(),
+            value: "venv Missing".to_string(),
+            detail: "Python 3 is present but python3-venv is missing. Debian/Ubuntu systems require python3-venv.".to_string(),
+            remediation: pm.map(|p| p.user_install_command(&["python3-venv"])),
+        });
+    } else {
+        items.push(DiagnosticItem {
+            key: "python".to_string(),
+            title: "Python 3 & venv".to_string(),
+            status: "error".to_string(),
+            value: "Not Installed".to_string(),
+            detail: "Python 3 is required by GApps and ARM Translation installers.".to_string(),
+            remediation: pm.map(|p| p.user_install_command(&["python3", "python3-venv"])),
+        });
+    }
+
+    // 11. squashfs extraction tool
+    let has_squash =
+        resolve_program("unsquashfs").is_some() || trusted_program("unsquashfs").is_some();
+    if has_squash {
+        items.push(DiagnosticItem {
+            key: "squashfs".to_string(),
+            title: "SquashFS Tools".to_string(),
+            status: "ok".to_string(),
+            value: "unsquashfs Ready".to_string(),
+            detail: "unsquashfs is available to unpack Android filesystem images.".to_string(),
+            remediation: None,
+        });
+    } else {
+        items.push(DiagnosticItem {
+            key: "squashfs".to_string(),
+            title: "SquashFS Tools".to_string(),
+            status: "warning".to_string(),
+            value: "Missing".to_string(),
+            detail:
+                "unsquashfs is required to extract Android images for GApps and ARM Translation."
+                    .to_string(),
+            remediation: pm.map(|p| p.user_install_command(&["squashfs"])),
+        });
+    }
+
+    // 12. lzip
+    let has_lzip = resolve_program("lzip").is_some() || trusted_program("lzip").is_some();
+    if has_lzip {
+        items.push(DiagnosticItem {
+            key: "lzip".to_string(),
+            title: "Lzip Decompressor".to_string(),
+            status: "ok".to_string(),
+            value: "lzip Ready".to_string(),
+            detail: "lzip is available to extract MindTheGapps and libhoudini archives."
+                .to_string(),
+            remediation: None,
+        });
+    } else {
+        items.push(DiagnosticItem {
+            key: "lzip".to_string(),
+            title: "Lzip Decompressor".to_string(),
+            status: "warning".to_string(),
+            value: "Missing".to_string(),
+            detail: "lzip is required to decompress archives for GApps and ARM Translation."
+                .to_string(),
+            remediation: pm.map(|p| p.user_install_command(&["lzip"])),
+        });
+    }
+
+    // 13. xdg-open
+    let has_xdg = resolve_program("xdg-open").is_some() || trusted_program("xdg-open").is_some();
+    if has_xdg {
+        items.push(DiagnosticItem {
+            key: "xdg_open".to_string(),
+            title: "File Manager Launcher".to_string(),
+            status: "ok".to_string(),
+            value: "xdg-open Ready".to_string(),
+            detail: "xdg-open is available to open shared storage in your default file manager."
+                .to_string(),
+            remediation: None,
+        });
+    } else {
+        items.push(DiagnosticItem {
+            key: "xdg_open".to_string(),
+            title: "File Manager Launcher".to_string(),
+            status: "info".to_string(),
+            value: "Missing".to_string(),
+            detail: "xdg-open is needed to open the Android shared media folder in a file manager."
+                .to_string(),
+            remediation: pm.map(|p| p.user_install_command(&["xdg-utils"])),
+        });
+    }
+
+    // 14. Terminal Emulator for Phantom
+    let terminal = find_terminal_emulator();
+    if let Some(ref term) = terminal {
+        items.push(DiagnosticItem {
+            key: "terminal".to_string(),
+            title: "Terminal Emulator".to_string(),
+            status: "ok".to_string(),
+            value: term.clone(),
+            detail: format!(
+                "Terminal emulator '{term}' detected to run Phantom Keymapper interactive shell."
+            ),
+            remediation: None,
+        });
+    } else {
+        items.push(DiagnosticItem {
+            key: "terminal".to_string(),
+            title: "Terminal Emulator".to_string(),
+            status: "info".to_string(),
+            value: "Not Detected".to_string(),
+            detail: "A desktop terminal emulator (alacritty, foot, kitty, konsole, gnome-terminal) is needed to launch Phantom Keymapper.".to_string(),
+            remediation: pm.map(|p| p.user_install_command(&["alacritty"])),
+        });
+    }
+
+    // 15. Disk Space
+    let disk_kb = check_available_disk_space_kb(Path::new("/var/lib/waydroid"));
+    if let Some(kb) = disk_kb {
+        let (status, detail, remediation) = if kb >= 1_500_000 {
+            (
+                "ok",
+                "Sufficient disk space available for system images and container operations.",
+                None,
+            )
+        } else if kb >= 500_000 {
+            (
+                "warning",
+                "Low disk space (< 1.5 GB). Initializing Waydroid requires ~1.2 GB of free space.",
+                Some("Free up at least 1.5 GB on host root or /var filesystem.".to_string()),
+            )
+        } else {
+            (
+                "error",
+                "Critically low disk space (< 500 MB). Waydroid container operations may fail.",
+                Some("Free up disk space immediately on host root or /var filesystem.".to_string()),
+            )
+        };
+        items.push(DiagnosticItem {
+            key: "disk".to_string(),
+            title: "Available Storage".to_string(),
+            status: status.to_string(),
+            value: format_disk_space(kb),
+            detail: detail.to_string(),
+            remediation,
+        });
+    } else {
+        items.push(DiagnosticItem {
+            key: "disk".to_string(),
+            title: "Available Storage".to_string(),
+            status: "info".to_string(),
+            value: "Unknown".to_string(),
+            detail: "Unable to query available disk space via df.".to_string(),
+            remediation: None,
+        });
+    }
+
+    // 16. Network Connectivity
+    let online = check_network_connectivity();
+    if online {
+        items.push(DiagnosticItem {
+            key: "network".to_string(),
+            title: "Network Connection".to_string(),
+            status: "ok".to_string(),
+            value: "Connected".to_string(),
+            detail: "Internet connectivity verified. Online downloads (system images, GApps, ARM translation) ready.".to_string(),
+            remediation: None,
+        });
+    } else {
+        items.push(DiagnosticItem {
+            key: "network".to_string(),
+            title: "Network Connection".to_string(),
+            status: "warning".to_string(),
+            value: "Offline".to_string(),
+            detail: "No internet connection detected. Offline host cannot download container images or third-party packages.".to_string(),
+            remediation: Some("Connect your Linux host to the internet to download required system images and packages.".to_string()),
+        });
+    }
+
+    // 17. Waydroid Android image initialization
+    if waydroid::is_initialized() {
+        items.push(DiagnosticItem {
+            key: "waydroid_image".to_string(),
+            title: "Android System Image".to_string(),
+            status: "ok".to_string(),
+            value: "Initialized".to_string(),
+            detail: "The Waydroid Android image is initialized and ready for sessions and add-ons."
+                .to_string(),
+            remediation: None,
+        });
+    } else {
+        items.push(DiagnosticItem {
+            key: "waydroid_image".to_string(),
+            title: "Android System Image".to_string(),
+            status: "warning".to_string(),
+            value: "Not Initialized".to_string(),
+            detail: "The Android image has not been initialized. GApps and ARM Translation need an initialized image."
+                .to_string(),
+            remediation: Some(
+                "Run the Setup Wizard, or run: sudo waydroid init".to_string(),
+            ),
+        });
+    }
+
+    DiagnosticsReport {
+        items,
+        package_manager: pm.map(|p| p.name().to_string()),
+    }
+}
+
+#[tauri::command]
+async fn check_host_diagnostics() -> DiagnosticsReport {
+    tauri::async_runtime::spawn_blocking(collect_diagnostics)
+        .await
+        .unwrap_or_else(|_| DiagnosticsReport {
+            items: Vec::new(),
+            package_manager: None,
+        })
 }
 
 #[tauri::command]
 async fn waydroid_init(app: AppHandle) -> CommandResult {
-    let waydroid_missing =
-        resolve_program("waydroid").is_none() && trusted_program("waydroid").is_none();
+    if has_elevation_tool().is_none() {
+        return AppError::elevation_denied(
+            "No root elevation tool (pkexec or sudo) found on host. Cannot initialize Waydroid.",
+        )
+        .into();
+    }
+
+    if !check_network_connectivity() {
+        return AppError::command_failed(
+            "No internet connection detected. An active internet connection is required to download Waydroid LineageOS system images (~1.2 GB).",
+        )
+        .into();
+    }
+
+    if let Some(kb) = check_available_disk_space_kb(Path::new("/var/lib/waydroid")) {
+        if kb < 1_500_000 {
+            return AppError::command_failed(format!(
+                "Insufficient disk space on host: only {:.1} GB available. Waydroid initialization requires at least 1.5 GB.",
+                kb as f64 / 1_048_576.0
+            ))
+            .into();
+        }
+    }
+
+    // The privileged script runs with SAFE_PATH, so a waydroid binary in a
+    // user-writable directory is not usable after elevation.
+    let waydroid_missing = trusted_program("waydroid").is_none();
     let pm = platform::PackageManager::detect();
 
     // Fast-fail before root elevation if Waydroid is missing on an unsupported distribution
@@ -1068,6 +1805,15 @@ async fn check_multitouch_status() -> CommandResult {
 /// the features are already live.
 #[tauri::command]
 async fn install_multitouch(app: AppHandle) -> CommandResult {
+    if has_elevation_tool().is_none() {
+        return AppError::elevation_denied(
+            "No root elevation tool (pkexec or sudo) found on host. Cannot perform administrative operations.",
+        )
+        .into();
+    }
+    if let Err(error) = require_initialized_waydroid("declaring multitouch features") {
+        return error.into();
+    }
     stream_privileged_script(
         app,
         capabilities::install_script(),
@@ -1464,6 +2210,12 @@ async fn waydroid_adb_cmd(command: String) -> CommandResult {
 
 #[tauri::command]
 async fn waydroid_wipe(app: AppHandle) -> CommandResult {
+    if has_elevation_tool().is_none() {
+        return AppError::elevation_denied(
+            "No root elevation tool (pkexec or sudo) found on host. Cannot perform administrative operations.",
+        )
+        .into();
+    }
     let script = r#"
     set -eu
     echo "[SYSTEM] Stopping Waydroid services..."
@@ -1537,31 +2289,49 @@ test "$(git -C {repo} rev-parse HEAD)" = {rev}
     )
 }
 
-fn gapps_install_script(pm: Option<platform::PackageManager>) -> String {
-    let dep_install = match pm {
+/// Dependencies shared by the GApps and ARM Translation root scripts. Root
+/// scripts run with `SAFE_PATH`, so these are the same programs preflight
+/// checks. Install every missing package before the script does any work, so a
+/// supported distro cannot fail after the root prompt because `git`, `venv`, or
+/// the extraction tools were absent.
+fn waydroid_script_dep_install(pm: Option<platform::PackageManager>, action: &str) -> String {
+    let check = r#"missing=""
+command -v git > /dev/null || missing="$missing git"
+if ! command -v python3 > /dev/null; then
+    missing="$missing python3"
+elif ! python3 -c 'import venv, ensurepip' > /dev/null 2>&1; then
+    missing="$missing python3-venv"
+fi
+command -v unsquashfs > /dev/null || missing="$missing squashfs-tools"
+command -v lzip > /dev/null || missing="$missing lzip"
+"#;
+
+    match pm {
         Some(pm) => format!(
-            r#"if ! command -v unsquashfs > /dev/null || ! command -v lzip > /dev/null; then
-    echo "[SYSTEM] Installing required extraction tools via {}..."
-    {}
+            r#"{check}if [ -n "$missing" ]; then
+    echo "[SYSTEM] Installing required tools via {name}..."
+    {install}
 fi
 "#,
-            pm.name(),
-            pm.install_command(&["squashfs", "lzip"])
+            check = check,
+            name = pm.name(),
+            install = pm.install_command(&["git", "python3", "python3-venv", "squashfs", "lzip"]),
         ),
-        None => r#"if ! command -v unsquashfs > /dev/null || ! command -v lzip > /dev/null; then
-    echo "[ERROR] unsquashfs and lzip are required to extract GApps." >&2
+        None => format!(
+            r#"{check}if [ -n "$missing" ]; then
+    echo "[ERROR] Missing required tools:$missing. Install them manually before {action}." >&2
     exit 1
 fi
-"#
-        .to_string(),
-    };
+"#,
+            check = check,
+            action = action,
+        ),
+    }
+}
 
+fn gapps_install_script(pm: Option<platform::PackageManager>) -> String {
     format!(
         r#"set -eu
-if ! command -v git > /dev/null; then
-    echo "[ERROR] git is required to download the pinned GApps helper." >&2
-    exit 1
-fi
 {dep_install}rm -rf /tmp/gapps /tmp/waydroid
 repo="$ARCHDROID_WORK/waydroid_script"
 {checkout}
@@ -1576,37 +2346,15 @@ fi
 rm -rf /tmp/gapps /tmp/waydroid
 echo "[SUCCESS] GApps installation complete! Please Start Waydroid."
 "#,
-        dep_install = dep_install,
+        dep_install = waydroid_script_dep_install(pm, "installing GApps"),
         checkout = pinned_git_checkout("\"$repo\"", WAYDROID_SCRIPT_URL, WAYDROID_SCRIPT_REV),
         setup = waydroid_script_python_setup(),
     )
 }
 
 fn houdini_install_script(pm: Option<platform::PackageManager>) -> String {
-    let dep_install = match pm {
-        Some(pm) => format!(
-            r#"if ! command -v unsquashfs > /dev/null || ! command -v lzip > /dev/null; then
-    echo "[SYSTEM] Installing required extraction tools via {}..."
-    {}
-fi
-"#,
-            pm.name(),
-            pm.install_command(&["squashfs", "lzip"])
-        ),
-        None => r#"if ! command -v unsquashfs > /dev/null || ! command -v lzip > /dev/null; then
-    echo "[ERROR] unsquashfs and lzip are required to extract libhoudini." >&2
-    exit 1
-fi
-"#
-        .to_string(),
-    };
-
     format!(
         r#"set -eu
-if ! command -v git > /dev/null; then
-    echo "[ERROR] git is required to download the pinned libhoudini helper." >&2
-    exit 1
-fi
 {dep_install}rm -rf /tmp/houdiniunpack /tmp/waydroid
 repo="$ARCHDROID_WORK/waydroid_script"
 {checkout}
@@ -1621,7 +2369,7 @@ fi
 rm -rf /tmp/houdiniunpack /tmp/waydroid
 echo "[SUCCESS] ARM Translation installation complete!"
 "#,
-        dep_install = dep_install,
+        dep_install = waydroid_script_dep_install(pm, "installing ARM Translation"),
         checkout = pinned_git_checkout("\"$repo\"", WAYDROID_SCRIPT_URL, WAYDROID_SCRIPT_REV),
         setup = waydroid_script_python_setup(),
     )
@@ -1653,18 +2401,9 @@ echo "[SUCCESS] Phantom Keymapper installed successfully!"
 
 #[tauri::command]
 async fn install_gapps(app: AppHandle) -> CommandResult {
-    let missing_squash =
-        resolve_program("unsquashfs").is_none() && trusted_program("unsquashfs").is_none();
-    let missing_lzip =
-        resolve_program("lzip").is_none() && trusted_program("lzip").is_none();
     let pm = platform::PackageManager::detect();
-
-    if (missing_squash || missing_lzip) && pm.is_none() {
-        return AppError::not_found(
-            "squashfs-tools/lzip",
-            "Required extraction tools ('squashfs-tools' / 'lzip') are missing, and no supported package manager (pacman, apt-get, dnf, zypper) was found on this Linux distribution. Please install them manually before running the GApps installer.",
-        )
-        .into();
+    if let Err(error) = installer_preflight(pm, "installing GApps") {
+        return error.into();
     }
 
     stream_privileged_script(
@@ -1679,18 +2418,9 @@ async fn install_gapps(app: AppHandle) -> CommandResult {
 
 #[tauri::command]
 async fn install_houdini(app: AppHandle) -> CommandResult {
-    let missing_squash =
-        resolve_program("unsquashfs").is_none() && trusted_program("unsquashfs").is_none();
-    let missing_lzip =
-        resolve_program("lzip").is_none() && trusted_program("lzip").is_none();
     let pm = platform::PackageManager::detect();
-
-    if (missing_squash || missing_lzip) && pm.is_none() {
-        return AppError::not_found(
-            "squashfs-tools/lzip",
-            "Required extraction tools ('squashfs-tools' / 'lzip') are missing, and no supported package manager (pacman, apt-get, dnf, zypper) was found on this Linux distribution. Please install them manually before running the ARM Translation installer.",
-        )
-        .into();
+    if let Err(error) = installer_preflight(pm, "installing ARM Translation") {
+        return error.into();
     }
 
     stream_privileged_script(
@@ -1705,6 +2435,21 @@ async fn install_houdini(app: AppHandle) -> CommandResult {
 
 #[tauri::command]
 async fn install_phantom(app: AppHandle) -> CommandResult {
+    if !check_network_connectivity() {
+        return AppError::command_failed(
+            "No internet connection detected. Internet access is required to download Phantom source.",
+        )
+        .into();
+    }
+
+    let pm = platform::PackageManager::detect();
+    if let Err(error) = phantom_preflight(pm) {
+        return error.into();
+    }
+    if let Err(error) = phantom_disk_preflight() {
+        return error.into();
+    }
+
     // Phantom installs into $HOME/.local and its system wrapper is disabled, so
     // it must not run through pkexec/sudo. Running it as the desktop user also
     // avoids executing the user's Rust toolchain as root.
@@ -1715,21 +2460,30 @@ async fn install_phantom(app: AppHandle) -> CommandResult {
 
 #[tauri::command]
 fn run_phantom() -> CommandResult {
-    let script = "phantom";
-    let terminal_cmd = format!(
-        r#"
-if command -v konsole > /dev/null; then konsole -e bash -c '{}';
-elif command -v alacritty > /dev/null; then alacritty -e bash -c '{}';
-elif command -v gnome-terminal > /dev/null; then gnome-terminal -- bash -c '{}';
-elif command -v xterm > /dev/null; then xterm -e bash -c '{}';
-else notify-send "No terminal emulator found"; fi
-    "#,
-        script, script, script, script
-    );
+    let term = match find_terminal_emulator() {
+        Some(term) => term,
+        None => {
+            return AppError::not_found(
+                "terminal emulator",
+                "No supported terminal emulator (alacritty, foot, kitty, konsole, gnome-terminal, xterm) found. Please install a terminal emulator to run the Phantom Keymapper.",
+            )
+            .into();
+        }
+    };
 
-    let _output = Command::new("bash").arg("-c").arg(&terminal_cmd).output();
+    let result = match term.as_str() {
+        "gnome-terminal" => Command::new("gnome-terminal")
+            .args(["--", "bash", "-c", "phantom"])
+            .spawn(),
+        _ => Command::new(&term)
+            .args(["-e", "bash", "-c", "phantom"])
+            .spawn(),
+    };
 
-    CommandResult::with_message("Launched Phantom Keymapper.")
+    match result {
+        Ok(_) => CommandResult::with_message(&format!("Launched Phantom Keymapper via {term}.")),
+        Err(err) => AppError::from_spawn(&term, "Failed to spawn terminal emulator.", err).into(),
+    }
 }
 
 /// The single-flight slot. Streaming operations share one terminal, so only
@@ -2583,7 +3337,9 @@ mod tests {
         assert!(body.contains("export WAYDROID_CONFIG=/var/lib/waydroid/waydroid.cfg"));
         assert!(body.contains("mktemp -d /var/tmp/archdroid."));
         assert!(body.contains("chmod 700 \"$ARCHDROID_WORK\""));
-        assert!(body.contains("trap 'rm -rf \"$ARCHDROID_WORK\" /tmp/gapps /tmp/houdiniunpack /tmp/waydroid'"));
+        assert!(body.contains(
+            "trap 'rm -rf \"$ARCHDROID_WORK\" /tmp/gapps /tmp/houdiniunpack /tmp/waydroid'"
+        ));
         assert!(body.contains(ELEVATED_SENTINEL));
         assert!(body.trim_end().ends_with("echo body"));
     }
@@ -2859,21 +3615,57 @@ mod tests {
     #[test]
     fn installers_adapt_to_detected_package_manager() {
         let pacman_gapps = gapps_install_script(Some(platform::PackageManager::Pacman));
-        assert!(pacman_gapps.contains("pacman -S --needed --noconfirm squashfs-tools lzip"));
+        assert!(
+            pacman_gapps.contains("pacman -S --needed --noconfirm git python squashfs-tools lzip")
+        );
 
         let apt_gapps = gapps_install_script(Some(platform::PackageManager::Apt));
-        assert!(apt_gapps.contains("apt-get install -y --no-install-recommends squashfs-tools lzip"));
+        assert!(apt_gapps.contains(
+            "apt-get install -y --no-install-recommends git python3 python3-venv squashfs-tools lzip"
+        ));
 
         let dnf_gapps = gapps_install_script(Some(platform::PackageManager::Dnf));
-        assert!(dnf_gapps.contains("dnf install -y squashfs-tools lzip"));
+        assert!(dnf_gapps.contains("dnf install -y git python3 squashfs-tools lzip"));
 
         let zypper_gapps = gapps_install_script(Some(platform::PackageManager::Zypper));
-        assert!(zypper_gapps.contains("zypper --non-interactive install --no-recommends squashfs lzip"));
+        assert!(zypper_gapps.contains(
+            "zypper --non-interactive install --no-recommends git python3 squashfs lzip"
+        ));
 
         let unsupported_gapps = gapps_install_script(None);
         assert!(!unsupported_gapps.contains("pacman"));
         assert!(!unsupported_gapps.contains("apt-get"));
-        assert!(unsupported_gapps.contains("[ERROR] unsquashfs and lzip are required"));
+        assert!(unsupported_gapps.contains("[ERROR] Missing required tools:"));
+        assert!(unsupported_gapps.contains("squashfs-tools"));
+        assert!(unsupported_gapps.contains("lzip"));
+    }
+
+    #[test]
+    fn root_installers_preinstall_every_dependency_before_checkout() {
+        for pm in [
+            platform::PackageManager::Pacman,
+            platform::PackageManager::Apt,
+            platform::PackageManager::Dnf,
+            platform::PackageManager::Zypper,
+        ] {
+            for script in [
+                gapps_install_script(Some(pm)),
+                houdini_install_script(Some(pm)),
+            ] {
+                assert!(script.contains("command -v git"));
+                assert!(script.contains("import venv, ensurepip"));
+                assert!(script.contains("command -v unsquashfs"));
+                assert!(script.contains("command -v lzip"));
+                let install_at = script
+                    .find("Installing required tools via")
+                    .expect("dependency install step missing");
+                let checkout_at = script.find("git init -q").expect("checkout step missing");
+                assert!(
+                    install_at < checkout_at,
+                    "dependencies are installed after checkout"
+                );
+            }
+        }
     }
 
     #[test]
@@ -3582,13 +4374,102 @@ wait
 
     #[test]
     fn check_host_diagnostics_returns_core_items() {
-        let report = check_host_diagnostics();
-        assert_eq!(report.items.len(), 5);
+        let report = collect_diagnostics();
+        assert!(report.items.len() >= 16);
         let keys: Vec<_> = report.items.iter().map(|i| i.key.as_str()).collect();
         assert!(keys.contains(&"session"));
         assert!(keys.contains(&"kvm"));
         assert!(keys.contains(&"binder"));
         assert!(keys.contains(&"gpu"));
         assert!(keys.contains(&"service"));
+        assert!(keys.contains(&"waydroid"));
+        assert!(keys.contains(&"adb"));
+        assert!(keys.contains(&"elevation"));
+        assert!(keys.contains(&"git"));
+        assert!(keys.contains(&"python"));
+        assert!(keys.contains(&"squashfs"));
+        assert!(keys.contains(&"lzip"));
+        assert!(keys.contains(&"xdg_open"));
+        assert!(keys.contains(&"terminal"));
+        assert!(keys.contains(&"disk"));
+        assert!(keys.contains(&"network"));
+        assert!(keys.contains(&"waydroid_image"));
+    }
+
+    #[test]
+    fn preflight_helpers_report_system_resources() {
+        // Disk probe on root must report positive available storage
+        let disk_root = check_available_disk_space_kb(Path::new("/"));
+        assert!(disk_root.is_some());
+        assert!(disk_root.unwrap() > 0);
+
+        // format_disk_space helper checks
+        assert_eq!(format_disk_space(2_097_152), "2.0 GB Free");
+        assert_eq!(format_disk_space(512_000), "500 MB Free");
+
+        // Elevation tool must return pkexec or sudo on standard Linux host
+        let elevation = has_elevation_tool();
+        assert!(elevation.is_some());
+        let elev = elevation.unwrap();
+        assert!(elev == "pkexec" || elev == "sudo");
+    }
+
+    #[test]
+    fn dependency_probes_only_report_known_names_once() {
+        let gapps = gapps_missing_dependencies();
+        let allowed_gapps = ["git", "python3", "python3-venv", "squashfs", "lzip"];
+        for name in &gapps {
+            assert!(
+                allowed_gapps.contains(name),
+                "unexpected dependency: {name}"
+            );
+        }
+        let mut unique = gapps.clone();
+        unique.sort_unstable();
+        unique.dedup();
+        assert_eq!(unique.len(), gapps.len(), "duplicate dependency reported");
+
+        let (packages, sdk) = phantom_missing_dependencies();
+        let allowed_packages = ["git", "cargo", "jdk", "sed", "coreutils"];
+        for name in &packages {
+            assert!(
+                allowed_packages.contains(name),
+                "unexpected package dependency: {name}"
+            );
+        }
+        for name in &sdk {
+            assert!(
+                ["d8", "android.jar"].contains(name),
+                "unexpected SDK dependency: {name}"
+            );
+        }
+    }
+
+    #[test]
+    fn phantom_dependency_error_includes_package_and_sdk_remediation() {
+        let error = phantom_dependency_error(
+            &["cargo", "jdk"],
+            &["d8", "android.jar"],
+            Some(platform::PackageManager::Pacman),
+        );
+        let message = error.to_string();
+        assert!(message.contains("cargo, jdk, d8, android.jar"), "{message}");
+        assert!(
+            message.contains("sudo pacman -S --needed rust jdk-openjdk"),
+            "{message}"
+        );
+        assert!(message.contains("D8=/path/to/d8"), "{message}");
+        assert!(
+            message.contains("ANDROID_JAR=/path/to/android.jar"),
+            "{message}"
+        );
+
+        let unsupported = phantom_dependency_error(&["git"], &[], None);
+        assert!(
+            unsupported
+                .to_string()
+                .contains("distribution's package manager"),
+            "{unsupported}"
+        );
     }
 }

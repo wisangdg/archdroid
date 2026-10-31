@@ -472,7 +472,7 @@ isolasi UI, lalu validasi rilis.
     (6) Stepper visual terminal (`stepConfigs.js`) disinkronkan untuk mengenali output
     `apt-get install`, `dnf install`, dan `zypper`. Dilindungi unit test Rust & Node.js.
 
-- [ ] **P0-7.2 — Preflight dependency sebelum aksi.**
+- [x] **P0-7.2 — Preflight dependency sebelum aksi.**
   - **Kerjakan:** deteksi `waydroid`, `adb` (android-tools), Wayland, `/dev/kvm`,
     binder, `/dev/dri`, polkit agent atau sudo, `git`, `python3` +
     `python3-venv`, `squashfs-tools`, `lzip`, `xdg-open`, terminal emulator
@@ -480,6 +480,37 @@ isolasi UI, lalu validasi rilis.
   - **DoD:** setup wizard/diagnostik menampilkan item yang kurang beserta
     perintah perbaikannya; tidak ada installer yang baru gagal setelah prompt
     root.
+  - **Status:** selesai untuk preflight statis dan gating command.
+    (1) `collect_diagnostics()` di `src-tauri/src/lib.rs` memeriksa 17 item:
+    sesi Wayland/X11, `/dev/kvm`, binder, `/dev/dri`, daemon container,
+    `waydroid`, `adb`, polkit/sudo, `git`, `python3` + `python3-venv`,
+    `unsquashfs`, `lzip`, `xdg-open`, terminal emulator, ruang disk, jaringan,
+    dan status image Android. Setiap item yang bermasalah membawa
+    `remediation` yang dibangun dari `PackageManager::user_install_command()`.
+    (2) `HostDiagnostics.jsx` merender perintah perbaikan tersebut.
+    (3) `SetupWizard.jsx` menjalankan `check_host_diagnostics` sebelum tombol
+    init aktif, menampilkan item yang belum OK beserta perintah perbaikan, dan
+    menahan tombol bila elevation, jaringan, disk, atau `waydroid` tanpa
+    package manager masih bermasalah.
+    (4) `install_gapps`, `install_houdini`, dan `install_multitouch` memeriksa
+    elevation, jaringan, disk, serta `waydroid` terpasang dan image sudah
+    diinisialisasi sebelum meminta root. Script root GApps/Houdini juga
+    mendeteksi dan memasang `git`, `python3`/`python3-venv`, `unsquashfs`, dan
+    `lzip` yang hilang sebelum checkout, sehingga dependency tidak baru gagal
+    setelah prompt root. Pada distro tanpa package manager yang didukung,
+    script berhenti dengan daftar tool yang harus dipasang manual.
+    (5) `install_phantom` memeriksa `git`, `cargo`, JDK (`javac`/`jar`), `sed`,
+    `install`/coreutils, `d8`, `android.jar`, ruang disk `$HOME`, dan jaringan
+    sebelum menjalankan build sebagai user. `d8`/`android.jar` dideteksi dari
+    `D8`/`ANDROID_JAR`, PATH, atau Android SDK (`ANDROID_SDK_ROOT`,
+    `ANDROID_HOME`, `~/Android/Sdk`).
+    (6) Pemetaan paket baru (`cargo`→`rust` di Arch, `jdk`→`jdk-openjdk`/
+    `default-jdk-headless`/`java-17-openjdk-devel`, `coreutils`, `sed`) diuji di
+    `platform.rs`; helper preflight dan format pesan remediation diuji di
+    `lib.rs`; UI remediation diuji di `src/lib/preflight-ui.test.js`.
+  - **Batas:** uji live Waydroid/polkit/installer dan deteksi `d8`/`android.jar`
+    pada host tanpa Android SDK masuk P0-8. Preflight ini tidak menggantikan
+    uji end-to-end.
 
 - [ ] **P0-7.3 — Jangan instal paket sistem secara diam-diam.**
   - **Bukti:** `waydroid_init` menjalankan `pacman -S --noconfirm waydroid`

@@ -1297,6 +1297,174 @@ body {
   border: 1px solid var(--border-subtle);
 }
 
+.setup-preflight {
+  width: 100%;
+  text-align: left;
+  margin-bottom: 26px;
+  padding: 16px;
+  border-radius: var(--radius-md);
+  background: rgba(10, 15, 26, 0.55);
+  border: 1px solid var(--border-subtle);
+}
+
+.setup-preflight-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.setup-preflight-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: var(--accent-primary);
+}
+
+.setup-preflight-heading h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.setup-preflight-heading p {
+  margin: 3px 0 0;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.setup-preflight-placeholder,
+.setup-preflight-ok {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 14px;
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px dashed var(--border-subtle);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.setup-preflight-error {
+  color: #f87171;
+  border-color: rgba(239, 68, 68, 0.4);
+}
+
+.setup-preflight-ok {
+  color: var(--accent-primary);
+  border-style: solid;
+  border-color: rgba(16, 185, 129, 0.3);
+}
+
+.setup-preflight-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 300px;
+  overflow-y: auto;
+  margin: 12px 0 0;
+  padding: 0 2px 0 0;
+}
+
+.setup-preflight-item {
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--border-medium);
+}
+
+.setup-preflight-item.status-ok {
+  border-left-color: var(--accent-primary);
+}
+
+.setup-preflight-item.status-warning {
+  border-left-color: #f59e0b;
+}
+
+.setup-preflight-item.status-error {
+  border-left-color: var(--accent-danger);
+}
+
+.setup-preflight-item.status-info {
+  border-left-color: var(--accent-info, #38bdf8);
+}
+
+.setup-preflight-item-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.setup-preflight-item-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.setup-preflight-item-value {
+  display: block;
+  margin-top: 3px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--text-secondary);
+  word-break: break-word;
+}
+
+.setup-preflight-item-detail {
+  margin: 4px 0 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.setup-preflight-fix {
+  display: block;
+  margin-top: 7px;
+  padding: 7px 9px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--border-subtle);
+  color: #a7f3d0;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.setup-preflight-toggle {
+  margin-top: 10px;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--accent-primary);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.setup-preflight-toggle:hover {
+  text-decoration: underline;
+}
+
+.setup-preflight-blocked {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0 0;
+  color: #f87171;
+  font-size: 12px;
+  font-weight: 600;
+}
+
 /* Terminal Modal Overlay */
 .terminal-overlay {
   position: fixed;
@@ -2618,6 +2786,34 @@ body {
   color: var(--text-muted);
   line-height: 1.45;
   margin: 4px 0 0 0;
+}
+
+.diag-remediation {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--border-subtle);
+}
+
+.diag-remediation-label {
+  display: block;
+  margin-bottom: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.diag-remediation code {
+  display: block;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  color: #a7f3d0;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .diag-loading-placeholder {

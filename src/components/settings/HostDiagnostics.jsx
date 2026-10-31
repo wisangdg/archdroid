@@ -139,6 +139,12 @@ export default function HostDiagnostics() {
                   <h4 className="diag-item-title">{item.title}</h4>
                   <span className="diag-item-value">{item.value}</span>
                   <p className="diag-item-detail">{item.detail}</p>
+                  {item.remediation && (
+                    <div className="diag-remediation">
+                      <span className="diag-remediation-label">Fix</span>
+                      <code>{item.remediation}</code>
+                    </div>
+                  )}
                 </div>
               </div>
             );

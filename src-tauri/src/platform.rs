@@ -61,13 +61,30 @@ impl PackageManager {
             (_, "lzip") => "lzip",
             (_, "waydroid") => "waydroid",
             (_, "git") => "git",
+            (PackageManager::Apt, "adb") => "adb",
+            (_, "adb") => "android-tools",
+            (PackageManager::Pacman, "python3") => "python",
+            (_, "python3") => "python3",
+            (PackageManager::Pacman, "python3-venv") => "python",
+            (PackageManager::Apt, "python3-venv") => "python3-venv",
+            (_, "python3-venv") => "python3",
+            (_, "xdg-utils") => "xdg-utils",
+            (PackageManager::Apt, "polkit") => "policykit-1",
+            (_, "polkit") => "polkit",
+            (PackageManager::Pacman, "cargo") => "rust",
+            (_, "cargo") => "cargo",
+            (PackageManager::Pacman, "jdk") => "jdk-openjdk",
+            (PackageManager::Apt, "jdk") => "default-jdk-headless",
+            (_, "jdk") => "java-17-openjdk-devel",
+            (_, "coreutils") => "coreutils",
+            (_, "sed") => "sed",
             (_, other) => other,
         }
     }
 
     /// Build the shell snippet to install missing packages with non-interactive flags.
     pub fn install_command(&self, packages: &[&str]) -> String {
-        let mapped: Vec<&str> = packages.iter().map(|p| self.package_name(p)).collect();
+        let mapped = self.map_packages(packages);
         let pkgs = mapped.join(" ");
         match self {
             PackageManager::Pacman => format!("pacman -S --needed --noconfirm {pkgs}"),
@@ -80,6 +97,35 @@ impl PackageManager {
             }
         }
     }
+
+    /// Build human-readable command for user remediation in terminal (prefixed with sudo).
+    pub fn user_install_command(&self, packages: &[&str]) -> String {
+        let mapped = self.map_packages(packages);
+        let pkgs = mapped.join(" ");
+        match self {
+            PackageManager::Pacman => format!("sudo pacman -S --needed {pkgs}"),
+            PackageManager::Apt => {
+                format!("sudo apt-get install -y --no-install-recommends {pkgs}")
+            }
+            PackageManager::Dnf => format!("sudo dnf install -y {pkgs}"),
+            PackageManager::Zypper => {
+                format!("sudo zypper install -y -n {pkgs}")
+            }
+        }
+    }
+
+    /// Map generic requirements to distro package names, dropping duplicates
+    /// such as Arch's `python3` and `python3-venv`, which are both `python`.
+    fn map_packages<'a>(&self, packages: &[&'a str]) -> Vec<&'a str> {
+        let mut mapped: Vec<&str> = Vec::new();
+        for package in packages {
+            let name = self.package_name(package);
+            if !mapped.contains(&name) {
+                mapped.push(name);
+            }
+        }
+        mapped
+    }
 }
 
 #[cfg(test)]
@@ -89,16 +135,93 @@ mod tests {
 
     #[test]
     fn package_name_mapping_respects_distro_differences() {
-        assert_eq!(PackageManager::Pacman.package_name("squashfs"), "squashfs-tools");
-        assert_eq!(PackageManager::Apt.package_name("squashfs"), "squashfs-tools");
-        assert_eq!(PackageManager::Dnf.package_name("squashfs"), "squashfs-tools");
+        assert_eq!(
+            PackageManager::Pacman.package_name("squashfs"),
+            "squashfs-tools"
+        );
+        assert_eq!(
+            PackageManager::Apt.package_name("squashfs"),
+            "squashfs-tools"
+        );
+        assert_eq!(
+            PackageManager::Dnf.package_name("squashfs"),
+            "squashfs-tools"
+        );
         assert_eq!(PackageManager::Zypper.package_name("squashfs"), "squashfs");
 
-        for pm in [PackageManager::Pacman, PackageManager::Apt, PackageManager::Dnf, PackageManager::Zypper] {
+        for pm in [
+            PackageManager::Pacman,
+            PackageManager::Apt,
+            PackageManager::Dnf,
+            PackageManager::Zypper,
+        ] {
             assert_eq!(pm.package_name("lzip"), "lzip");
             assert_eq!(pm.package_name("waydroid"), "waydroid");
             assert_eq!(pm.package_name("git"), "git");
         }
+
+        assert_eq!(PackageManager::Apt.package_name("adb"), "adb");
+        assert_eq!(PackageManager::Pacman.package_name("adb"), "android-tools");
+        assert_eq!(PackageManager::Dnf.package_name("adb"), "android-tools");
+        assert_eq!(PackageManager::Zypper.package_name("adb"), "android-tools");
+
+        assert_eq!(PackageManager::Pacman.package_name("python3"), "python");
+        assert_eq!(PackageManager::Apt.package_name("python3"), "python3");
+        assert_eq!(
+            PackageManager::Pacman.package_name("python3-venv"),
+            "python"
+        );
+        assert_eq!(
+            PackageManager::Apt.package_name("python3-venv"),
+            "python3-venv"
+        );
+        assert_eq!(PackageManager::Dnf.package_name("python3-venv"), "python3");
+
+        assert_eq!(PackageManager::Pacman.package_name("cargo"), "rust");
+        assert_eq!(PackageManager::Apt.package_name("cargo"), "cargo");
+        assert_eq!(PackageManager::Dnf.package_name("cargo"), "cargo");
+        assert_eq!(PackageManager::Zypper.package_name("cargo"), "cargo");
+
+        assert_eq!(PackageManager::Pacman.package_name("jdk"), "jdk-openjdk");
+        assert_eq!(
+            PackageManager::Apt.package_name("jdk"),
+            "default-jdk-headless"
+        );
+        assert_eq!(
+            PackageManager::Dnf.package_name("jdk"),
+            "java-17-openjdk-devel"
+        );
+        assert_eq!(
+            PackageManager::Zypper.package_name("jdk"),
+            "java-17-openjdk-devel"
+        );
+
+        assert_eq!(
+            PackageManager::Pacman.package_name("coreutils"),
+            "coreutils"
+        );
+        assert_eq!(PackageManager::Apt.package_name("sed"), "sed");
+    }
+
+    #[test]
+    fn user_install_command_formats_sudo_terminal_command() {
+        let pkgs = &["waydroid"];
+        assert_eq!(
+            PackageManager::Pacman.user_install_command(pkgs),
+            "sudo pacman -S --needed waydroid"
+        );
+        assert_eq!(
+            PackageManager::Apt.user_install_command(pkgs),
+            "sudo apt-get install -y --no-install-recommends waydroid"
+        );
+        assert_eq!(
+            PackageManager::Dnf.user_install_command(pkgs),
+            "sudo dnf install -y waydroid"
+        );
+        assert_eq!(
+            PackageManager::Zypper.user_install_command(pkgs),
+            "sudo zypper install -y -n waydroid"
+        );
     }
 
     #[test]
@@ -123,6 +246,31 @@ mod tests {
     }
 
     #[test]
+    fn package_mapping_deduplicates_shared_names() {
+        let pkgs = &["python3", "python3-venv"];
+        assert_eq!(
+            PackageManager::Pacman.install_command(pkgs),
+            "pacman -S --needed --noconfirm python"
+        );
+        assert_eq!(
+            PackageManager::Apt.install_command(pkgs),
+            "DEBIAN_FRONTEND=noninteractive apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends python3 python3-venv"
+        );
+        assert_eq!(
+            PackageManager::Dnf.install_command(pkgs),
+            "dnf install -y python3"
+        );
+        assert_eq!(
+            PackageManager::Zypper.install_command(pkgs),
+            "zypper --non-interactive install --no-recommends python3"
+        );
+        assert_eq!(
+            PackageManager::Pacman.user_install_command(pkgs),
+            "sudo pacman -S --needed python"
+        );
+    }
+
+    #[test]
     fn detect_in_identifies_distro_binaries() {
         let temp = std::env::temp_dir().join(format!("archdroid-pm-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&temp);
@@ -136,25 +284,37 @@ mod tests {
         // Pacman
         let pacman_bin = temp.join("pacman");
         fs::write(&pacman_bin, "#!/bin/sh\n").unwrap();
-        assert_eq!(PackageManager::detect_in(&[temp_str]), Some(PackageManager::Pacman));
+        assert_eq!(
+            PackageManager::detect_in(&[temp_str]),
+            Some(PackageManager::Pacman)
+        );
         fs::remove_file(&pacman_bin).unwrap();
 
         // Apt
         let apt_bin = temp.join("apt-get");
         fs::write(&apt_bin, "#!/bin/sh\n").unwrap();
-        assert_eq!(PackageManager::detect_in(&[temp_str]), Some(PackageManager::Apt));
+        assert_eq!(
+            PackageManager::detect_in(&[temp_str]),
+            Some(PackageManager::Apt)
+        );
         fs::remove_file(&apt_bin).unwrap();
 
         // Dnf
         let dnf_bin = temp.join("dnf");
         fs::write(&dnf_bin, "#!/bin/sh\n").unwrap();
-        assert_eq!(PackageManager::detect_in(&[temp_str]), Some(PackageManager::Dnf));
+        assert_eq!(
+            PackageManager::detect_in(&[temp_str]),
+            Some(PackageManager::Dnf)
+        );
         fs::remove_file(&dnf_bin).unwrap();
 
         // Zypper
         let zypper_bin = temp.join("zypper");
         fs::write(&zypper_bin, "#!/bin/sh\n").unwrap();
-        assert_eq!(PackageManager::detect_in(&[temp_str]), Some(PackageManager::Zypper));
+        assert_eq!(
+            PackageManager::detect_in(&[temp_str]),
+            Some(PackageManager::Zypper)
+        );
 
         let _ = fs::remove_dir_all(&temp);
     }

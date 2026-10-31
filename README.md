@@ -42,6 +42,35 @@ ArchDroid dirancang dengan arsitektur **multi-distro** yang secara otomatis mend
    - Untuk GUI desktop: Agen Polkit aktif (misalnya `hyprpolkitagent`, `polkit-gnome`, atau `polkit-kde-agent`).
    - Atau jalankan aplikasi dari terminal jika menggunakan fallback sudo.
 
+### Preflight Dependency
+
+Sebelum aksi yang membutuhkan dependency atau root, ArchDroid memeriksa host dan
+menampilkan item yang kurang beserta perintah perbaikannya:
+
+- **Setup Wizard**: menampilkan hasil `check_host_diagnostics` sebelum tombol
+  inisialisasi aktif. Item elevation, jaringan, disk, atau `waydroid` tanpa
+  package manager yang didukung akan menahan tombol init.
+- **Settings → Host Diagnostics**: menampilkan 17 pemeriksaan, termasuk
+  `waydroid`, `adb`, Wayland, `/dev/kvm`, binder, `/dev/dri`, polkit/sudo,
+  `git`, `python3` + `python3-venv`, `unsquashfs`, `lzip`, `xdg-open`, terminal
+  emulator, ruang disk, jaringan, dan status image Android.
+- **Installer GApps/Houdini/Multitouch**: gagal cepat sebelum prompt root bila
+  elevation, jaringan, disk, atau image Waydroid belum siap. Script root
+  GApps/Houdini juga memasang `git`, `python3`/`python3-venv`, `unsquashfs`,
+  dan `lzip` yang hilang sebelum checkout. Pada distro tanpa package manager
+  yang didukung, script berhenti dengan daftar tool yang harus dipasang manual.
+- **Phantom Keymapper**: build membutuhkan `git`, `cargo`, JDK (`javac` dan
+  `jar`), `sed`, `install`, `d8`, dan `android.jar`. `d8`/`android.jar` tidak
+  selalu tersedia di repositori distro; instal Android SDK command-line tools
+  dan set `ANDROID_SDK_ROOT`/`ANDROID_HOME`, atau set `D8` dan `ANDROID_JAR`
+  secara eksplisit. Preflight menampilkan perintah paket untuk dependency yang
+  bisa dipasang lewat package manager dan instruksi SDK untuk `d8`/`android.jar`.
+
+> [!IMPORTANT]
+> Preflight memeriksa ketersediaan dan konfigurasi, bukan membuktikan bahwa
+> Waydroid, polkit, atau installer berhasil di host tertentu. Validasi live
+> tetap dilakukan pada P0-8 di VM/mesin uji sekali pakai.
+
 ---
 
 ## 3. Fitur Utama

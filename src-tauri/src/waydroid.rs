@@ -31,6 +31,17 @@ use crate::error::{AppError, Result};
 
 pub const BINARY: &str = "waydroid";
 
+/// Written by `waydroid init`; its presence is the cheap, root-free proof that
+/// an Android image exists. `waydroid status` is authoritative but needs the
+/// CLI and a reachable session, so preflight uses this file first.
+pub const CONFIG_PATH: &str = "/var/lib/waydroid/waydroid.cfg";
+
+/// Is the Android system image initialized? A missing config is the same state
+/// that makes `waydroid status` print "Waydroid is not initialized".
+pub fn is_initialized() -> bool {
+    Path::new(CONFIG_PATH).is_file()
+}
+
 /// Shown when `waydroid` cannot be found on PATH.
 const HINT: &str = "Install it with your package manager, then run the setup wizard.";
 
