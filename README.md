@@ -254,6 +254,12 @@ rm -rf ~/.local/share/waydroid
    Injeksi libhoudini bergantung pada ketersediaan image Google Android TV upstream yang diunduh melalui skrip helper ter-pin. Game yang menggunakan sistem anti-cheat tingkat kernel (seperti game tertentu dengan proteksi ketat) mungkin tidak dapat berjalan pada container emulator.
 4. **Tingkat Dukungan Distro**:
    Dukungan penuh (Tier 1) yang diverifikasi live mencakup keluarga Arch Linux. Distro Tier 2 (Debian, Ubuntu, Fedora, openSUSE) berstatus preview dan belum melalui pengujian live di seluruh varian rilisnya.
+5. **Cakupan Uji Live yang Belum Lengkap**:
+   Semua alur utama diuji live di VM Arch (lihat [`docs/P0-8.2-MATRIX-RESULTS.md`](docs/P0-8.2-MATRIX-RESULTS.md)). Yang belum: peluncuran `phantom-gui` asli dari tombol Launch Keymapper (app melaporkan error bila GUI langsung keluar), drag-and-drop pada compositor Wayland sungguhan (GNOME/KDE/Hyprland; yang teruji adalah XDND/X11), serta matriks GPU dan desktop. Jika alur ini gagal di sistem Anda, lampirkan Diagnostic Bundle saat melapor.
+6. **Integritas Arsip Add-on**:
+   Skrip `waydroid_script` dipin ke commit tertentu dan dependensi Python-nya diverifikasi SHA-256, tetapi arsip GApps/libhoudini yang diunduhnya dicocokkan dengan **MD5** yang tertanam di commit tersebut. MD5 mencegah file rusak atau tertukar, tetapi bukan perlindungan kriptografis yang kuat.
+7. **Probe Konektivitas**:
+   Pemeriksaan "online" membuka koneksi TCP tanpa data ke `1.1.1.1:53` (lalu `8.8.8.8:53`). Di jaringan yang memblokir DNS publik, diagnostik dapat menampilkan "Offline" walaupun unduhan dari upstream tetap bisa berjalan. Rincian ada di [PRIVACY.md](PRIVACY.md).
 
 ---
 

@@ -92,26 +92,29 @@
 
 ### Belum selesai / belum diverifikasi
 
-- [ ] Uji live Waydroid, polkit/sudo, installer root, dan wipe di mesin/VM
-  bersih. VM disposable sudah tersedia dari P0-8.1 dan matriks P0-8.2 sudah
-  dijalankan sebagian besar lewat CLI + GUI (Xvfb); sisa item terdaftar di
+- [x] Uji live Waydroid, polkit/sudo, installer root, dan wipe di VM bersih
+  (matriks P0-8.2, smoke rilis 0.1.0/0.1.1, dan uji 1 Nov untuk perubahan
+  setelah 0.1.1). Sisa yang belum: peluncuran `phantom-gui` asli setelah F8,
+  DnD Wayland-native di compositor sungguhan, matriks GPU/desktop; lihat
   `docs/P0-8.2-MATRIX-RESULTS.md`.
-- [ ] Verifikasi CSP di DevTools runtime (tidak ada pelanggaran saat start,
-  IPC, dialog, dan operasi panjang) belum dilakukan karena butuh sesi GUI;
-  masuk P0-8. Pemeriksaan statis `dist/` sudah bersih.
-- [ ] Uji live pkexec/sudo untuk hasil P0-3.1 (sukses, batal, exit non-zero,
-  sudo gagal) tetap harus dilakukan di P0-8.
-- [ ] Timeout dan Cancel per task sudah diimplementasikan, tetapi eksekusi
-  live-nya (polkit prompt, installer, init, wipe) belum diuji di mesin ini;
-  verifikasinya masuk P0-8.
+- [x] CSP runtime diverifikasi pada binary rilis lewat WebKitWebDriver
+  (1 Nov): eval, inline script, fetch/img/script remote diblokir dengan
+  `securitypolicyviolation`; nol pelanggaran saat start, semua tab, IPC,
+  Re-check, dan Diagnostic Bundle. Dialog file picker native tidak lewat
+  WebView sehingga tidak relevan untuk CSP.
+- [x] Uji live pkexec/sudo untuk hasil P0-3.1: polkit sukses/batal dan tanpa
+  agent (fallback sudo) lulus di matriks baris 21/22.
+- [x] Timeout dan Cancel per task diuji live: timeout 120 s dan Cancel task
+  root (F7, F9) tidak meninggalkan proses root, marker, atau workdir; Cancel
+  Houdini diuji ulang 1 Nov.
 - [x] Kontrak distro sudah multi-distro (P0-7.1), dan klaim dukungan diselaraskan dengan bukti uji (P0-9.4): Tier 1 adalah Arch Linux (teruji live di QEMU/KVM); Debian/Ubuntu/Fedora/openSUSE diklasifikasikan sebagai Tier 2 (best-effort); rilis resmi hanya mempublikasikan artefak teruji (PKGBUILD lokal dan AppImage).
 - [x] CI berjalan di remote GitHub Actions untuk `main` dan `pull_request`
   (P0-10).
 - [x] Lint frontend, test komponen Vitest, dan E2E WebDriver sudah ada dan
   berjalan di CI (P1-2).
-- [ ] Semua artefak sudah dibangun (`.pkg.tar.zst`, `.deb`, `.rpm`,
-  AppImage), tetapi hanya `.pkg.tar.zst` yang diuji install/launch/uninstall
-  (VM Arch).
+- [x] Artefak yang dipublikasikan (`.pkg.tar.zst` dan AppImage) sudah diuji
+  install/launch/uninstall di VM Arch (P0-9.1, smoke 0.1.0/0.1.1). `.deb` dan
+  `.rpm` tetap preview Tier 2 yang belum diuji dan tidak dilampirkan ke rilis.
 - [x] `README.md` (first run, troubleshooting, uninstall, known limitations),
   `LICENSE`, `SECURITY.md`, `PRIVACY.md`, `CHANGELOG.md`, dan `NOTICES.md`
   tersedia (P0-11).
@@ -120,9 +123,10 @@
   eslint) yang diterima; `npm audit --omit=dev` = 0 (P1-5).
 - [x] `cargo audit` berjalan di CI (P1-5); `cargo deny` belum dipakai.
 
-**Kesimpulan:** build dan test backend sudah sehat, tetapi aplikasi belum layak
-disebut production-ready sampai seluruh **P0** di bawah selesai dan diverifikasi
-secara live.
+**Kesimpulan (1 Nov):** seluruh P0 selesai dan terverifikasi live di VM,
+termasuk CSP runtime dan drag-and-drop (XDND). Gate §7 terpenuhi untuk `main`.
+Sisa risiko (peluncuran `phantom-gui` asli, DnD Wayland-native, matriks
+GPU/desktop) didokumentasikan sebagai known limitation.
 
 ---
 
@@ -1047,20 +1051,30 @@ Sisa:
 
 Rilis hanya boleh diberi label production-ready jika:
 
-- [ ] Semua item **P0** di atas selesai.
-- [ ] Ada bukti uji live untuk alur utama dan failure path di VM bersih.
-- [ ] CSP aktif, tidak ada request eksternal yang tidak disengaja, dan aplikasi
-  berfungsi offline.
-- [ ] Tidak ada installer root yang memakai dependency unpinned.
-- [ ] Artefak yang dipublikasikan sudah diuji install/uninstall dan punya
-  checksum/signature.
+- [x] Semua item **P0** di atas selesai (1 Nov).
+- [x] Ada bukti uji live untuk alur utama dan failure path di VM bersih
+  (`docs/P0-8.2-MATRIX-RESULTS.md`, skrip di `scripts/test-vm/live/`).
+- [x] CSP aktif (diverifikasi runtime 1 Nov), tidak ada request eksternal
+  yang tidak disengaja dari WebView, dan aplikasi berfungsi offline (matriks
+  baris 24). Satu-satunya koneksi otomatis adalah probe konektivitas backend
+  yang diungkap di `PRIVACY.md`.
+- [x] Tidak ada installer root yang memakai dependency unpinned:
+  `waydroid_script` dipin commit, wheel Python `--require-hashes`, arsip
+  GApps/libhoudini dicocokkan MD5 dari commit yang dipin (risiko sisa: MD5
+  lemah, didokumentasikan di README).
+- [x] Artefak yang dipublikasikan sudah diuji install/uninstall dan punya
+  checksum/signature (0.1.1: pkg + AppImage, `SHA256SUMS` + `.asc`).
 - [x] CI di remote hijau dan menjadi required check (`check` wajib di `main`
   sejak 1 Nov; force-push dan hapus branch diblokir; admin masih boleh push
   langsung).
 - [x] README, LICENSE, SECURITY, PRIVACY, CHANGELOG, dan third-party notices
   tersedia.
-- [ ] Known limitations dan residual risk didokumentasikan, bukan disembunyikan.
-- [ ] Tidak ada bug P0/P1 terbuka yang belum diterima secara eksplisit.
+- [x] Known limitations dan residual risk didokumentasikan (README §8,
+  `PRIVACY.md`, `docs/P0-8.2-MATRIX-RESULTS.md`).
+- [x] Tidak ada bug P0/P1 terbuka di `main`. F10 (install dari container
+  beku tidak muncul di daftar) dan F11 ada di rilis 0.1.1 dan baru hilang
+  setelah rilis berikutnya. Tooltip Start yang tertinggal diterima sebagai
+  kosmetik (P2).
 
 **Jangan menyebut production-ready hanya karena build `.deb`, `cargo test`, dan
 `npm run build` lulus.**
