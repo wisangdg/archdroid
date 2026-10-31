@@ -233,7 +233,16 @@ export WAYDROID_CONFIG=/var/lib/waydroid/waydroid.cfg
     kill -TERM 0
 ) &
 ARCHDROID_CANCEL_WATCH=$!
-trap 'kill "$ARCHDROID_CANCEL_WATCH" 2>/dev/null; rm -rf "$ARCHDROID_WORK" /tmp/gapps /tmp/houdiniunpack /tmp/waydroid' EXIT HUP INT TERM
+# The script body runs under `set -e`, which also applies inside traps: the
+# watcher is usually gone by now (its `kill -TERM 0` hits itself), so a bare
+# `kill` would fail and exit before `rm -rf`. A signal must also end the
+# script instead of resuming the next root command after the trap.
+archdroid_cleanup() {{
+    kill "$ARCHDROID_CANCEL_WATCH" 2>/dev/null || true
+    rm -rf "$ARCHDROID_WORK" /tmp/gapps /tmp/houdiniunpack /tmp/waydroid
+}}
+trap archdroid_cleanup EXIT
+trap 'exit 143' HUP INT TERM
 {script}
 "#,
         home = home,
@@ -362,11 +371,84 @@ mod tests {
         assert!(body.contains("ARCHDROID_CANCEL_FILE"));
         assert!(body.contains("ARCHDROID_CANCEL_WATCH=$!"));
         assert!(body.contains("kill -TERM 0"));
-        assert!(body.contains(
-            "trap 'kill \"$ARCHDROID_CANCEL_WATCH\" 2>/dev/null; rm -rf \"$ARCHDROID_WORK\" /tmp/gapps /tmp/houdiniunpack /tmp/waydroid'"
-        ));
+        assert!(body.contains("kill \"$ARCHDROID_CANCEL_WATCH\" 2>/dev/null || true"));
+        assert!(
+            body.contains("rm -rf \"$ARCHDROID_WORK\" /tmp/gapps /tmp/houdiniunpack /tmp/waydroid")
+        );
+        assert!(body.contains("trap archdroid_cleanup EXIT"));
+        assert!(body.contains("trap 'exit 143' HUP INT TERM"));
         assert!(body.contains(ELEVATED_SENTINEL));
         assert!(body.trim_end().ends_with("echo body"));
+    }
+
+    /// Runs the real prelude (as the test user) with a `set -eu` body, the way
+    /// every installer script starts, and cancels it through the cancel file
+    /// the root-side watcher polls. Root groups cannot be signalled by the app,
+    /// so this watcher path is the only cancel that reaches them.
+    #[test]
+    fn cancel_file_ends_a_set_e_script_and_removes_its_work_dir() {
+        use std::os::unix::process::CommandExt;
+        use std::process::Stdio;
+        use std::time::{Duration, Instant};
+
+        let dir = std::env::temp_dir().join(format!("archdroid-prelude-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("test dir must be creatable");
+        let cancel_file = dir.join("cancel");
+        let work_file = dir.join("work");
+        let context = UserContext {
+            uid: 1234,
+            home: PathBuf::from("/home/archdroid-test"),
+        };
+        let body = elevate_env_for(
+            &context,
+            "set -eu\necho \"$ARCHDROID_WORK\" > \"$WORK_FILE\"\nsleep 300\necho resumed >> \"$WORK_FILE\"\n",
+        );
+        let mut child = Command::new("bash")
+            .args(["--noprofile", "--norc", "-c", &body])
+            .env("ARCHDROID_CANCEL_FILE", &cancel_file)
+            .env("WORK_FILE", &work_file)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            // `kill -TERM 0` in the watcher must not reach the test runner.
+            .process_group(0)
+            .spawn()
+            .expect("bash must start");
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let work = loop {
+            let text = std::fs::read_to_string(&work_file).unwrap_or_default();
+            if !text.trim().is_empty() {
+                break PathBuf::from(text.trim());
+            }
+            assert!(Instant::now() < deadline, "the script never started");
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        assert!(work.is_dir());
+
+        std::fs::write(&cancel_file, "cancel\n").expect("cancel file must be writable");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let status = loop {
+            if let Some(status) = child.try_wait().expect("try_wait must not fail") {
+                break status;
+            }
+            if Instant::now() > deadline {
+                let _ = child.kill();
+                panic!("the watcher did not stop the script");
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        };
+
+        let resumed = std::fs::read_to_string(&work_file).unwrap_or_default();
+        let work_left = work.exists();
+        let _ = std::fs::remove_dir_all(&work);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(!status.success());
+        assert!(!work_left, "the EXIT trap must remove $ARCHDROID_WORK");
+        assert!(
+            !resumed.contains("resumed"),
+            "a cancelled script must not run its next root command"
+        );
     }
 
     #[test]
