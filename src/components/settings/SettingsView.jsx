@@ -10,6 +10,7 @@ import {
 import ResolutionPresets from "./ResolutionPresets";
 import HostDiagnostics from "./HostDiagnostics";
 import AppLogPanel from "./AppLogPanel";
+import DiagnosticBundlePanel from "./DiagnosticBundlePanel";
 
 export default function SettingsView({
   multiWindow,
@@ -167,6 +168,8 @@ export default function SettingsView({
       <HostDiagnostics />
 
       <AppLogPanel />
+
+      <DiagnosticBundlePanel />
 
       {/* Diagnostic Logs */}
       <div className="glass-panel settings-card">

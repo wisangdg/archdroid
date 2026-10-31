@@ -130,7 +130,6 @@ fn argv(parts: &[&str]) -> Vec<String> {
 }
 
 /// `waydroid -V` prints the version.
-#[cfg(feature = "dev-commands")]
 pub fn argv_version() -> Vec<String> {
     argv(&["--version"])
 }
@@ -235,7 +234,6 @@ impl Waydroid {
         run_program(&self.program, args, timeout_secs, cancel)
     }
 
-    #[cfg(feature = "dev-commands")]
     pub fn version(&self) -> Result<String> {
         self.run(&argv_version(), TIMEOUT_QUICK)
             .map(|text| text.trim().to_string())
@@ -532,7 +530,6 @@ mod tests {
         assert_eq!(argv_session_stop(), vec!["session", "stop"]);
     }
 
-    #[cfg(feature = "dev-commands")]
     #[test]
     fn version_argv_matches_the_upstream_action() {
         assert_eq!(argv_version(), vec!["--version"]);

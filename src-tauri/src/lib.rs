@@ -11,6 +11,7 @@ use std::time::Duration;
 use tauri::{AppHandle, Manager};
 
 mod adb;
+mod bundle;
 mod capabilities;
 #[cfg(feature = "dev-commands")]
 mod device;
@@ -608,20 +609,34 @@ async fn app_log_read(app: AppHandle) -> CommandResult {
         let Some(path) = app_log_file(&app) else {
             return CommandResult::with_data(String::new());
         };
-        let read = || -> std::io::Result<String> {
-            let mut file = std::fs::File::open(&path)?;
-            let len = file.metadata()?.len();
-            file.seek(SeekFrom::Start(len.saturating_sub(MAX_LOG_VIEW_BYTES)))?;
-            let mut bytes = Vec::new();
-            file.read_to_end(&mut bytes)?;
-            Ok(redact_text(&String::from_utf8_lossy(&bytes)))
-        };
-        match read() {
-            Ok(text) => CommandResult::with_data(text),
+        match bundle::read_tail(&path, MAX_LOG_VIEW_BYTES) {
+            Ok(text) => CommandResult::with_data(redact_text(&text)),
             Err(e) => AppError::Io(e).into(),
         }
     })
     .await
+}
+
+/// What the Settings page shows after writing a diagnostic bundle.
+#[derive(Serialize)]
+struct DiagnosticBundle {
+    /// Where the file was written, with the home directory shown as `~`.
+    path: String,
+    content: String,
+}
+
+#[tauri::command]
+async fn diagnostic_bundle_create(
+    app: AppHandle,
+) -> std::result::Result<DiagnosticBundle, CommandResult> {
+    tauri::async_runtime::spawn_blocking(move || bundle::create(&app))
+        .await
+        .map_err(|e| CommandResult::from(AppError::Io(std::io::Error::other(e.to_string()))))?
+        .map(|(path, content)| DiagnosticBundle {
+            path: redact_text(&path.to_string_lossy()),
+            content,
+        })
+        .map_err(CommandResult::from)
 }
 
 /// Where the log lives, so Settings can tell the user.
@@ -1578,6 +1593,7 @@ pub fn run() {
             app_log_read,
             app_log_location,
             app_log_clear,
+            diagnostic_bundle_create,
             #[cfg(feature = "dev-commands")]
             waydroid_status_json,
             #[cfg(feature = "dev-commands")]
