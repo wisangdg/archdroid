@@ -25,6 +25,7 @@ pub mod code {
     pub const ADB_UNAUTHORIZED: &str = "adb_unauthorized";
     pub const COMMAND_FAILED: &str = "command_failed";
     pub const BUSY: &str = "busy";
+    pub const APPROVAL_REQUIRED: &str = "approval_required";
 }
 
 #[derive(Debug)]
@@ -59,6 +60,9 @@ pub enum AppError {
     CommandFailed { detail: String },
     /// Another streaming task already owns the single-flight slot.
     Busy { detail: String },
+    /// A privileged operation would install packages without the user having
+    /// approved the exact, distro-mapped package list first.
+    ApprovalRequired { detail: String },
     /// Anything that came out of `std::io`.
     Io(io::Error),
 }
@@ -119,6 +123,12 @@ impl AppError {
         }
     }
 
+    pub fn approval_required(detail: impl Into<String>) -> Self {
+        Self::ApprovalRequired {
+            detail: detail.into(),
+        }
+    }
+
     /// Map a failed `Command::spawn` onto the right variant, so a missing binary
     /// is reported as "not installed" instead of a bare I/O error.
     pub fn from_spawn(program: &str, hint: &str, error: io::Error) -> Self {
@@ -144,6 +154,7 @@ impl AppError {
             Self::AdbUnauthorized { .. } => code::ADB_UNAUTHORIZED,
             Self::CommandFailed { .. } => code::COMMAND_FAILED,
             Self::Busy { .. } => code::BUSY,
+            Self::ApprovalRequired { .. } => code::APPROVAL_REQUIRED,
             Self::Io(_) => code::IO,
         }
     }
@@ -217,6 +228,7 @@ impl fmt::Display for AppError {
                 f,
                 "another operation is already running ({detail}); wait for it to finish."
             ),
+            Self::ApprovalRequired { detail } => write!(f, "{detail}"),
             Self::Io(error) => write!(f, "{error}"),
         }
     }
@@ -342,6 +354,17 @@ mod tests {
         assert_eq!(failed.code(), code::COMMAND_FAILED);
         assert_eq!(failed.to_string(), "waydroid prop set did not take effect.");
         assert!(!failed.to_string().contains("exit code"));
+    }
+
+    #[test]
+    fn approval_required_is_distinct_from_a_failed_command() {
+        let error = AppError::approval_required("Review the package preview and confirm again.");
+        assert_eq!(error.code(), code::APPROVAL_REQUIRED);
+        assert_eq!(
+            error.to_string(),
+            "Review the package preview and confirm again."
+        );
+        assert!(!error.to_string().contains("exit code"));
     }
 
     #[test]

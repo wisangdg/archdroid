@@ -1,5 +1,5 @@
 import React, { useEffect } from "react";
-import { AlertTriangle, AlertOctagon, Trash2, ShieldAlert, X } from "lucide-react";
+import { AlertTriangle, AlertOctagon, Package, Trash2, ShieldAlert, X } from "lucide-react";
 
 export default function ConfirmModal({
   isOpen,
@@ -9,6 +9,7 @@ export default function ConfirmModal({
   cancelText = "Cancel",
   confirmVariant = "danger",
   iconType = "danger",
+  packagePreview = null,
   onConfirm,
   onCancel,
 }) {
@@ -67,6 +68,38 @@ export default function ConfirmModal({
         <div className="confirm-modal-body">
           <h3 id="confirm-modal-title" className="confirm-modal-title">{title}</h3>
           <p className="confirm-modal-desc">{description}</p>
+          {packagePreview && (
+            <div className="confirm-package-preview">
+              <div className="confirm-package-header">
+                <Package size={16} />
+                <span>System packages this action will install</span>
+              </div>
+              {packagePreview.packages.length > 0 ? (
+                <>
+                  <ul className="confirm-package-list">
+                    {packagePreview.packages.map((name) => (
+                      <li key={name}>{name}</li>
+                    ))}
+                  </ul>
+                  {packagePreview.command ? (
+                    <pre className="confirm-package-command">
+                      {packagePreview.command}
+                    </pre>
+                  ) : (
+                    <p className="confirm-package-note">
+                      No supported package manager was detected. Install these
+                      packages manually before continuing.
+                    </p>
+                  )}
+                </>
+              ) : (
+                <p className="confirm-package-note">
+                  No system packages will be installed. The action only uses
+                  tools that are already present.
+                </p>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="confirm-modal-actions">

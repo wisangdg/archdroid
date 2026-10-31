@@ -82,10 +82,20 @@ impl PackageManager {
         }
     }
 
-    /// Build the shell snippet to install missing packages with non-interactive flags.
+    /// Build the shell snippet to install missing packages with non-interactive
+    /// flags. Production code previews and runs the already-mapped list through
+    /// `install_mapped_command`, so this wrapper only serves the mapping tests.
+    #[cfg(test)]
     pub fn install_command(&self, packages: &[&str]) -> String {
-        let mapped = self.map_packages(packages);
-        let pkgs = mapped.join(" ");
+        let mapped = self.mapped_packages(packages);
+        self.install_mapped_command(&mapped)
+    }
+
+    /// Build the shell snippet from names that were already mapped for this
+    /// package manager. Preview and execution both use this so a distro package
+    /// name is never passed through the generic mapping twice.
+    pub fn install_mapped_command(&self, packages: &[&str]) -> String {
+        let pkgs = packages.join(" ");
         match self {
             PackageManager::Pacman => format!("pacman -S --needed --noconfirm {pkgs}"),
             PackageManager::Apt => {
@@ -100,8 +110,14 @@ impl PackageManager {
 
     /// Build human-readable command for user remediation in terminal (prefixed with sudo).
     pub fn user_install_command(&self, packages: &[&str]) -> String {
-        let mapped = self.map_packages(packages);
-        let pkgs = mapped.join(" ");
+        let mapped = self.mapped_packages(packages);
+        self.user_install_mapped_command(&mapped)
+    }
+
+    /// Human-readable remediation command for names already mapped for this
+    /// package manager.
+    pub fn user_install_mapped_command(&self, packages: &[&str]) -> String {
+        let pkgs = packages.join(" ");
         match self {
             PackageManager::Pacman => format!("sudo pacman -S --needed {pkgs}"),
             PackageManager::Apt => {
@@ -116,7 +132,7 @@ impl PackageManager {
 
     /// Map generic requirements to distro package names, dropping duplicates
     /// such as Arch's `python3` and `python3-venv`, which are both `python`.
-    fn map_packages<'a>(&self, packages: &[&'a str]) -> Vec<&'a str> {
+    pub fn mapped_packages<'a>(&self, packages: &[&'a str]) -> Vec<&'a str> {
         let mut mapped: Vec<&str> = Vec::new();
         for package in packages {
             let name = self.package_name(package);
@@ -268,6 +284,51 @@ mod tests {
             PackageManager::Pacman.user_install_command(pkgs),
             "sudo pacman -S --needed python"
         );
+    }
+
+    #[test]
+    fn mapped_commands_do_not_remap_distro_package_names() {
+        let pacman = PackageManager::Pacman;
+        assert_eq!(
+            pacman.mapped_packages(&["python3", "python3-venv", "squashfs"]),
+            vec!["python", "squashfs-tools"]
+        );
+        assert_eq!(
+            pacman.install_mapped_command(&["python", "squashfs-tools"]),
+            "pacman -S --needed --noconfirm python squashfs-tools"
+        );
+        assert_eq!(
+            pacman.user_install_mapped_command(&["python", "squashfs-tools"]),
+            "sudo pacman -S --needed python squashfs-tools"
+        );
+
+        let apt = PackageManager::Apt;
+        assert_eq!(
+            apt.mapped_packages(&["python3", "python3-venv", "squashfs"]),
+            vec!["python3", "python3-venv", "squashfs-tools"]
+        );
+        assert_eq!(
+            apt.install_mapped_command(&["python3", "python3-venv", "squashfs-tools"]),
+            "DEBIAN_FRONTEND=noninteractive apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends python3 python3-venv squashfs-tools"
+        );
+    }
+
+    #[test]
+    fn install_commands_never_upgrade_the_whole_system() {
+        for pm in [
+            PackageManager::Pacman,
+            PackageManager::Apt,
+            PackageManager::Dnf,
+            PackageManager::Zypper,
+        ] {
+            let command = pm.install_command(&["git"]);
+            assert!(!command.contains("Syu"), "{command}");
+            assert!(!command.contains("dist-upgrade"), "{command}");
+            assert!(!command.contains("full-upgrade"), "{command}");
+            assert!(!command.contains("dup"), "{command}");
+            assert!(!command.contains("upgrade"), "{command}");
+            assert!(!command.contains("update\n"), "{command}");
+        }
     }
 
     #[test]
