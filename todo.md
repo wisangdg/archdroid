@@ -703,7 +703,7 @@ isolasi UI, lalu validasi rilis.
     workflow.
   - **DoD:** action pihak ketiga tidak bisa berubah tanpa review; token CI
     hanya punya izin baca.
-  - **Bukti selesai:** di `.github/workflows/ci.yml`: ditambahkan `permissions: contents: read` di level workflow; action dipin ke commit SHA (`actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683`, `actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5a1`, `dtolnay/rust-toolchain@7b7640457d930a38d363e8c7f861602957381862`).
+  - **Bukti selesai:** di `.github/workflows/ci.yml`: ditambahkan `permissions: contents: read` di level workflow; action dipin ke commit SHA (`actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683`, `actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af`, `dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8`).
 
 - [x] **P0-10.4 — Commit dan review perubahan yang masih menggantung.**
   - **Bukti:** `git status` menunjukkan 26 berkas termodifikasi dan 12 path
