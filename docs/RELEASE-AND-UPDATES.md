@@ -10,7 +10,7 @@ eksplisit.
 
 ### Cara upgrade
 1. Arch: `pacman -U archdroid-bin-<versi>-x86_64.pkg.tar.zst`. AppImage: ganti file lama.
-   `.deb`/`.rpm` adalah preview Tier 2 tanpa jaminan.
+   `.deb` adalah paket Tier 2 (teruji di Ubuntu 24.04, ikut ditandatangani sejak 0.1.3); `.rpm` adalah preview tanpa jaminan dan tidak dilampirkan.
 2. Verifikasi dulu sesuai [VERIFY-RELEASE.md](VERIFY-RELEASE.md)
    (`gpg --verify SHA256SUMS.asc SHA256SUMS`, `sha256sum -c SHA256SUMS`).
 3. Cek versi terpasang di aplikasi/`archdroid --version`; bandingkan dengan halaman

@@ -1,6 +1,6 @@
 [package]
 name = "archdroid"
-version = "0.1.2"
+version = "0.1.3"
 description = "Android emulator manager (Waydroid) for Linux"
 authors = ["Wisang Drillian Geni <gwisang45@gmail.com>"]
 license = "MIT"

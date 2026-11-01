@@ -7,6 +7,10 @@ Format ini mengacu pada [Keep a Changelog](https://keepachangelog.com/id/1.0.0/)
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-11-01
+
+Rilis perbaikan setelah uji live Tier 2 di Ubuntu 24.04. Paket `.deb` kini ikut dilampirkan dan ditandatangani.
+
 ### Diperbaiki
 - Paket `.deb` (Tier 2 preview) tidak bisa dipasang di Ubuntu 24.04 karena mewajibkan paket `waydroid` yang tidak ada di repo resmi Ubuntu. `waydroid` kini menjadi *Recommends*; layar setup ArchDroid sudah menangani host tanpa Waydroid.
 - Di host `apt`, item diagnostik "Waydroid Package" kini menyebut repo resmi Waydroid bila `apt` tidak menemukan paket `waydroid` (mis. Ubuntu 24.04).

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Generate release bundle staging directory with SHA256SUMS and detached GPG signature.
 # Official Tier 1 artifacts are placed in the root of dist-release.
-# Unverified Tier 2 preview artifacts (.deb, .rpm) are placed in dist-release/preview/.
+# The .deb (Tier 2, tested on Ubuntu 24.04) is signed with Tier 1; the untested
+# .rpm preview is placed in dist-release/preview/.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -37,13 +38,22 @@ else
     exit 1
 fi
 
-# 3. Public Key
+# 3. Debian package (Tier 2, live-tested on Ubuntu 24.04; signed with the rest)
+DEB_PKG="$REPO_ROOT/src-tauri/target/release/bundle/deb/ArchDroid_${VERSION}_amd64.deb"
+if [[ -f "$DEB_PKG" ]]; then
+    cp -v "$DEB_PKG" "$OUT_DIR/"
+else
+    echo "Error: .deb for $VERSION not found, run npm run build:bundles" >&2
+    exit 1
+fi
+
+# 4. Public Key
 cp -v "$REPO_ROOT/packaging/release/archdroid-release.asc" "$OUT_DIR/"
 
 echo "==> Generating Tier 1 SHA256SUMS"
 (
     cd "$OUT_DIR"
-    sha256sum $(ls *.pkg.tar.zst *.AppImage 2>/dev/null) > SHA256SUMS
+    sha256sum $(ls *.pkg.tar.zst *.AppImage *.deb 2>/dev/null) > SHA256SUMS
 )
 
 echo "==> Signing SHA256SUMS with GPG key $KEY_ID"
@@ -59,14 +69,10 @@ echo "==> Verifying Tier 1 release bundle"
     sha256sum -c SHA256SUMS
 )
 
-# 4. Optional: Stage Tier 2 preview artifacts in preview/ subdirectory
+# 5. Optional: stage the untested .rpm preview in preview/ (never signed)
 mkdir -p "$PREVIEW_DIR"
-DEB_PKG="$REPO_ROOT/src-tauri/target/release/bundle/deb/ArchDroid_${VERSION}_amd64.deb"
 RPM_PKG="$REPO_ROOT/src-tauri/target/release/bundle/rpm/ArchDroid-${VERSION}-1.x86_64.rpm"
 
-if [[ -f "$DEB_PKG" ]]; then
-    cp -v "$DEB_PKG" "$PREVIEW_DIR/"
-fi
 if [[ -f "$RPM_PKG" ]]; then
     cp -v "$RPM_PKG" "$PREVIEW_DIR/"
 fi
@@ -74,7 +80,7 @@ fi
 if compgen -G "$PREVIEW_DIR/*" > /dev/null; then
     (
         cd "$PREVIEW_DIR"
-        sha256sum $(ls *.deb *.rpm 2>/dev/null) > SHA256SUMS
+        sha256sum $(ls *.rpm 2>/dev/null) > SHA256SUMS
     )
     echo "==> Tier 2 preview artifacts staged in $PREVIEW_DIR"
 fi
