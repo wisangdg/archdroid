@@ -7,6 +7,9 @@ Format ini mengacu pada [Keep a Changelog](https://keepachangelog.com/id/1.0.0/)
 
 ## [Unreleased]
 
+### Diperbaiki
+- Start Engine kini melaporkan "Start Failed" beserta penyebab dari Waydroid (mis. `OSError: container failed to start`) bila container gagal start. Sebelumnya `waydroid session start` keluar dengan kode 0 setelah ~10 detik dan ArchDroid hanya menampilkan "Session Slow to Start". Start yang berhasil dilaporkan begitu status menunjukkan RUNNING.
+
 ## [0.1.3] - 2026-11-01
 
 Rilis perbaikan setelah uji live Tier 2 di Ubuntu 24.04. Paket `.deb` kini ikut dilampirkan dan ditandatangani.

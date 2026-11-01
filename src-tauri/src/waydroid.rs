@@ -62,7 +62,8 @@ pub const NOT_INITIALIZED_LEGACY_MARKER: &str = "Cannot locate waydroid config";
 /// again" is deliberately absent: a later retry can succeed. These markers are
 /// only treated as failures when the exit code is already zero; a non-zero exit
 /// keeps the more useful `Exit` error.
-const FAILURE_MARKERS: [&str; 6] = [
+const FAILURE_MARKERS: [&str; 7] = [
+    "container failed to start",
     "sending reply failed",
     "waydroid session is stopped",
     "failed with code:",
@@ -71,9 +72,11 @@ const FAILURE_MARKERS: [&str; 6] = [
     "failed to uninstall package",
 ];
 
-/// How long `session start` may take to either fail (fast exit) or prove it is
-/// up (still running) before we report success and hand it to a reaper thread.
-pub const SESSION_START_GRACE_SECS: u64 = 5;
+/// How long `session start` may take to fail before a still-running daemon
+/// counts as started. A failed LXC start takes ~10 s to surface (and the CLI
+/// still exits 0), so this is longer than a normal start; `session_start`
+/// returns as soon as `waydroid status` reports the session RUNNING.
+pub const SESSION_START_GRACE_SECS: u64 = 20;
 
 /// Does this output mean "the image was never initialised"?
 pub fn looks_uninitialized(text: &str) -> bool {
@@ -277,6 +280,7 @@ impl Waydroid {
         let mut stderr_reader = Some(thread::spawn(move || read_lossy(stderr)));
 
         let deadline = Instant::now() + Duration::from_secs(grace_secs);
+        let mut next_probe = Instant::now() + Duration::from_secs(1);
         let mut still_running = false;
         let outcome = loop {
             match child.try_wait() {
@@ -295,6 +299,13 @@ impl Waydroid {
                     if Instant::now() >= deadline {
                         still_running = true;
                         break Ok(());
+                    }
+                    if Instant::now() >= next_probe {
+                        next_probe = Instant::now() + Duration::from_secs(1);
+                        if self.status().is_ok_and(|status| session_running(&status)) {
+                            still_running = true;
+                            break Ok(());
+                        }
                     }
                     thread::sleep(Duration::from_millis(20));
                 }
@@ -777,6 +788,58 @@ exit 0"#,
         let tool = Waydroid::with_program("/bin/echo");
         tool.session_start_argv(&argv(&["session", "start"]), 5)
             .unwrap();
+    }
+
+    /// Seen on Ubuntu 24.04: LXC could not start the container, waydroid
+    /// printed the traceback ~10 s later and still exited 0.
+    #[test]
+    fn a_session_whose_container_fails_reports_it_despite_exit_zero() {
+        let dir = std::env::temp_dir().join(format!("archdroid-session-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let stub = dir.join("waydroid");
+        std::fs::write(
+            &stub,
+            "#!/bin/sh\n[ \"$1\" = status ] && { echo 'Session:\tSTOPPED'; exit 0; }\nsleep 1\necho '[08:46:40] OSError: container failed to start' >&2\nexit 0\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&stub, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+            .unwrap();
+
+        let error = Waydroid::with_program(&stub)
+            .session_start_argv(&argv(&["session", "start"]), 5)
+            .unwrap_err();
+        assert_eq!(error.code(), code::COMMAND_FAILED, "{error}");
+        assert!(
+            error.to_string().contains("container failed to start"),
+            "{error}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A healthy start returns once status says RUNNING, not after the grace.
+    #[test]
+    fn a_session_reported_running_returns_before_the_grace_period() {
+        let dir = std::env::temp_dir().join(format!("archdroid-running-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let stub = dir.join("waydroid");
+        std::fs::write(
+            &stub,
+            "#!/bin/sh\n[ \"$1\" = status ] && { echo 'Session:\tRUNNING'; exit 0; }\nexec sleep 30\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&stub, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+            .unwrap();
+
+        let started = Instant::now();
+        Waydroid::with_program(&stub)
+            .session_start_argv(&argv(&["session", "start"]), 20)
+            .unwrap();
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "{:?}",
+            started.elapsed()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

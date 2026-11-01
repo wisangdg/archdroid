@@ -62,7 +62,7 @@ describe("useEngineStatus", () => {
     expect(addToast).toHaveBeenCalledWith(
       expect.objectContaining({
         title: "Start Failed",
-        message: "binder missing",
+        message: expect.stringMatching(/^binder missing .*Diagnostic Bundle/),
       })
     );
   });

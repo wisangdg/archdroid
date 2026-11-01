@@ -79,7 +79,7 @@ export function useEngineStatus({ addToast, onOnline }) {
         addToast({
           type: "error",
           title: "Start Failed",
-          message: res.message || "Failed to start Waydroid session.",
+          message: `${res.message || "Failed to start Waydroid session."} A Diagnostic Bundle (Settings) includes the Waydroid log.`,
         });
         return;
       }
