@@ -93,10 +93,9 @@
 ### Belum selesai / belum diverifikasi
 
 - [x] Uji live Waydroid, polkit/sudo, installer root, dan wipe di VM bersih
-  (matriks P0-8.2, smoke rilis 0.1.0/0.1.1, dan uji 1 Nov untuk perubahan
-  setelah 0.1.1). Sisa yang belum: peluncuran `phantom-gui` asli setelah F8,
-  DnD Wayland-native di compositor sungguhan, matriks GPU/desktop; lihat
-  `docs/P0-8.2-MATRIX-RESULTS.md`.
+  (matriks P0-8.2, smoke rilis 0.1.0/0.1.1/0.1.2). Phantom asli dan DnD
+  Wayland/X11 lulus pada paket 0.1.2. Sisa: matriks GPU/desktop di hardware
+  sungguhan; lihat `docs/P0-8.2-MATRIX-RESULTS.md`.
 - [x] CSP runtime diverifikasi pada binary rilis lewat WebKitWebDriver
   (1 Nov): eval, inline script, fetch/img/script remote diblokir dengan
   `securitypolicyviolation`; nol pelanggaran saat start, semua tab, IPC,
@@ -124,9 +123,9 @@
 - [x] `cargo audit` berjalan di CI (P1-5); `cargo deny` belum dipakai.
 
 **Kesimpulan (1 Nov):** seluruh P0 selesai dan terverifikasi live di VM,
-termasuk CSP runtime dan drag-and-drop (XDND). Gate §7 terpenuhi untuk `main`.
-Sisa risiko (peluncuran `phantom-gui` asli, DnD Wayland-native, matriks
-GPU/desktop) didokumentasikan sebagai known limitation.
+termasuk CSP runtime, drag-and-drop Wayland/X11, dan Phantom asli pada paket
+0.1.2. Gate §7 terpenuhi. Sisa risiko (matriks GPU/desktop di hardware
+sungguhan) didokumentasikan sebagai known limitation.
 
 ---
 
@@ -1071,9 +1070,8 @@ Rilis hanya boleh diberi label production-ready jika:
   tersedia.
 - [x] Known limitations dan residual risk didokumentasikan (README §8,
   `PRIVACY.md`, `docs/P0-8.2-MATRIX-RESULTS.md`).
-- [x] Tidak ada bug P0/P1 terbuka di `main`. F10 (install dari container
-  beku tidak muncul di daftar) dan F11 ada di rilis 0.1.1 dan baru hilang
-  setelah rilis berikutnya. Tooltip Start yang tertinggal diterima sebagai
+- [x] Tidak ada bug P0/P1 terbuka. F10 (install dari container beku tidak
+  muncul di daftar) dan F11 ada di 0.1.1 dan diperbaiki di 0.1.2. Tooltip Start yang tertinggal diterima sebagai
   kosmetik (P2).
 
 **Jangan menyebut production-ready hanya karena build `.deb`, `cargo test`, dan

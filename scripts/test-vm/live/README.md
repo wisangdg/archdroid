@@ -34,6 +34,8 @@ build; without it Tauri does not allow automation.
 | `dnd.sh <file> <name>` | Real XDND drag from a GTK3 source window (`dragsrc.py`) onto the app with `xdotool`; screenshot to `~/dnd/<name>.png`. The app must already be running. |
 | `pkg_cycle.py ~/archdroid ~/dnd` | Uninstall F-Droid from the UI, then reinstall it by drag-and-drop, both starting with the container **frozen**; app count and card must follow. Needs a running Waydroid session and F-Droid installed. |
 | `ui_cycle.py ~/archdroid ~/dnd` | Cancel a Houdini install after stage 2 (stepper keeps completed stages, no `/var/tmp/archdroid.*` left), then a factory reset (title and stages at completion). **Wipes Waydroid.** |
+| `phantom_real.py ~/archdroid ~/dnd` | Install Phantom from the UI and launch the real `phantom-gui`. Needs Rust, a JDK and an Android SDK (`platforms;android-34`, `build-tools;34.0.0`, licence accepted by the owner); run under `bash -l` so `java` is on PATH. |
+| `wldrag.sh X1 Y1 X2 Y2 <name>` | Wayland-native drag: start `weston --backend=x11-backend.so --use-pixman --socket=wayland-dnd` on `:99`, run the app and `dragsrc.py` with `GDK_BACKEND=wayland WAYLAND_DISPLAY=wayland-dnd`, then drag between the window coordinates seen in a screenshot. |
 | `phantom_launch.py ~/archdroid` | Launch Keymapper with stub `phantom-gui` binaries (one exits 1, one keeps running). Tests the app's reporting, not Phantom itself. |
 
 WebKitWebDriver allows one session at a time. If a script dies without
