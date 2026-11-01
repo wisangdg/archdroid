@@ -7,6 +7,10 @@ Format ini mengacu pada [Keep a Changelog](https://keepachangelog.com/id/1.0.0/)
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-11-01
+
+Rilis perbaikan setelah uji live CSP runtime dan drag-and-drop native di VM.
+
 ### Ditambahkan
 - `archdroid --version` (atau `-V`) mencetak versi tanpa membuka jendela, sesuai panduan upgrade di `docs/RELEASE-AND-UPDATES.md`.
 - Diagnostic bundle (Settings → Diagnostic Bundle): satu file teks untuk laporan bug berisi versi OS/kernel/Waydroid, diagnostik host, status add-on, dan log terakhir. Dikumpulkan tanpa root, disamarkan, disimpan dengan mode `0600` di `~/Downloads`, dan tidak pernah diunggah.
