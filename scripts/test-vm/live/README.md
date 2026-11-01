@@ -36,6 +36,9 @@ build; without it Tauri does not allow automation.
 | `ui_cycle.py ~/archdroid ~/dnd` | Cancel a Houdini install after stage 2 (stepper keeps completed stages, no `/var/tmp/archdroid.*` left), then a factory reset (title and stages at completion). **Wipes Waydroid.** |
 | `phantom_real.py ~/archdroid ~/dnd` | Install Phantom from the UI and launch the real `phantom-gui`. Needs Rust, a JDK and an Android SDK (`platforms;android-34`, `build-tools;34.0.0`, licence accepted by the owner); run under `bash -l` so `java` is on PATH. |
 | `wldrag.sh X1 Y1 X2 Y2 <name>` | Wayland-native drag: start `weston --backend=x11-backend.so --use-pixman --socket=wayland-dnd` on `:99`, run the app and `dragsrc.py` with `GDK_BACKEND=wayland WAYLAND_DISPLAY=wayland-dnd`, then drag between the window coordinates seen in a screenshot. |
+| `setup_probe.py ~/archdroid ~/out` | Host without Waydroid (Tier 2): setup screen, diagnostics, CSP. Never confirms a root action. |
+| `tier2_init.py ~/archdroid ~/out` | Initialize from the setup screen (the app installs Waydroid with the distro package manager, then `waydroid init`), then Start Engine. Needs a polkit agent in the session. |
+| `tier2_engine.py ~/archdroid ~/out <apk>` | Start Engine, wait for the app list, drop an APK with `dnd.sh`, Stop Engine. |
 | `phantom_launch.py ~/archdroid` | Launch Keymapper with stub `phantom-gui` binaries (one exits 1, one keeps running). Tests the app's reporting, not Phantom itself. |
 
 WebKitWebDriver allows one session at a time. If a script dies without
