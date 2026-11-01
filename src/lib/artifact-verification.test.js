@@ -74,7 +74,16 @@ test("platform support claims in README strictly match test evidence", () => {
     !readme.includes("AUR / Source / AppImage"),
     "AUR package not yet published to AUR"
   );
-  assert.ok(readme.includes("Tier 2 (Best-Effort — Belum Diuji Live)"));
+  // Tier 2 stays best-effort; the only live-tested Tier 2 claim is the .deb
+  // on Ubuntu 24.04 (docs/P0-8.2-MATRIX-RESULTS.md), and the untested
+  // distros must still be named as untested.
+  assert.ok(readme.includes("Tier 2 (Best-Effort)"));
+  assert.ok(readme.includes("teruji live di VM Ubuntu 24.04 LTS"));
+  assert.ok(readme.includes("Debian, Fedora, dan openSUSE belum diuji live"));
+  assert.ok(
+    !/Fedora[^\n|]*\|[^\n]*teruji live/.test(readme),
+    "Fedora/RHEL row must not claim live testing"
+  );
 
   // Relative links only, no file:/// leaks
   assert.ok(
