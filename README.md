@@ -21,7 +21,7 @@ ArchDroid dirancang dengan arsitektur **multi-distro** yang secara otomatis mend
 | Distribusi | Package Manager | Format Paket | Status Dukungan |
 |---|---|---|---|
 | **Ubuntu / Debian / Linux Mint / Pop!_OS** | `apt-get` | Preview `.deb` / AppImage | **Tier 2 (Best-Effort)**<br>`.deb` teruji live di VM Ubuntu 24.04 LTS: install, setup, instalasi Waydroid oleh app lewat `apt` (setelah repo resmi Waydroid ditambahkan), init via polkit, start/stop engine, install APK via drag-and-drop, CSP. Varian lain (Debian, Mint, Pop!_OS) belum diuji. |
-| **Fedora / RHEL / Alma / Rocky Linux** | `dnf` | Preview `.rpm` / AppImage | **Tier 2 (Best-Effort)**<br>Kontrak mapping paket teruji di unit test backend (`platform.rs`), tetapi belum melalui live testing matriks sistem operasi penuh. |
+| **Fedora / RHEL / Alma / Rocky Linux** | `dnf` | Preview `.rpm` / AppImage | **Tier 2 (Best-Effort)**<br>`.rpm` teruji live di VM Fedora 44: `dnf install` (menarik `waydroid` dari repo Fedora), init via polkit, start/stop engine, daftar app, install APK via drag-and-drop, CSP, `dnf remove arch-droid`. RHEL/Alma/Rocky belum diuji. |
 | **openSUSE (Tumbleweed / Leap)** | `zypper` | Preview `.rpm` / AppImage | **Tier 2 (Best-Effort)**<br>Kontrak mapping paket teruji di unit test backend (`platform.rs`), tetapi belum melalui live testing matriks sistem operasi penuh. |
 
 > [!NOTE]
@@ -92,11 +92,11 @@ chmod +x ArchDroid_*.AppImage
 
 - **Debian / Ubuntu**: Ubuntu 24.04 belum memiliki paket `waydroid` di repo resminya; tambahkan dulu [repo resmi Waydroid](https://docs.waydro.id/usage/install-on-desktops), lalu pasang paket preview dengan apt:
   ```bash
-  sudo apt install ./archdroid_*_amd64.deb
+  sudo apt install ./ArchDroid_*_amd64.deb
   ```
 - **Fedora / openSUSE**: Pasang paket preview dengan dnf/zypper:
   ```bash
-  sudo dnf install ./archdroid-*.x86_64.rpm
+  sudo dnf install ./ArchDroid-*.x86_64.rpm
   ```
 
 ---
@@ -208,16 +208,14 @@ Jika Anda ingin menghapus ArchDroid dan seluruh datanya dari sistem:
 - **Arch Linux**:
   ```bash
   sudo pacman -R archdroid-bin
-  # Atau jika dipasang dari source PKGBUILD:
-  sudo pacman -R archdroid
   ```
 - **Debian / Ubuntu**:
   ```bash
-  sudo apt remove archdroid
+  sudo apt remove arch-droid
   ```
 - **Fedora / openSUSE**:
   ```bash
-  sudo dnf remove archdroid
+  sudo dnf remove arch-droid   # openSUSE: sudo zypper remove arch-droid
   ```
 - **AppImage**: Cukup hapus file `ArchDroid_*.AppImage` dan file `.desktop` terkait di `~/.local/share/applications/` jika ada.
 
@@ -253,7 +251,7 @@ rm -rf ~/.local/share/waydroid
 3. **Ketersediaan ARM Translation Layer (libhoudini)**:
    Injeksi libhoudini bergantung pada ketersediaan image Google Android TV upstream yang diunduh melalui skrip helper ter-pin. Game yang menggunakan sistem anti-cheat tingkat kernel (seperti game tertentu dengan proteksi ketat) mungkin tidak dapat berjalan pada container emulator.
 4. **Tingkat Dukungan Distro**:
-   Dukungan penuh (Tier 1) yang diverifikasi live mencakup keluarga Arch Linux. Distro Tier 2 berstatus preview: `.deb` sudah diuji live di Ubuntu 24.04 LTS, sedangkan Debian, Fedora, dan openSUSE belum diuji live.
+   Dukungan penuh (Tier 1) yang diverifikasi live mencakup keluarga Arch Linux. Distro Tier 2 berstatus preview: `.deb` sudah diuji live di Ubuntu 24.04 LTS dan `.rpm` di Fedora 44, sedangkan Debian, RHEL-family, dan openSUSE belum diuji live.
 5. **Cakupan Uji Live**:
    Semua alur utama, termasuk build dan peluncuran Phantom serta drag-and-drop Wayland dan X11, diuji live di VM Arch (weston dan Xvfb; lihat [`docs/P0-8.2-MATRIX-RESULTS.md`](docs/P0-8.2-MATRIX-RESULTS.md)). Belum diuji: matriks GPU dan desktop di hardware sungguhan (GNOME/KDE/Hyprland, Intel/AMD/NVIDIA). Jika ada yang gagal di sistem Anda, lampirkan Diagnostic Bundle saat melapor.
 6. **Integritas Arsip Add-on**:

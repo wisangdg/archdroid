@@ -22,7 +22,7 @@ Markers are only a shortcut for when the container is offline:
 
 ## Clean uninstall
 1. In ArchDroid, Settings → Factory Reset (or `sudo waydroid session stop && sudo waydroid-container stop`).
-2. Remove the package (`pacman -R archdroid`, `apt remove archdroid`, ...).
+2. Remove the package: `pacman -R archdroid-bin` (Arch), `apt remove arch-droid` (Debian/Ubuntu), `dnf remove arch-droid` (Fedora). The `.deb`/`.rpm` package name is `arch-droid`, derived from the product name.
 3. Delete user data: `rm -rf ~/.config/io.github.archdroid ~/.cache/archdroid ~/.local/share/io.github.wisangdg.archdroid`.
 4. Optional, removes all Android data: `sudo rm -rf /var/lib/waydroid ~/.local/share/waydroid`.
 

@@ -39,6 +39,8 @@ build; without it Tauri does not allow automation.
 | `setup_probe.py ~/archdroid ~/out` | Host without Waydroid (Tier 2): setup screen, diagnostics, CSP. Never confirms a root action. |
 | `tier2_init.py ~/archdroid ~/out` | Initialize from the setup screen (the app installs Waydroid with the distro package manager, then `waydroid init`), then Start Engine. Needs a polkit agent in the session. |
 | `tier2_engine.py ~/archdroid ~/out <apk>` | Start Engine, wait for the app list, drop an APK with `dnd.sh`, Stop Engine. |
+| `session_list_drop.py` | With the session already running: wait for the app list to fill, drop F-Droid with `dnd.sh`, Stop Engine. |
+| `start_probe.py ~/archdroid` | Click Start Engine and report the first outcome (Engine Running, "Start Failed …" or "Slow to Start"). Remove `$XDG_RUNTIME_DIR/pulse/native` first to reproduce a container that fails to start. |
 | `phantom_launch.py ~/archdroid` | Launch Keymapper with stub `phantom-gui` binaries (one exits 1, one keeps running). Tests the app's reporting, not Phantom itself. |
 
 WebKitWebDriver allows one session at a time. If a script dies without

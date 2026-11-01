@@ -79,11 +79,22 @@ test("platform support claims in README strictly match test evidence", () => {
   // distros must still be named as untested.
   assert.ok(readme.includes("Tier 2 (Best-Effort)"));
   assert.ok(readme.includes("teruji live di VM Ubuntu 24.04 LTS"));
-  assert.ok(readme.includes("Debian, Fedora, dan openSUSE belum diuji live"));
+  assert.ok(readme.includes("teruji live di VM Fedora 44"));
   assert.ok(
-    !/Fedora[^\n|]*\|[^\n]*teruji live/.test(readme),
-    "Fedora/RHEL row must not claim live testing"
+    readme.includes("Debian, RHEL-family, dan openSUSE belum diuji live")
   );
+  assert.ok(
+    !/openSUSE[^\n|]*\|[^\n]*teruji live/.test(readme),
+    "openSUSE row must not claim live testing"
+  );
+
+  // Package names and file names as the bundler produces them: the
+  // .deb/.rpm package is `arch-droid`, files start with `ArchDroid`.
+  assert.ok(readme.includes("sudo apt remove arch-droid"));
+  assert.ok(readme.includes("sudo dnf remove arch-droid"));
+  assert.ok(!/(apt|dnf) remove archdroid\b/.test(readme));
+  assert.ok(readme.includes("./ArchDroid_*_amd64.deb"));
+  assert.ok(readme.includes("./ArchDroid-*.x86_64.rpm"));
 
   // Relative links only, no file:/// leaks
   assert.ok(

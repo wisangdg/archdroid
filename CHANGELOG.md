@@ -8,6 +8,7 @@ Format ini mengacu pada [Keep a Changelog](https://keepachangelog.com/id/1.0.0/)
 ## [Unreleased]
 
 ### Diperbaiki
+- Panduan uninstall memakai nama paket yang benar untuk `.deb`/`.rpm` (`arch-droid`, bukan `archdroid`), dan contoh instalasi memakai nama file yang sebenarnya (`ArchDroid_*.deb`, `ArchDroid-*.rpm`); sebelumnya perintah itu gagal.
 - Start Engine kini melaporkan "Start Failed" beserta penyebab dari Waydroid (mis. `OSError: container failed to start`) bila container gagal start. Sebelumnya `waydroid session start` keluar dengan kode 0 setelah ~10 detik dan ArchDroid hanya menampilkan "Session Slow to Start". Start yang berhasil dilaporkan begitu status menunjukkan RUNNING.
 
 ## [0.1.3] - 2026-11-01
