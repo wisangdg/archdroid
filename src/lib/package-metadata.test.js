@@ -19,9 +19,13 @@ test("tauri.conf.json bundle metadata is complete and accurately declared", () =
   assert.ok(conf.bundle.copyright.includes("2026"));
 
   // Linux package runtime dependencies
+  // Ubuntu 24.04 has no waydroid package (it comes from repo.waydro.id), so
+  // a hard dependency made the .deb uninstallable; the setup screen handles a
+  // host without Waydroid instead.
   assert.ok(Array.isArray(conf.bundle.linux?.deb?.depends));
-  assert.ok(conf.bundle.linux.deb.depends.includes("waydroid"));
+  assert.ok(!conf.bundle.linux.deb.depends.includes("waydroid"));
   assert.ok(Array.isArray(conf.bundle.linux?.deb?.recommends));
+  assert.ok(conf.bundle.linux.deb.recommends.includes("waydroid"));
   assert.ok(conf.bundle.linux.deb.recommends.includes("squashfs-tools"));
   assert.ok(conf.bundle.linux.deb.recommends.includes("lzip"));
   assert.ok(conf.bundle.linux.deb.recommends.includes("git"));

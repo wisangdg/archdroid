@@ -16,11 +16,11 @@ ArchDroid dirancang dengan arsitektur **multi-distro** yang secara otomatis mend
 |---|---|---|---|
 | **Arch Linux / CachyOS / EndeavourOS / Manjaro** | `pacman` | PKGBUILD lokal (`makepkg -si`) / AppImage | **Didukung Penuh (Tier 1)**<br>Teruji live di VM QEMU/KVM Arch Linux (kernel 7.2.11, desktop launcher `gtk-launch`, Waydroid daemon, preflight, install/uninstall). Lihat [docs/P0-8.2-MATRIX-RESULTS.md](docs/P0-8.2-MATRIX-RESULTS.md) dan [docs/P0-9.1-PACKAGING-RESULTS.md](docs/P0-9.1-PACKAGING-RESULTS.md). |
 
-### Target Eksperimental — Tier 2 (Best-Effort — Belum Diuji Live)
+### Target Eksperimental — Tier 2 (Best-Effort)
 
 | Distribusi | Package Manager | Format Paket | Status Dukungan |
 |---|---|---|---|
-| **Ubuntu / Debian / Linux Mint / Pop!_OS** | `apt-get` | Preview `.deb` / AppImage | **Tier 2 (Best-Effort)**<br>Kontrak mapping paket teruji di unit test backend (`platform.rs`), tetapi belum melalui live testing matriks sistem operasi penuh. |
+| **Ubuntu / Debian / Linux Mint / Pop!_OS** | `apt-get` | Preview `.deb` / AppImage | **Tier 2 (Best-Effort)**<br>`.deb` teruji live di VM Ubuntu 24.04 LTS: install, setup, instalasi Waydroid oleh app lewat `apt` (setelah repo resmi Waydroid ditambahkan), init via polkit, start/stop engine, install APK via drag-and-drop, CSP. Varian lain (Debian, Mint, Pop!_OS) belum diuji. |
 | **Fedora / RHEL / Alma / Rocky Linux** | `dnf` | Preview `.rpm` / AppImage | **Tier 2 (Best-Effort)**<br>Kontrak mapping paket teruji di unit test backend (`platform.rs`), tetapi belum melalui live testing matriks sistem operasi penuh. |
 | **openSUSE (Tumbleweed / Leap)** | `zypper` | Preview `.rpm` / AppImage | **Tier 2 (Best-Effort)**<br>Kontrak mapping paket teruji di unit test backend (`platform.rs`), tetapi belum melalui live testing matriks sistem operasi penuh. |
 
@@ -90,7 +90,7 @@ chmod +x ArchDroid_*.AppImage
 
 ### Distribusi Lain (Preview Tier 2)
 
-- **Debian / Ubuntu**: Pasang paket preview dengan apt:
+- **Debian / Ubuntu**: Ubuntu 24.04 belum memiliki paket `waydroid` di repo resminya; tambahkan dulu [repo resmi Waydroid](https://docs.waydro.id/usage/install-on-desktops), lalu pasang paket preview dengan apt:
   ```bash
   sudo apt install ./archdroid_*_amd64.deb
   ```
@@ -253,7 +253,7 @@ rm -rf ~/.local/share/waydroid
 3. **Ketersediaan ARM Translation Layer (libhoudini)**:
    Injeksi libhoudini bergantung pada ketersediaan image Google Android TV upstream yang diunduh melalui skrip helper ter-pin. Game yang menggunakan sistem anti-cheat tingkat kernel (seperti game tertentu dengan proteksi ketat) mungkin tidak dapat berjalan pada container emulator.
 4. **Tingkat Dukungan Distro**:
-   Dukungan penuh (Tier 1) yang diverifikasi live mencakup keluarga Arch Linux. Distro Tier 2 (Debian, Ubuntu, Fedora, openSUSE) berstatus preview dan belum melalui pengujian live di seluruh varian rilisnya.
+   Dukungan penuh (Tier 1) yang diverifikasi live mencakup keluarga Arch Linux. Distro Tier 2 berstatus preview: `.deb` sudah diuji live di Ubuntu 24.04 LTS, sedangkan Debian, Fedora, dan openSUSE belum diuji live.
 5. **Cakupan Uji Live**:
    Semua alur utama, termasuk build dan peluncuran Phantom serta drag-and-drop Wayland dan X11, diuji live di VM Arch (weston dan Xvfb; lihat [`docs/P0-8.2-MATRIX-RESULTS.md`](docs/P0-8.2-MATRIX-RESULTS.md)). Belum diuji: matriks GPU dan desktop di hardware sungguhan (GNOME/KDE/Hyprland, Intel/AMD/NVIDIA). Jika ada yang gagal di sistem Anda, lampirkan Diagnostic Bundle saat melapor.
 6. **Integritas Arsip Add-on**:

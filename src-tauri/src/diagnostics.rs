@@ -183,7 +183,7 @@ pub(crate) fn collect_diagnostics() -> DiagnosticsReport {
             title: "Waydroid Package".to_string(),
             status: "error".to_string(),
             value: "Not Installed".to_string(),
-            detail: "Waydroid command is missing. It must be installed before starting or initializing containers.".to_string(),
+            detail: waydroid_missing_detail(pm),
             remediation: pm.map(|p| p.user_install_command(&["waydroid"])),
         });
     }
@@ -515,8 +515,29 @@ pub(crate) fn collect_diagnostics() -> DiagnosticsReport {
     }
 }
 
+/// Debian and Ubuntu releases before Waydroid entered their archives (e.g.
+/// Ubuntu 24.04) have no `waydroid` package, so the apt command alone fails
+/// with "Unable to locate package"; upstream documents its own repository.
+fn waydroid_missing_detail(pm: Option<platform::PackageManager>) -> String {
+    let base = "Waydroid command is missing. It must be installed before starting or initializing containers.";
+    match pm {
+        Some(platform::PackageManager::Apt) => format!(
+            "{base} If apt cannot find the waydroid package (e.g. Ubuntu 24.04), add the official Waydroid repository first: https://docs.waydro.id/usage/install-on-desktops"
+        ),
+        _ => base.to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn missing_waydroid_on_apt_points_to_the_upstream_repository() {
+        let apt = super::waydroid_missing_detail(Some(crate::platform::PackageManager::Apt));
+        assert!(apt.contains("https://docs.waydro.id/usage/install-on-desktops"));
+        let pacman = super::waydroid_missing_detail(Some(crate::platform::PackageManager::Pacman));
+        assert!(!pacman.contains("repository"));
+    }
+
     use super::*;
 
     #[test]

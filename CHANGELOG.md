@@ -7,6 +7,12 @@ Format ini mengacu pada [Keep a Changelog](https://keepachangelog.com/id/1.0.0/)
 
 ## [Unreleased]
 
+### Diperbaiki
+- Paket `.deb` (Tier 2 preview) tidak bisa dipasang di Ubuntu 24.04 karena mewajibkan paket `waydroid` yang tidak ada di repo resmi Ubuntu. `waydroid` kini menjadi *Recommends*; layar setup ArchDroid sudah menangani host tanpa Waydroid.
+- Di host `apt`, item diagnostik "Waydroid Package" kini menyebut repo resmi Waydroid bila `apt` tidak menemukan paket `waydroid` (mis. Ubuntu 24.04).
+- Daftar app kini diperbarui sendiri selama sesi berjalan. Sebelumnya, pada boot pertama setelah init (saat Waydroid baru menulis entri launcher) daftar tetap "0 applications" sampai ada aksi lain.
+- Peringatan "Session Slow to Start" kini mengarahkan ke Diagnostic Bundle, yang memuat log Waydroid. `waydroid session start` dapat keluar dengan kode 0 walaupun container gagal start.
+
 ## [0.1.2] - 2026-11-01
 
 Rilis perbaikan setelah uji live CSP runtime dan drag-and-drop native di VM.

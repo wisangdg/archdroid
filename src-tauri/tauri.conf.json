@@ -47,10 +47,9 @@
     ],
     "linux": {
       "deb": {
-        "depends": [
-          "waydroid"
-        ],
+        "depends": [],
         "recommends": [
+          "waydroid",
           "squashfs-tools",
           "lzip",
           "git"

@@ -113,6 +113,42 @@ describe("App state & workflow integration", () => {
     });
   });
 
+  it("shows apps that appear while the session runs without any user action", async () => {
+    let apps = [];
+    invoke.mockImplementation((cmd) => {
+      if (cmd === "waydroid_status") {
+        return Promise.resolve({
+          status: "success",
+          code: null,
+          data: "Session: RUNNING\nContainer: RUNNING\n",
+        });
+      }
+      if (cmd === "get_waydroid_apps") return Promise.resolve(apps);
+      if (cmd === "waydroid_prop_get")
+        return Promise.resolve({ status: "success", data: "false" });
+      return Promise.resolve({ status: "not_installed" });
+    });
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      render(<App />);
+      await waitFor(() => expect(screen.getByText("Online")).toBeTruthy());
+      expect(screen.queryByText("Settings App")).toBeNull();
+
+      // First boot after init: Waydroid writes the launcher entries later.
+      apps = [
+        { name: "Settings App", package: "com.android.settings", icon: null },
+      ];
+      await act(async () => {
+        vi.advanceTimersByTime(10000);
+      });
+      await waitFor(() =>
+        expect(screen.getByText("Settings App")).toBeTruthy()
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("rejects non-APK files during drag and drop with a warning toast", async () => {
     invoke.mockImplementation((cmd) => {
       if (cmd === "waydroid_status") {

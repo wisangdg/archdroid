@@ -18,6 +18,7 @@ import { useEngineStatus } from "./hooks/useEngineStatus";
 import { useDeviceConfig } from "./hooks/useDeviceConfig";
 import { useApkInstall } from "./hooks/useApkInstall";
 
+const APP_LIST_POLL_MS = 10000;
 export default function App() {
   const [activeTab, setActiveTab] = useState("home");
   const [apps, setApps] = useState([]);
@@ -144,6 +145,19 @@ export default function App() {
       console.error("Failed to load apps:", e);
     }
   }, []);
+
+  // Waydroid writes launcher entries while Android boots (the first boot after
+  // init has none yet) and after installs made outside ArchDroid, so refresh
+  // the list while the session runs. The backend only re-parses entries whose
+  // mtime changed, so a poll is a directory listing.
+  useEffect(() => {
+    if (status !== "online") return undefined;
+    loadApps();
+    const interval = setInterval(() => {
+      if (!document.hidden) loadApps();
+    }, APP_LIST_POLL_MS);
+    return () => clearInterval(interval);
+  }, [status, loadApps]);
 
   const {
     isDraggingOver,

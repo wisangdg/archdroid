@@ -90,7 +90,7 @@ export function useEngineStatus({ addToast, onOnline }) {
           type: "warning",
           title: "Session Slow to Start",
           message:
-            "Start command was sent, but the session is not yet reporting online.",
+            "The session is not reporting online yet. If it stays offline, create a Diagnostic Bundle in Settings: it includes the Waydroid log with the reason.",
         });
       }
     } catch (e) {
