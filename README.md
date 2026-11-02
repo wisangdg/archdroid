@@ -1,100 +1,100 @@
 # ArchDroid
 
-ArchDroid adalah aplikasi desktop berbasis **Tauri v2 + React 18** untuk mengelola [Waydroid](https://waydroid.net/) di Linux dengan antarmuka modern glassmorphism (terinspirasi dari emulator Android desktop seperti LDPlayer / NoxPlayer).
+ArchDroid is a **Tauri v2 + React 18** desktop app for managing [Waydroid](https://waydroid.net/) on Linux, with a modern glassmorphism interface (inspired by desktop Android emulators such as LDPlayer / NoxPlayer).
 
-ArchDroid mempermudah inisialisasi image Android, manajemen aplikasi APK, injeksi GApps & ARM translation (libhoudini), kontrol resolusi/DPI, keymapping virtual touchscreen (Phantom), serta diagnostik host Linux dalam satu antarmuka desktop yang terpadu dan aman.
+ArchDroid brings Android image initialization, APK app management, GApps & ARM translation (libhoudini) injection, resolution/DPI control, virtual touchscreen keymapping (Phantom), and Linux host diagnostics together in one unified, safe desktop interface.
 
 ---
 
-## 1. Distribusi Linux yang Didukung (Platform Support Contract)
+## 1. Supported Linux Distributions (Platform Support Contract)
 
-ArchDroid dirancang dengan arsitektur **multi-distro** yang secara otomatis mendeteksi package manager host dan memetakan paket dependency yang sesuai.
+ArchDroid uses a **multi-distro** architecture that detects the host package manager automatically and maps the matching dependency packages.
 
-### Target Resmi — Tier 1 (Didukung Penuh & Teruji Live)
+### Official Target — Tier 1 (Fully Supported & Live-Tested)
 
-| Distribusi | Package Manager | Format Paket | Status Dukungan & Bukti Uji |
+| Distribution | Package Manager | Package Format | Support Status & Test Evidence |
 |---|---|---|---|
-| **Arch Linux / CachyOS / EndeavourOS / Manjaro** | `pacman` | PKGBUILD lokal (`makepkg -si`) / AppImage | **Didukung Penuh (Tier 1)**<br>Teruji live di VM QEMU/KVM Arch Linux (kernel 7.2.11, desktop launcher `gtk-launch`, Waydroid daemon, preflight, install/uninstall). Lihat [docs/P0-8.2-MATRIX-RESULTS.md](docs/P0-8.2-MATRIX-RESULTS.md) dan [docs/P0-9.1-PACKAGING-RESULTS.md](docs/P0-9.1-PACKAGING-RESULTS.md). |
+| **Arch Linux / CachyOS / EndeavourOS / Manjaro** | `pacman` | Local PKGBUILD (`makepkg -si`) / AppImage | **Fully Supported (Tier 1)**<br>Live-tested in an Arch Linux QEMU/KVM VM (kernel 7.2.11, `gtk-launch` desktop launcher, Waydroid daemon, preflight, install/uninstall). See [docs/P0-8.2-MATRIX-RESULTS.md](docs/P0-8.2-MATRIX-RESULTS.md) and [docs/P0-9.1-PACKAGING-RESULTS.md](docs/P0-9.1-PACKAGING-RESULTS.md). |
 
-### Target Eksperimental — Tier 2 (Best-Effort)
+### Experimental Targets — Tier 2 (Best-Effort)
 
-| Distribusi | Package Manager | Format Paket | Status Dukungan |
+| Distribution | Package Manager | Package Format | Support Status |
 |---|---|---|---|
-| **Ubuntu / Debian / Linux Mint / Pop!_OS** | `apt-get` | Preview `.deb` / AppImage | **Tier 2 (Best-Effort)**<br>`.deb` teruji live di VM Ubuntu 24.04 LTS: install, setup, instalasi Waydroid oleh app lewat `apt` (setelah repo resmi Waydroid ditambahkan), init via polkit, start/stop engine, install APK via drag-and-drop, CSP. Varian lain (Debian, Mint, Pop!_OS) belum diuji. |
-| **Fedora / RHEL / Alma / Rocky Linux** | `dnf` | Preview `.rpm` / AppImage | **Tier 2 (Best-Effort)**<br>`.rpm` teruji live di VM Fedora 44: `dnf install` (menarik `waydroid` dari repo Fedora), init via polkit, start/stop engine, daftar app, install APK via drag-and-drop, CSP, `dnf remove arch-droid`. RHEL/Alma/Rocky belum diuji. |
-| **openSUSE (Tumbleweed / Leap)** | `zypper` | Preview `.rpm` / AppImage | **Tier 2 (Best-Effort)**<br>Kontrak mapping paket teruji di unit test backend (`platform.rs`), tetapi belum melalui live testing matriks sistem operasi penuh. |
+| **Ubuntu / Debian / Linux Mint / Pop!_OS** | `apt-get` | Preview `.deb` / AppImage | **Tier 2 (Best-Effort)**<br>`.deb` live-tested in an Ubuntu 24.04 LTS VM: install, setup, Waydroid installed by the app through `apt` (after adding the official Waydroid repo), init via polkit, engine start/stop, APK install via drag-and-drop, CSP. Other variants (Debian, Mint, Pop!_OS) are untested. |
+| **Fedora / RHEL / Alma / Rocky Linux** | `dnf` | Preview `.rpm` / AppImage | **Tier 2 (Best-Effort)**<br>`.rpm` live-tested in a Fedora 44 VM: `dnf install` (pulls `waydroid` from the Fedora repos), init via polkit, engine start/stop, app list, APK install via drag-and-drop, CSP, `dnf remove arch-droid`. RHEL/Alma/Rocky are untested. |
+| **openSUSE (Tumbleweed / Leap)** | `zypper` | Preview `.rpm` / AppImage | **Tier 2 (Best-Effort)**<br>The package mapping contract is covered by backend unit tests (`platform.rs`), but has not gone through the full live OS matrix. |
 
 > [!NOTE]
-> Dependency sistem (`waydroid`, `squashfs-tools` / `squashfs`, `lzip`, `git`) dipetakan secara dinamis berdasarkan package manager host yang terdeteksi, dan diinstal menggunakan flag non-interaktif minimalis (`--needed` / `--no-install-recommends`). ArchDroid tidak pernah memasang paket secara diam-diam: dialog konfirmasi menampilkan daftar paket dan command persis yang akan dijalankan, dan script root hanya menjalankan paket yang disetujui.
+> System dependencies (`waydroid`, `squashfs-tools` / `squashfs`, `lzip`, `git`) are mapped dynamically from the detected host package manager and installed with minimal non-interactive flags (`--needed` / `--no-install-recommends`). ArchDroid never installs packages silently: the confirmation dialog lists the packages and the exact command that will run, and the root script only installs the approved packages.
 
-### Integritas & Verifikasi Artefak
+### Artifact Integrity & Verification
 
-Setiap rilis resmi Tier 1 (`archdroid-bin-*.pkg.tar.zst` dan `ArchDroid_*.AppImage`) disertai file checksum `SHA256SUMS` dan tanda tangan digital GPG `SHA256SUMS.asc` dari kunci publik resmi (`18F47067ACC5BBF9`). Panduan verifikasi manual dan otomatis dapat dilihat di [docs/VERIFY-RELEASE.md](docs/VERIFY-RELEASE.md). Strategi update (manual, tanpa updater) dan pengelolaan kunci: [docs/RELEASE-AND-UPDATES.md](docs/RELEASE-AND-UPDATES.md).
+Every official Tier 1 release (`archdroid-bin-*.pkg.tar.zst` and `ArchDroid_*.AppImage`) ships with a `SHA256SUMS` checksum file and a GPG signature `SHA256SUMS.asc` from the official public key (`18F47067ACC5BBF9`). Manual and automated verification steps are in [docs/VERIFY-RELEASE.md](docs/VERIFY-RELEASE.md). Update strategy (manual, no updater) and key management: [docs/RELEASE-AND-UPDATES.md](docs/RELEASE-AND-UPDATES.md).
 
-### Target yang Tidak Didukung (Explicitly Unsupported)
+### Unsupported Targets (Explicitly Unsupported)
 
-- **Sesi Desktop Murni X11 (Pure X11)**:
-  Waydroid membutuhkan Wayland compositor (`WAYLAND_DISPLAY`). Desktop environment yang didukung mencakup GNOME Wayland, KDE Plasma Wayland, Hyprland, Sway, dan compositor Wayland lainnya. Sesi X11 murni **tidak didukung** secara langsung (memerlukan nested compositor seperti Weston/cage).
-- **Distribusi Non-Systemd / Non-Standard Package Manager**:
-  Distribusi seperti Alpine Linux (`apk`), Void Linux (`xbps`), NixOS, atau GNU Guix **tidak didukung untuk instalasi dependensi otomatis**. Pada platform ini, installer dependensi akan **gagal cepat (fast-fail) sebelum meminta root**, dan pengguna harus memasang `waydroid`, `squashfs-tools`, dan `lzip` secara manual melalui repositori distro masing-masing.
-- **Sistem Operasi Non-Linux**:
-  Windows dan macOS **tidak didukung** (Waydroid bergantung pada Linux kernel namespaces, cgroups, dan binder IPC).
-
----
-
-## 2. Kebutuhan Sistem Host (Prerequisites)
-
-1. **Kernel Linux**: Versi 5.x atau lebih baru dengan modul kernel `binder` dan `ashmem` (atau `binderfs`). Kernel bawaan Arch, Ubuntu, Fedora, dan openSUSE modern sudah menyertakan modul ini.
-2. **Akselerasi Grafis (GPU / DRI)**: Node render `/dev/dri/renderD128` dengan driver Mesa/Vulkan.
-3. **Wayland Compositor**: Sesi desktop Wayland aktif (`WAYLAND_DISPLAY` terdefinisi).
-4. **Agen Otentikasi Polkit atau Sudo**:
-   - Untuk GUI desktop: Agen Polkit aktif di sesi desktop Anda (misalnya `hyprpolkitagent`, `polkit-gnome`, atau `polkit-kde-agent`).
-   - Atau fallback terminal sudo jika agen Polkit grafis tidak tersedia.
-
-### Preflight Dependency
-
-Sebelum aksi yang membutuhkan dependency atau root, ArchDroid memeriksa host dan menampilkan item yang kurang beserta perintah perbaikannya:
-
-- **Setup Wizard**: Menampilkan hasil diagnosa sistem host sebelum tombol inisialisasi aktif. Item elevation, jaringan, disk, atau ketiadaan `waydroid` tanpa package manager yang didukung akan menahan tombol init.
-- **Settings → Host Diagnostics**: Menampilkan 17 pemeriksaan menyeluruh, termasuk `waydroid`, `adb`, Wayland, `/dev/kvm`, binder, `/dev/dri`, polkit/sudo, `git`, `python3` + `python3-venv`, `unsquashfs`, `lzip`, `xdg-open`, terminal emulator, ruang disk, koneksi internet, dan status image Android.
-- **Installer GApps/Houdini/Multitouch**: Gagal cepat (*fast-fail*) sebelum prompt root bila elevation, jaringan, disk, atau image Waydroid belum siap. Script root GApps/Houdini memasang dependensi pendukung yang disetujui pengguna di dialog konfirmasi sebelum checkout.
+- **Pure X11 Desktop Sessions**:
+  Waydroid needs a Wayland compositor (`WAYLAND_DISPLAY`). Supported desktop environments include GNOME Wayland, KDE Plasma Wayland, Hyprland, Sway, and other Wayland compositors. Pure X11 sessions are **not supported** directly (they need a nested compositor such as Weston/cage).
+- **Non-systemd / Non-standard Package Manager Distributions**:
+  Distributions such as Alpine Linux (`apk`), Void Linux (`xbps`), NixOS, or GNU Guix are **not supported for automatic dependency installation**. On these platforms the dependency installer **fails fast before asking for root**, and users must install `waydroid`, `squashfs-tools`, and `lzip` manually from their distro repositories.
+- **Non-Linux Operating Systems**:
+  Windows and macOS are **not supported** (Waydroid depends on Linux kernel namespaces, cgroups, and binder IPC).
 
 ---
 
-## 3. Panduan Instalasi (Installation)
+## 2. Host System Requirements (Prerequisites)
 
-### Arch Linux / Distribusi Berbasis Arch (Tier 1)
+1. **Linux Kernel**: 5.x or newer with the `binder` and `ashmem` kernel modules (or `binderfs`). Stock kernels on modern Arch, Ubuntu, Fedora, and openSUSE already include them.
+2. **Graphics Acceleration (GPU / DRI)**: A `/dev/dri/renderD128` render node with Mesa/Vulkan drivers.
+3. **Wayland Compositor**: An active Wayland desktop session (`WAYLAND_DISPLAY` set).
+4. **Polkit Authentication Agent or Sudo**:
+   - For desktop GUIs: a Polkit agent running in your desktop session (for example `hyprpolkitagent`, `polkit-gnome`, or `polkit-kde-agent`).
+   - Or the terminal sudo fallback when no graphical Polkit agent is available.
 
-**Opsi A: Menggunakan PKGBUILD Lokal (Direkomendasikan)**
+### Dependency Preflight
+
+Before any action that needs a dependency or root, ArchDroid checks the host and shows the missing items with the command that fixes them:
+
+- **Setup Wizard**: Shows the host diagnostics before the initialize button is enabled. Elevation, network, or disk problems, or a missing `waydroid` with no supported package manager, keep the init button disabled.
+- **Settings → Host Diagnostics**: Shows 17 checks, including `waydroid`, `adb`, Wayland, `/dev/kvm`, binder, `/dev/dri`, polkit/sudo, `git`, `python3` + `python3-venv`, `unsquashfs`, `lzip`, `xdg-open`, terminal emulator, disk space, internet connection, and Android image status.
+- **GApps/Houdini/Multitouch Installers**: Fail fast before the root prompt when elevation, network, disk, or the Waydroid image is not ready. The GApps/Houdini root scripts install the supporting dependencies the user approved in the confirmation dialog before checkout.
+
+---
+
+## 3. Installation
+
+### Arch Linux / Arch-based Distributions (Tier 1)
+
+**Option A: Local PKGBUILD (Recommended)**
 ```bash
 git clone https://github.com/wisangdg/archdroid.git
 cd archdroid/packaging/arch
 makepkg -si
 ```
 
-**Opsi B: Menggunakan Paket Binary Rilis (`.pkg.tar.zst`)**
-Unduh artefak `archdroid-bin-<versi>-x86_64.pkg.tar.zst` dan verifikasi tanda tangannya, lalu pasang dengan pacman:
+**Option B: Release Binary Package (`.pkg.tar.zst`)**
+Download the `archdroid-bin-<version>-x86_64.pkg.tar.zst` artifact, verify its signature, then install it with pacman:
 ```bash
 sudo pacman -U archdroid-bin-*.pkg.tar.zst
 ```
 
 ### Standalone Executable (AppImage)
 
-ArchDroid AppImage dapat langsung dijalankan di semua distribusi Linux x86_64 dengan Wayland:
+The ArchDroid AppImage runs directly on any x86_64 Linux distribution with Wayland:
 ```bash
 chmod +x ArchDroid_*.AppImage
 ./ArchDroid_*.AppImage
 ```
 > [!TIP]
-> ArchDroid secara otomatis membersihkan variabel environment `PYTHONHOME` dan `PYTHONPATH` internal AppImage saat memanggil tool sistem host (`/usr/bin/waydroid`), mencegah crash modul Python pada distro host.
+> ArchDroid clears the AppImage's internal `PYTHONHOME` and `PYTHONPATH` environment variables when it calls host system tools (`/usr/bin/waydroid`), which prevents Python module crashes on the host distro.
 
-### Distribusi Lain (Preview Tier 2)
+### Other Distributions (Tier 2 Preview)
 
-- **Debian / Ubuntu**: Ubuntu 24.04 belum memiliki paket `waydroid` di repo resminya; tambahkan dulu [repo resmi Waydroid](https://docs.waydro.id/usage/install-on-desktops), lalu pasang paket preview dengan apt:
+- **Debian / Ubuntu**: Ubuntu 24.04 has no `waydroid` package in its official repos; add the [official Waydroid repo](https://docs.waydro.id/usage/install-on-desktops) first, then install the preview package with apt:
   ```bash
   sudo apt install ./ArchDroid_*_amd64.deb
   ```
-- **Fedora / openSUSE**: Pasang paket preview dengan dnf/zypper:
+- **Fedora / openSUSE**: Install the preview package with dnf/zypper:
   ```bash
   sudo dnf install ./ArchDroid-*.x86_64.rpm
   ```
@@ -103,108 +103,108 @@ chmod +x ArchDroid_*.AppImage
 
 ## 4. First Run & Setup Wizard
 
-Saat ArchDroid dibuka untuk pertama kali:
+When ArchDroid opens for the first time:
 
-1. **Deteksi Status Waydroid**:
-   ArchDroid otomatis memeriksa apakah Waydroid sudah terpasang dan apakah image sistem Android sudah diinisialisasi di `/var/lib/waydroid`.
-2. **Setup Wizard Interaktif**:
-   Jika image Android belum ada, jendela **Setup Wizard** akan menyambut Anda:
-   - **Host Health Preflight**: Memeriksa kesiapan kernel binder, GPU DRI, sesi Wayland, dan ruang penyimpanan disk (minimal 10 GB direkomendasikan).
-   - **Tipe Image Android**:
-     - `VANILLA`: Sistem Android murni (ringan, open-source, tanpa layanan Google).
-     - `GAPPS`: Android yang sudah dilengkapi Google Mobile Services dan Google Play Store.
-   - **Download & Ekstrak Otomatis**: Menampilkan progress bar dan log langsung saat image Android diunduh dan diekstrak ke host.
-3. **Mulai Layanan Waydroid**:
-   Setelah selesai, sesi container Waydroid akan siap dijalankan dan App Library akan memuat aplikasi bawaan Android.
-
----
-
-## 5. Model Hak Akses & Keamanan Root (Privilege Boundaries)
-
-ArchDroid dirancang dengan prinsip **least-privilege** (hak akses seminimal mungkin):
-
-### Kapan Root Dibutuhkan?
-Akses root (via Polkit grafis atau sudo) **hanya** diminta untuk operasi administratif sistem berikut:
-1. **Instalasi Paket Dependensi Sistem**: Memasang paket yang belum ada (`waydroid`, `squashfs-tools`, `lzip`, `git`) melalui package manager host.
-2. **Inisialisasi Pertama Kali (`waydroid init`)**: Menyiapkan mount namespace `/var/lib/waydroid` dan file image Android di level root.
-3. **Injeksi Add-on Sistem (`GApps`, `libhoudini`, `multitouch`)**: Memodifikasi partisi sistem Waydroid (`/var/lib/waydroid/images/system.img`).
-
-### Kapan Root TIDAK PERNAH Diminta?
-Operasional harian ArchDroid berjalan **100% unprivileged (sebagai user biasa)** tanpa izin root:
-- Membuka dan menjalankan ArchDroid.
-- Menjalankan sesi Waydroid (`waydroid session start`).
-- Meluncurkan aplikasi dan game Android.
-- Memasang file `.apk` (drag-and-drop atau file picker).
-- Mengubah profil resolusi dan DPI layar.
-- Mengonfigurasi dan menjalankan Smart Keymapping Phantom.
-- Menjalankan pemeriksaan diagnostik host.
-
-### Dialog Persetujuan Eksplisit (Explicit Consent)
-Sebelum prompt password root (Polkit/sudo) dimunculkan, ArchDroid **selalu menampilkan modal konfirmasi**:
-- Menjelaskan perintah persis yang akan dieksekusi.
-- Merinci paket sistem distro yang akan dipasang.
-- Backend Rust memvalidasi kembali bahwa paket yang dieksekusi sama persis dengan yang disetujui pengguna (menolak injeksi paket liar).
-- Script root dieksekusi di direktori privat sementara (`mode 0700`) dan mengisolasi cache agar tidak mencemari direktori pengguna.
+1. **Waydroid Status Detection**:
+   ArchDroid checks whether Waydroid is installed and whether the Android system image has been initialized in `/var/lib/waydroid`.
+2. **Interactive Setup Wizard**:
+   If there is no Android image yet, the **Setup Wizard** greets you:
+   - **Host Health Preflight**: Checks the kernel binder, GPU DRI, Wayland session, and disk space (at least 10 GB recommended).
+   - **Android Image Type**:
+     - `VANILLA`: Plain Android (lightweight, open source, no Google services).
+     - `GAPPS`: Android with Google Mobile Services and the Google Play Store.
+   - **Automatic Download & Extract**: Shows a progress bar and a live log while the Android image is downloaded and extracted on the host.
+3. **Start the Waydroid Service**:
+   Once finished, the Waydroid container session is ready to start and the App Library loads the built-in Android apps.
 
 ---
 
-## 6. Pemecahan Masalah (Troubleshooting)
+## 5. Privilege Model & Root Safety (Privilege Boundaries)
 
-### 1. Dialog Root Tidak Muncul di Desktop Mandiri (Hyprland / Sway / i3)
-- **Gejala**: Tombol install dependensi atau init hang/timeout tanpa ada popup password.
-- **Penyebab**: Window manager mandiri tidak menyertakan Polkit Authentication Agent secara default.
-- **Solusi**: Pasang dan jalankan agen polkit di sesi startup Anda:
+ArchDroid follows the **least-privilege** principle:
+
+### When Is Root Needed?
+Root access (through graphical Polkit or sudo) is requested **only** for these system administration operations:
+1. **Installing System Dependencies**: Installing missing packages (`waydroid`, `squashfs-tools`, `lzip`, `git`) through the host package manager.
+2. **First-Time Initialization (`waydroid init`)**: Setting up the `/var/lib/waydroid` mount namespace and the Android image files as root.
+3. **System Add-on Injection (`GApps`, `libhoudini`, `multitouch`)**: Modifying the Waydroid system partition (`/var/lib/waydroid/images/system.img`).
+
+### When Is Root NEVER Requested?
+Day-to-day use of ArchDroid runs **100% unprivileged (as a normal user)**:
+- Opening and running ArchDroid.
+- Starting the Waydroid session (`waydroid session start`).
+- Launching Android apps and games.
+- Installing `.apk` files (drag-and-drop or file picker).
+- Changing screen resolution and DPI profiles.
+- Configuring and running Phantom Smart Keymapping.
+- Running host diagnostics.
+
+### Explicit Consent Dialog
+Before any root password prompt (Polkit/sudo) appears, ArchDroid **always shows a confirmation modal** that:
+- Explains the exact command that will run.
+- Lists the distro system packages that will be installed.
+- The Rust backend re-checks that the packages being installed exactly match what the user approved (rejecting injected packages).
+- Root scripts run in a private temporary directory (`mode 0700`) with an isolated cache so they never pollute the user's directories.
+
+---
+
+## 6. Troubleshooting
+
+### 1. Root Dialog Does Not Appear on Standalone Window Managers (Hyprland / Sway / i3)
+- **Symptom**: The dependency install or init button hangs/times out with no password popup.
+- **Cause**: Standalone window managers do not ship a Polkit authentication agent by default.
+- **Fix**: Install a polkit agent and start it with your session:
   ```bash
-  # Untuk Hyprland
+  # For Hyprland
   systemctl --user enable --now hyprpolkitagent.service
-  # Atau jalankan polkit-gnome / polkit-kde di autostart
+  # Or start polkit-gnome / polkit-kde from autostart
   /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1 &
   ```
-  Atau jalankan `archdroid` melalui terminal untuk melihat prompt password `sudo` berbasis teks.
+  Or launch `archdroid` from a terminal to get the text-based `sudo` password prompt.
 
-### 2. Modul Kernel Binder Hilang (`binder: missing`)
-- **Gejala**: Diagnostik menunjukkan Binder hilang; Waydroid tidak bisa start container.
-- **Penyebab**: Kernel Linux yang digunakan tidak mengaktifkan modul `binder_linux` atau binderfs.
-- **Solusi**:
-  - Pada Arch Linux: Gunakan kernel standar `linux` atau `linux-zen` yang sudah mengaktifkan binder secara bawaan.
-  - Jika menggunakan kernel custom, pastikan opsi berikut aktif:
+### 2. Missing Binder Kernel Module (`binder: missing`)
+- **Symptom**: Diagnostics show Binder missing; Waydroid cannot start the container.
+- **Cause**: The running Linux kernel does not enable the `binder_linux` module or binderfs.
+- **Fix**:
+  - On Arch Linux: use the stock `linux` or `linux-zen` kernel, which enable binder by default.
+  - On a custom kernel, make sure these options are enabled:
     ```ini
     CONFIG_ANDROID_BINDER_IPC=y
     CONFIG_ANDROID_BINDERFS=y
     ```
-  - Pastikan binderfs di-mount:
+  - Make sure binderfs is mounted:
     ```bash
     sudo mkdir -p /dev/binderfs
     sudo mount -t binder binder /dev/binderfs
     ```
 
-### 3. Wayland Compositor Tidak Terdeteksi (`Wayland: not running`)
-- **Gejala**: Aplikasi memperingatkan bahwa sesi Wayland tidak ditemukan.
-- **Penyebab**: Anda sedang login pada sesi desktop X11 murni (`DISPLAY` aktif, tetapi `WAYLAND_DISPLAY` kosong).
-- **Solusi**: Login ke sesi Wayland (pilih "GNOME on Wayland", "Plasma (Wayland)", atau jalankan compositor seperti Hyprland/Sway). Untuk menjalankan di sesi X11, Anda dapat menggunakan nested Wayland compositor seperti `weston` atau `cage`.
+### 3. Wayland Compositor Not Detected (`Wayland: not running`)
+- **Symptom**: The app warns that no Wayland session was found.
+- **Cause**: You are logged into a pure X11 desktop session (`DISPLAY` set, but `WAYLAND_DISPLAY` empty).
+- **Fix**: Log into a Wayland session (choose "GNOME on Wayland", "Plasma (Wayland)", or run a compositor such as Hyprland/Sway). To run under an X11 session, use a nested Wayland compositor such as `weston` or `cage`.
 
-### 4. Izin KVM Ditolak (`/dev/kvm: permission denied`)
-- **Gejala**: Performa emulasi lambat atau peringatan izin KVM.
-- **Solusi**: Tambahkan pengguna Anda ke grup `kvm`:
+### 4. KVM Permission Denied (`/dev/kvm: permission denied`)
+- **Symptom**: Slow emulation or a KVM permission warning.
+- **Fix**: Add your user to the `kvm` group:
   ```bash
   sudo usermod -aG kvm $USER
   ```
-  Lalu log out dan log in kembali.
+  Then log out and log back in.
 
-### 5. Kompatibilitas GPU (Nvidia vs AMD / Intel)
-- **Intel & AMD**: Bekerja langsung secara out-of-the-box menggunakan driver open-source Mesa (DRI3/Vulkan).
-- **Nvidia Proprietary**: Pastikan modul `nvidia-drm.modeset=1` aktif pada boot parameter kernel. Jika Waydroid mengalami render glitch, Waydroid dapat dikonfigurasi untuk menggunakan fallback software renderer (`Mesa llvmpipe`).
+### 5. GPU Compatibility (Nvidia vs AMD / Intel)
+- **Intel & AMD**: Work out of the box with the open-source Mesa drivers (DRI3/Vulkan).
+- **Nvidia Proprietary**: Make sure `nvidia-drm.modeset=1` is set in the kernel boot parameters. If Waydroid shows render glitches, it can be configured to fall back to the software renderer (`Mesa llvmpipe`).
 
-### 6. Melaporkan Masalah (Diagnostic Bundle)
-Buka **Settings → Diagnostic Bundle → Create Bundle**. ArchDroid menulis satu file teks ke `~/Downloads/archdroid-diagnostics-<waktu>.txt` berisi versi sistem dan Waydroid, hasil diagnostik host, status add-on, serta log terakhir, dengan path home dan nilai token/password disamarkan. Log dapat memuat nama paket Android dan nama file APK yang pernah Anda pakai; baca isinya dan hapus yang tidak ingin dibagikan, lalu lampirkan ke laporan bug. File ini dibuat tanpa root dan tidak pernah diunggah otomatis.
+### 6. Reporting Problems (Diagnostic Bundle)
+Open **Settings → Diagnostic Bundle → Create Bundle**. ArchDroid writes one text file to `~/Downloads/archdroid-diagnostics-<time>.txt` with the system and Waydroid versions, host diagnostics, add-on status, and recent logs, with home paths and token/password values masked. The logs can contain Android package names and APK file names you have used; read the file and remove anything you do not want to share, then attach it to the bug report. The file is created without root and is never uploaded automatically.
 
 ---
 
-## 7. Panduan Uninstall Bersih (Clean Uninstall)
+## 7. Clean Uninstall
 
-Jika Anda ingin menghapus ArchDroid dan seluruh datanya dari sistem:
+To remove ArchDroid and all of its data from your system:
 
-### 1. Menghapus Aplikasi ArchDroid
+### 1. Remove the ArchDroid App
 - **Arch Linux**:
   ```bash
   sudo pacman -R archdroid-bin
@@ -217,115 +217,115 @@ Jika Anda ingin menghapus ArchDroid dan seluruh datanya dari sistem:
   ```bash
   sudo dnf remove arch-droid   # openSUSE: sudo zypper remove arch-droid
   ```
-- **AppImage**: Cukup hapus file `ArchDroid_*.AppImage` dan file `.desktop` terkait di `~/.local/share/applications/` jika ada.
+- **AppImage**: Delete the `ArchDroid_*.AppImage` file and its `.desktop` file in `~/.local/share/applications/` if there is one.
 
-### 2. Menghapus Konfigurasi & Cache Pengguna
-Hapus preferensi lokal, keymap Phantom, dan cache sementara:
+### 2. Remove User Configuration & Cache
+Remove local preferences, Phantom keymaps, and the temporary cache:
 ```bash
 rm -rf ~/.config/archdroid
 rm -rf ~/.cache/archdroid
 ```
 
-### 3. Menghapus Data & Image Waydroid (Opsional)
-Jika Anda juga ingin menghapus seluruh sistem Android, aplikasi yang terpasang di dalam container, dan image Waydroid:
+### 3. Remove Waydroid Data & Images (Optional)
+To also remove the whole Android system, the apps installed inside the container, and the Waydroid images:
 ```bash
-# Hentikan sesi dan service Waydroid
+# Stop the Waydroid session and service
 waydroid session stop
 sudo systemctl stop waydroid-container.service
 
-# Hapus data sistem dan image container (membutuhkan root)
+# Remove system data and container images (requires root)
 sudo rm -rf /var/lib/waydroid
 
-# Hapus data runtime pengguna
+# Remove user runtime data
 rm -rf ~/.local/share/waydroid
 ```
 
 ---
 
-## 8. Batasan yang Diketahui (Known Limitations)
+## 8. Known Limitations
 
-1. **Satu Container per Host (Single Instance Container)**:
-   Waydroid secara arsitektur menggunakan satu container LXC global per mesin host. ArchDroid tidak mendukung multi-instance container Android simultan secara paralel.
-2. **Ketergantungan Sesi Wayland**:
-   ArchDroid dan Waydroid membutuhkan Wayland compositor aktif. Tidak ada display server terisolasi X11 bawaan di dalam aplikasi.
-3. **Ketersediaan ARM Translation Layer (libhoudini)**:
-   Injeksi libhoudini bergantung pada ketersediaan image Google Android TV upstream yang diunduh melalui skrip helper ter-pin. Game yang menggunakan sistem anti-cheat tingkat kernel (seperti game tertentu dengan proteksi ketat) mungkin tidak dapat berjalan pada container emulator.
-4. **Tingkat Dukungan Distro**:
-   Dukungan penuh (Tier 1) yang diverifikasi live mencakup keluarga Arch Linux. Distro Tier 2 berstatus preview: `.deb` sudah diuji live di Ubuntu 24.04 LTS dan `.rpm` di Fedora 44, sedangkan Debian, RHEL-family, dan openSUSE belum diuji live.
-5. **Cakupan Uji Live**:
-   Semua alur utama, termasuk build dan peluncuran Phantom serta drag-and-drop Wayland dan X11, diuji live di VM Arch (weston dan Xvfb; lihat [`docs/P0-8.2-MATRIX-RESULTS.md`](docs/P0-8.2-MATRIX-RESULTS.md)). Belum diuji: matriks GPU dan desktop di hardware sungguhan (GNOME/KDE/Hyprland, Intel/AMD/NVIDIA). Jika ada yang gagal di sistem Anda, lampirkan Diagnostic Bundle saat melapor.
-6. **Integritas Arsip Add-on**:
-   Skrip `waydroid_script` dipin ke commit tertentu dan dependensi Python-nya diverifikasi SHA-256, tetapi arsip GApps/libhoudini yang diunduhnya dicocokkan dengan **MD5** yang tertanam di commit tersebut. MD5 mencegah file rusak atau tertukar, tetapi bukan perlindungan kriptografis yang kuat.
-7. **Probe Konektivitas**:
-   Pemeriksaan "online" membuka koneksi TCP tanpa data ke `1.1.1.1:53` (lalu `8.8.8.8:53`). Di jaringan yang memblokir DNS publik, diagnostik dapat menampilkan "Offline" walaupun unduhan dari upstream tetap bisa berjalan. Rincian ada di [PRIVACY.md](PRIVACY.md).
+1. **One Container per Host (Single Instance Container)**:
+   By design, Waydroid uses one global LXC container per host machine. ArchDroid does not support running multiple Android containers in parallel.
+2. **Wayland Session Dependency**:
+   ArchDroid and Waydroid need an active Wayland compositor. The app has no built-in isolated X11 display server.
+3. **ARM Translation Layer (libhoudini) Availability**:
+   libhoudini injection depends on the upstream Google Android TV image downloaded by a pinned helper script. Games with kernel-level anti-cheat (such as some heavily protected titles) may not run in an emulator container.
+4. **Distro Support Levels**:
+   Full (Tier 1) live-verified support covers the Arch Linux family. Tier 2 distros are in preview: the `.deb` is live-tested on Ubuntu 24.04 LTS and the `.rpm` on Fedora 44, while Debian, the RHEL family, and openSUSE are not live-tested yet.
+5. **Live Test Coverage**:
+   All main flows, including building and launching Phantom and Wayland and X11 drag-and-drop, are live-tested in an Arch VM (weston and Xvfb; see [`docs/P0-8.2-MATRIX-RESULTS.md`](docs/P0-8.2-MATRIX-RESULTS.md)). Not yet tested: the GPU and desktop matrix on real hardware (GNOME/KDE/Hyprland, Intel/AMD/NVIDIA). If something fails on your system, attach a Diagnostic Bundle to your report.
+6. **Add-on Archive Integrity**:
+   The `waydroid_script` script is pinned to a specific commit and its Python dependencies are SHA-256 verified, but the GApps/libhoudini archives it downloads are checked against the **MD5** hashes embedded in that commit. MD5 catches corrupted or swapped files, but it is not strong cryptographic protection.
+7. **Connectivity Probe**:
+   The "online" check opens a TCP connection, sending no data, to `1.1.1.1:53` (then `8.8.8.8:53`). On networks that block public DNS, diagnostics can show "Offline" even though downloads from upstream still work. Details are in [PRIVACY.md](PRIVACY.md).
 
 ---
 
-## 9. Fitur Utama
+## 9. Key Features
 
-- 🎮 **App Library & Game Launcher**: Daftar aplikasi Android yang terpasang dengan ekstraksi ikon, pencarian instan (`Ctrl+F`), filter kategori (All/User/System), dan klik kanan context menu.
-- 📦 **Drag-and-Drop APK Installer**: Tarik file `.apk` dari file manager langsung ke jendela ArchDroid untuk instalasi instan.
+- 🎮 **App Library & Game Launcher**: A list of installed Android apps with icon extraction, instant search (`Ctrl+F`), category filters (All/User/System), and a right-click context menu.
+- 📦 **Drag-and-Drop APK Installer**: Drag an `.apk` file from your file manager straight onto the ArchDroid window to install it.
 - 🧩 **Add-on Injection (GApps & ARM Translation)**:
-  - Injeksi Google Play Services (MindTheGapps / OpenGApps).
-  - Injeksi ARM translation layer (Intel libhoudini) untuk memainkan game Android 3D mobile pada CPU x86_64.
-  - Deklarasi hardware multitouch untuk kompatibilitas penuh Google Play Store.
-  - Setiap injeksi root dilindungi oleh **dialog persetujuan eksplisit** sebelum meminta akses polkit/sudo.
-- 🖥️ **Display Profiles & Resolution Presets**: Pilihan preset cepat (Tablet 1080p, Tablet 720p, Mobile Portrait, Gaming 2K) dan kustomisasi DPI dinamis.
-- ⌨️ **Smart Keymapping (Phantom Keymapper)**: Integrasi keymapper virtual touchscreen desktop unprivileged.
-- 🩺 **Host System Diagnostics**: Pengecekan otomatis terhadap KVM, binder, GPU render node, sesi Wayland, daemon Waydroid, dan storage.
-- 📟 **Visual Process Stepper & Terminal**: Stepper visual interaktif dengan log parser multi-distro, kemampuan ekspor log (`.log`), pembatalan task (`cancel`), dan retry.
+  - Google Play Services injection (MindTheGapps / OpenGApps).
+  - ARM translation layer injection (Intel libhoudini) to play 3D Android mobile games on x86_64 CPUs.
+  - Multitouch hardware declaration for full Google Play Store compatibility.
+  - Every root injection is guarded by an **explicit consent dialog** before polkit/sudo access is requested.
+- 🖥️ **Display Profiles & Resolution Presets**: Quick presets (Tablet 1080p, Tablet 720p, Mobile Portrait, Gaming 2K) and dynamic DPI customization.
+- ⌨️ **Smart Keymapping (Phantom Keymapper)**: Integration with an unprivileged desktop virtual-touchscreen keymapper.
+- 🩺 **Host System Diagnostics**: Automatic checks for KVM, binder, the GPU render node, the Wayland session, the Waydroid daemon, and storage.
+- 📟 **Visual Process Stepper & Terminal**: An interactive visual stepper with a multi-distro log parser, log export (`.log`), task cancellation (`cancel`), and retry.
 
 ---
 
-## 10. Keamanan & Privilege Boundary
+## 10. Security & Privilege Boundary
 
-ArchDroid menerapkan prinsip keamanan defensif berlapis:
-- **Hash-Pinned Python Dependencies**: Dependensi Python untuk helper instalasi di-lock dan diverifikasi dengan hash SHA-256 (`--require-hashes --only-binary=:all:`).
-- **Isolasi Lingkungan Root**: Script privileged berjalan di direktori temporer privat (`mktemp -d`, mode `0700`), `SUDO_USER` di-unset, dan cache diarahkan ke `$ARCHDROID_WORK/cache` agar proses root tidak pernah menulis file ke `~/.cache` milik user desktop.
-- **Explicit Consent**: Semua installer root wajib dikonfirmasi melalui modal persetujuan pengguna sebelum prompt root polkit/sudo muncul.
-- **Package Approval**: Daftar paket sistem dan command persis yang akan dijalankan ditampilkan di modal; backend memvalidasi ulang daftar yang disetujui dan menolak instalasi paket di luar rencana (`approval_required` / `invalid_input`).
-- **Fail-Fast Preflight**: Jika dependensi hilang pada distribusi yang tidak didukung, sistem menolak operasi sebelum meminta izin root.
+ArchDroid applies layered defensive security:
+- **Hash-Pinned Python Dependencies**: Python dependencies for the install helpers are locked and verified by SHA-256 hash (`--require-hashes --only-binary=:all:`).
+- **Root Environment Isolation**: Privileged scripts run in a private temporary directory (`mktemp -d`, mode `0700`), `SUDO_USER` is unset, and the cache points to `$ARCHDROID_WORK/cache`, so root processes never write to the desktop user's `~/.cache`.
+- **Explicit Consent**: Every root installer must be confirmed in a user consent modal before the polkit/sudo root prompt appears.
+- **Package Approval**: The modal shows the system packages and the exact command that will run; the backend re-validates the approved list and refuses to install packages outside the plan (`approval_required` / `invalid_input`).
+- **Fail-Fast Preflight**: If dependencies are missing on an unsupported distribution, the operation is refused before root is requested.
 
 ---
 
-## 11. Pengembangan & Build
+## 11. Development & Build
 
-### Menjalankan Mode Development
+### Development Mode
 ```bash
-# Instal dependensi frontend
+# Install frontend dependencies
 npm install
 
-# Jalankan Vite dev server + Tauri IPC
+# Start the Vite dev server + Tauri IPC
 npm run tauri dev
 ```
 
-### Menjalankan Pengujian (Testing)
+### Running Tests
 ```bash
-# Unit test frontend & security assertions
+# Frontend unit tests & security assertions
 npm test
 
-# Unit test backend Rust (multi-distro, elevation, parser)
+# Rust backend unit tests (multi-distro, elevation, parser)
 cargo test --manifest-path src-tauri/Cargo.toml
 
-# Test dengan fitur dev-commands
+# Tests with the dev-commands feature
 cargo test --manifest-path src-tauri/Cargo.toml --features dev-commands
 ```
 
-### Membangun Paket Rilis (Production Build)
+### Production Build
 ```bash
 npm run tauri build
 ```
-Hasil paket rilis (`.deb`, `.AppImage`) akan dibuat di folder `src-tauri/target/release/bundle/`.
+The release packages (`.deb`, `.AppImage`) are written to `src-tauri/target/release/bundle/`.
 
 ---
 
-## 12. Lisensi & Upstream Credits
+## 12. License & Upstream Credits
 
-- **ArchDroid**: Lisensi [MIT](LICENSE), Copyright (c) 2026 wisangdg.
+- **ArchDroid**: [MIT](LICENSE) license, Copyright (c) 2026 wisangdg.
 - **Waydroid**: [https://waydroid.net](https://waydroid.net) (GPL-3.0).
-- **waydroid_script**: [casualsnek/waydroid_script](https://github.com/casualsnek/waydroid_script) (GPL-3.0) — Pinned commit `48dbfaf`. Script ini diunduh saat instalasi add-on dan tidak di-vendor di dalam binary ArchDroid.
-- **Phantom Keymapper**: [oliviermugishak/phantom](https://github.com/oliviermugishak/phantom) (MIT) — Pinned commit `1a6b7ed`.
-- Rincian pihak ketiga dan audit lisensi tersedia di [`docs/THIRD-PARTY.md`](docs/THIRD-PARTY.md).
+- **waydroid_script**: [casualsnek/waydroid_script](https://github.com/casualsnek/waydroid_script) (GPL-3.0) — pinned commit `48dbfaf`. The script is downloaded when an add-on is installed and is not vendored in the ArchDroid binary.
+- **Phantom Keymapper**: [oliviermugishak/phantom](https://github.com/oliviermugishak/phantom) (MIT) — pinned commit `1a6b7ed`.
+- Third-party details and the license audit are in [`docs/THIRD-PARTY.md`](docs/THIRD-PARTY.md).
 
 > [!NOTE]
-> **Pernyataan Merek Dagang (Trademark Disclaimer)**: LDPlayer dan NoxPlayer adalah merek dagang atau merek dagang terdaftar milik pemiliknya masing-masing. Penggunaan nama tersebut di dalam dokumentasi semata-mata bertujuan sebagai referensi perbandingan antarmuka pengguna. ArchDroid adalah proyek independen dan tidak berafiliasi, disponsori, atau didukung oleh pemegang merek dagang tersebut.
+> **Trademark Disclaimer**: LDPlayer and NoxPlayer are trademarks or registered trademarks of their respective owners. These names are used in this documentation only as a user-interface comparison reference. ArchDroid is an independent project and is not affiliated with, sponsored by, or endorsed by those trademark holders.

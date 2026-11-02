@@ -66,8 +66,8 @@ test("platform support claims in README strictly match test evidence", () => {
   const readme = fs.readFileSync(path.join(repoRoot, "README.md"), "utf8");
 
   // Tier 1 must be Arch Linux, verified live
-  assert.ok(readme.includes("Tier 1 (Didukung Penuh & Teruji Live)"));
-  assert.ok(readme.includes("PKGBUILD lokal (`makepkg -si`) / AppImage"));
+  assert.ok(readme.includes("Tier 1 (Fully Supported & Live-Tested)"));
+  assert.ok(readme.includes("Local PKGBUILD (`makepkg -si`) / AppImage"));
 
   // No unverified claims
   assert.ok(
@@ -78,13 +78,15 @@ test("platform support claims in README strictly match test evidence", () => {
   // on Ubuntu 24.04 (docs/P0-8.2-MATRIX-RESULTS.md), and the untested
   // distros must still be named as untested.
   assert.ok(readme.includes("Tier 2 (Best-Effort)"));
-  assert.ok(readme.includes("teruji live di VM Ubuntu 24.04 LTS"));
-  assert.ok(readme.includes("teruji live di VM Fedora 44"));
+  assert.ok(readme.includes("live-tested in an Ubuntu 24.04 LTS VM"));
+  assert.ok(readme.includes("live-tested in a Fedora 44 VM"));
   assert.ok(
-    readme.includes("Debian, RHEL-family, dan openSUSE belum diuji live")
+    readme.includes(
+      "Debian, the RHEL family, and openSUSE are not live-tested yet"
+    )
   );
   assert.ok(
-    !/openSUSE[^\n|]*\|[^\n]*teruji live/.test(readme),
+    !/openSUSE[^\n|]*\|[^\n]*live-tested/.test(readme),
     "openSUSE row must not claim live testing"
   );
 

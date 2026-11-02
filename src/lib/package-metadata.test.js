@@ -82,8 +82,5 @@ test("third-party brand names are audited and metadata points to legitimate repo
   assert.ok(!pkgbuild.toLowerCase().includes("ldplayer-style"));
 
   // README contains explicit trademark disclaimer
-  assert.ok(
-    readme.includes("Trademark Disclaimer") ||
-      readme.includes("Pernyataan Merek Dagang")
-  );
+  assert.ok(readme.includes("Trademark Disclaimer"));
 });
