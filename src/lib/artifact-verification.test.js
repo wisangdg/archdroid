@@ -67,7 +67,9 @@ test("platform support claims in README strictly match test evidence", () => {
 
   // Tier 1 must be Arch Linux, verified live
   assert.ok(readme.includes("Tier 1 (Fully Supported & Live-Tested)"));
-  assert.ok(readme.includes("Local PKGBUILD (`makepkg -si`) / AppImage"));
+  assert.ok(
+    readme.includes("`.pkg.tar.zst` (release), local PKGBUILD, AppImage")
+  );
 
   // No unverified claims
   assert.ok(
