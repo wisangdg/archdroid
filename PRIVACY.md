@@ -1,38 +1,40 @@
-# Kebijakan Privasi (Privacy Policy)
+# Privacy Policy
 
-ArchDroid menghormati privasi pengguna. Kebijakan ini menjelaskan data yang disimpan secara lokal di mesin Anda dan komitmen privasi aplikasi.
-
----
-
-## 1. Zero Telemetry & Phone-Home
-
-- **Tanpa Pelacakan (Zero Analytics)**: ArchDroid tidak memuat library pelacakan, analytics, telemetry, ataupun identifier unik pengguna.
-- **Tanpa Pengiriman Data**: Aplikasi tidak pernah mengirim data host, spesifikasi hardware, daftar aplikasi Android yang terpasang, atau statistik penggunaan ke server mana pun di internet.
-- **Koneksi Jaringan**: ArchDroid hanya membuat dua jenis koneksi keluar:
-  1. **Probe konektivitas (otomatis, tanpa data).** Untuk memeriksa apakah host online, ArchDroid membuka koneksi TCP ke `1.1.1.1:53` (Cloudflare) dan, hanya jika itu gagal, ke `8.8.8.8:53` (Google), dengan timeout 1 detik. Koneksi langsung ditutup tanpa mengirim byte apa pun; tidak ada query DNS, identifier, atau data host. Penyedia tersebut dan firewall Anda tetap dapat melihat bahwa alamat IP Anda membuka koneksi. Probe ini berjalan saat layar Setup atau Settings → Host Diagnostics dibuka, saat tombol scan ulang ditekan, saat membuat Diagnostic Bundle, dan sebelum init, installer GApps/Houdini, atau instalasi Phantom.
-  2. **Unduhan yang diminta pengguna**, langsung ke sumber upstream:
-     - Image resmi Android (SourceForge / Waydroid OTA server).
-     - Dependensi paket distro melalui package manager host (`pacman`, `apt`, `dnf`, `zypper`).
-     - Skrip injeksi GApps/Houdini (`waydroid_script`) yang dipin commit-nya dari GitHub upstream, paket Python ber-hash yang dibutuhkannya (PyPI), serta arsip GApps/libhoudini yang diunduh skrip itu dari sumber upstream-nya.
-     - Source Phantom yang dipin commit-nya dari GitHub upstream; installer upstream-nya dapat mengunduh dependensi build sendiri.
+ArchDroid keeps everything on your machine. This page lists what it stores locally and every network connection it makes.
 
 ---
 
-## 2. Penyimpanan Data Lokal
+## 1. No telemetry, no phone-home
 
-Semua data konfigurasi, preferensi, dan runtime disimpan secara eksklusif di penyimpanan lokal mesin host:
+- **No tracking.** ArchDroid contains no tracking, analytics, or telemetry library and no unique user identifier.
+- **No data sent.** The app never sends host data, hardware details, your list of Android apps, or usage statistics to any server.
+- **Network connections.** ArchDroid makes only two kinds of outgoing connections:
+  1. **Connectivity probe (automatic, sends no data).** To check whether the host is online, ArchDroid opens a TCP connection to `1.1.1.1:53` (Cloudflare) and, only if that fails, to `8.8.8.8:53` (Google), with a 1-second timeout. The connection is closed immediately without sending a single byte: no DNS query, identifier, or host data. Those providers and your firewall can still see that your IP address opened a connection. The probe runs when the Setup screen or Settings → Host Diagnostics opens, when you press Re-check, when you create a Diagnostic Bundle, and before init, the GApps/Houdini installers, or the Phantom install.
+  2. **Downloads you ask for**, straight from the upstream sources:
+     - The official Android images (SourceForge / Waydroid OTA server), downloaded by `waydroid init`.
+     - Distro packages through your package manager (`pacman`, `apt`, `dnf`, `zypper`).
+     - For GApps/Houdini: the commit-pinned `waydroid_script` from GitHub, its hash-pinned Python packages (PyPI), and the GApps (MindTheGapps, GitHub) or libhoudini (GitHub) archive, which ArchDroid downloads itself and accepts only with the pinned SHA-256.
+     - The commit-pinned Phantom source from GitHub; its upstream installer may download its own build dependencies.
 
-| Jenis Data | Lokasi Penyimpanan | Tujuan |
+The app window itself cannot reach the network: its Content Security Policy only allows the app's own IPC.
+
+---
+
+## 2. Local data
+
+| Data | Location | Purpose |
 |---|---|---|
-| **Preferensi Aplikasi** | `~/.config/io.github.archdroid/` | Menyimpan profil tampilan, preset resolusi, DPI, dan konfigurasi keymapper Phantom. |
-| **Marker & State Cache** | `~/.cache/archdroid/` | Menyimpan marker status task unprivileged dan cache file sementara. |
-| **File Log Aplikasi** | `~/.local/share/io.github.wisangdg.archdroid/logs/` (lokasi persisnya tampil di Settings → Application Log) | Menyimpan log eksekusi proses lokal. Log ini hanya dibaca oleh pengguna dan tidak pernah diunggah secara otomatis. |
-| **Diagnostic Bundle** | `~/Downloads/archdroid-diagnostics-*.txt` (atau `~`), mode `0600` | Dibuat **hanya** saat pengguna menekan Settings → Diagnostic Bundle → Create Bundle. Berisi versi OS/kernel/Waydroid, hasil diagnostik host, status add-on, dan sekitar 32 KiB terakhir log aplikasi serta log Waydroid. Log aplikasi mencatat argumen setiap command, sehingga bundle dapat memuat **nama paket Android dan nama file APK** yang pernah Anda pasang, jalankan, atau hapus. Path home dan nilai token/password disamarkan; nama paket dan nama file tidak. Dikumpulkan tanpa root dan tidak pernah diunggah; pengguna yang memutuskan untuk membagikannya. |
-| **Data Sistem Waydroid** | `/var/lib/waydroid/` | File image Android sistem dan vendor milik container Waydroid (dikelola oleh root). |
-| **Data Pengguna Android** | `~/.local/share/waydroid/` | Penyimpanan internal container Android, aplikasi APK yang terpasang, dan data aplikasi Android milik pengguna. |
+| **Add-on markers and installer cache** | `~/.cache/archdroid/` | Whether GApps, libhoudini, and multitouch were installed (`pending` until confirmed in a running container, then `verified`). |
+| **Device profile** | `~/.config/io.github.archdroid/profile.json` | Saved display/device profile. Current release builds do not write this file; resolution and DPI are stored by Waydroid itself (`/var/lib/waydroid/waydroid.cfg`). |
+| **Application log** | `~/.local/share/io.github.wisangdg.archdroid/logs/` (the exact path is shown in Settings → Application Log) | Commands the app ran, their result and duration, and the progress/error lines of installers. Never uploaded. |
+| **Diagnostic Bundle** | `~/Downloads/archdroid-diagnostics-*.txt` (or `~`), mode `0600` | Created **only** when you press Settings → Diagnostic Bundle → Create Bundle. Contains OS/kernel/Waydroid versions, host diagnostics, add-on status, and about the last 32 KiB of the application log and the Waydroid log. The application log records each command's arguments, so the bundle can contain **Android package names and APK file names** you installed, launched, or removed. Home paths and token/password values are masked; package and file names are not. Created without root and never uploaded; you decide whether to share it. |
+| **Waydroid system data** | `/var/lib/waydroid/` | Android system and vendor images and the container configuration (owned by root, managed by Waydroid). |
+| **Android user data** | `~/.local/share/waydroid/` | Android internal storage, installed apps, and their data. |
+
+Phantom stores its keymaps in its own configuration directory; see the [Phantom project](https://github.com/oliviermugishak/phantom).
 
 ---
 
-## 3. Retensi & Penghapusan Data
+## 3. Retention and deletion
 
-Pengguna memegang kendali penuh atas data mereka. Seluruh data dapat dihapus kapan saja dengan menghapus direktori di atas atau mengikuti instruksi penghapusan bersih di [README.md](README.md#7-panduan-uninstall-bersih-clean-uninstall).
+You control all of this data. Delete it at any time by removing the directories above, or follow the [Uninstall](README.md#uninstall) steps in the README. Full list of locations: [docs/DATA-AND-UNINSTALL.md](docs/DATA-AND-UNINSTALL.md).

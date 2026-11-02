@@ -461,6 +461,9 @@ pub(crate) fn run_program(
     let outcome = interpret(&program, status, stdout, stderr);
     let elapsed = started.elapsed().as_millis();
     match &outcome {
+        // The UI polls `status` every 5 s; at info level it would push
+        // everything else out of the log tail a Diagnostic Bundle includes.
+        Ok(_) if args == ["status"] => log::debug!("{program} {:?} ok in {elapsed}ms", args),
         Ok(_) => log::info!("{program} {:?} ok in {elapsed}ms", args),
         Err(failure) => log::warn!("{program} {:?} failed in {elapsed}ms: {failure}", args),
     }

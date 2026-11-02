@@ -3,6 +3,7 @@
 //! privileged script runners built on top of them.
 
 use serde::Serialize;
+use std::collections::VecDeque;
 use std::io::Read;
 use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, ExitStatus, Stdio};
@@ -17,6 +18,36 @@ use crate::*;
 
 /// Upper bound for the output kept around for inspection.
 const MAX_CAPTURED_OUTPUT: usize = 4096;
+
+/// Lines of script output kept for the application log when a task fails. The
+/// head in `captured` explains how it started; this explains how it ended.
+const FAILURE_TAIL_LINES: usize = 40;
+
+/// Script lines that mark progress or an outcome. They go to the application
+/// log as they arrive, so a Diagnostic Bundle shows how far an installer got
+/// even when the terminal was closed without exporting its output.
+fn marker_level(line: &str) -> Option<log::Level> {
+    let line = line.trim_start();
+    if line.starts_with("[ERROR]") {
+        Some(log::Level::Warn)
+    } else if ["[STEP]", "[SUCCESS]", "[HINT]", "[WARN"]
+        .iter()
+        .any(|prefix| line.starts_with(prefix))
+    {
+        Some(log::Level::Info)
+    } else {
+        None
+    }
+}
+
+fn push_tail(tail: &Arc<Mutex<VecDeque<String>>>, line: &str) {
+    if let Ok(mut tail) = tail.lock() {
+        if tail.len() == FAILURE_TAIL_LINES {
+            tail.pop_front();
+        }
+        tail.push_back(line.to_string());
+    }
+}
 
 /// How long a terminated script gets to run its `trap ... EXIT` cleanup before
 /// the whole process group is killed outright. `elevate_env_for` relies on that
@@ -243,11 +274,21 @@ fn failure_hint(text: &str) -> Option<&'static str> {
     }
 }
 
-fn flush_line(app: &AppHandle, task_id: &str, buffer: &mut String, captured: &Arc<Mutex<String>>) {
+fn flush_line(
+    app: &AppHandle,
+    task_id: &str,
+    buffer: &mut String,
+    captured: &Arc<Mutex<String>>,
+    tail: &Arc<Mutex<VecDeque<String>>>,
+) {
     if buffer.is_empty() {
         return;
     }
     emit_output(app, task_id, buffer.clone());
+    if let Some(level) = marker_level(buffer) {
+        log::log!(level, "[{task_id}] {}", redact_text(buffer.trim()));
+    }
+    push_tail(tail, buffer);
     if let Ok(mut text) = captured.lock() {
         // Past the head budget, still keep lines that explain a failure so the
         // hint survives long installer output.
@@ -268,11 +309,12 @@ fn spawn_line_reader(
     task_id: &str,
     reader: impl Read + Send + 'static,
     captured: Arc<Mutex<String>>,
+    tail: Arc<Mutex<VecDeque<String>>>,
 ) -> thread::JoinHandle<()> {
     let task_id = task_id.to_string();
     thread::spawn(move || {
         read_lines(reader, |mut line| {
-            flush_line(&app, &task_id, &mut line, &captured)
+            flush_line(&app, &task_id, &mut line, &captured, &tail)
         });
     })
 }
@@ -490,8 +532,11 @@ fn run_and_stream(
     let stderr = child.stderr.take().unwrap();
 
     let captured = Arc::new(Mutex::new(String::new()));
-    let stdout_reader = spawn_line_reader(app.clone(), task_id, stdout, captured.clone());
-    let stderr_reader = spawn_line_reader(app.clone(), task_id, stderr, captured.clone());
+    let tail = Arc::new(Mutex::new(VecDeque::new()));
+    let stdout_reader =
+        spawn_line_reader(app.clone(), task_id, stdout, captured.clone(), tail.clone());
+    let stderr_reader =
+        spawn_line_reader(app.clone(), task_id, stderr, captured.clone(), tail.clone());
 
     let wait = wait_with_deadline(&mut child, timeout_secs, cancel, cancel_path);
     if let Some(path) = cancel_path {
@@ -509,6 +554,13 @@ fn run_and_stream(
         log::info!("{program} finished");
     } else if let Err(error) = &outcome.outcome {
         log::warn!("{program} failed: {}", redact_text(&error.to_string()));
+        if !outcome.cancelled() {
+            let last = tail
+                .lock()
+                .map(|tail| tail.iter().cloned().collect::<Vec<_>>().join("\n"))
+                .unwrap_or_default();
+            log::warn!("[{task_id}] last output:\n{}", redact_text(&last));
+        }
     }
     outcome
 }
@@ -1647,5 +1699,39 @@ wait
             assert_eq!(value["code"], expected);
             assert!(value["message"].is_string());
         }
+    }
+
+    #[test]
+    fn script_markers_are_logged_and_other_output_is_not() {
+        assert_eq!(marker_level("[STEP] download"), Some(log::Level::Info));
+        assert_eq!(
+            marker_level("[SUCCESS] GApps installation complete!"),
+            Some(log::Level::Info)
+        );
+        assert_eq!(
+            marker_level("[HINT] The disk filled up"),
+            Some(log::Level::Info)
+        );
+        assert_eq!(
+            marker_level("  [ERROR] gapps.zip SHA-256 mismatch"),
+            Some(log::Level::Warn)
+        );
+        assert_eq!(marker_level("Collecting requests==2.32.3"), None);
+        assert_eq!(marker_level("[SYSTEM] Downloading 'gapps.zip'"), None);
+    }
+
+    #[test]
+    fn failure_tail_keeps_the_last_lines() {
+        let tail = Arc::new(Mutex::new(VecDeque::new()));
+        for i in 0..FAILURE_TAIL_LINES + 5 {
+            push_tail(&tail, &format!("line {i}"));
+        }
+        let tail = tail.lock().unwrap();
+        assert_eq!(tail.len(), FAILURE_TAIL_LINES);
+        assert_eq!(tail.front().unwrap(), "line 5");
+        assert_eq!(
+            tail.back().unwrap(),
+            &format!("line {}", FAILURE_TAIL_LINES + 4)
+        );
     }
 }

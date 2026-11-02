@@ -56,6 +56,7 @@ try:
     shot(f"95-{TAG}-tools")
     click("Start Engine")
     log["engine_running"] = until("Engine Running", 180)
+    click("My Apps")
     until("[1-9]\\d* applications? ready", 120)
     log["apps"] = js("return document.body.innerText.match(/\\d+ applications? ready to launch/)?.[0]")
     shot(f"96-{TAG}-running")

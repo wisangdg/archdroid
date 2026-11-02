@@ -10,6 +10,10 @@ Format ini mengacu pada [Keep a Changelog](https://keepachangelog.com/id/1.0.0/)
 ### Keamanan
 - Arsip GApps (MindTheGapps) dan libhoudini kini diunduh ArchDroid sendiri dan hanya dipakai bila SHA-256-nya sama dengan pin di kode (tahap "Verified Download" di stepper). Sebelumnya integritas arsip hanya dicek `waydroid_script` dengan MD5. File yang tidak cocok dihapus dan instalasi berhenti sebelum image diubah.
 
+### Observability
+- Log aplikasi kini mencatat baris `[STEP]`/`[ERROR]`/`[SUCCESS]` dari setiap installer dan, bila task gagal, 40 baris output terakhirnya; juga setiap error yang ditampilkan UI (mis. preflight Phantom), tanpa mengulang pesan identik berturut-turut. Diagnostic Bundle jadi memuat penyebab kegagalan instalasi.
+- Polling `waydroid status` tiap 5 detik tidak lagi ditulis ke log (level debug), sehingga tidak menggeser isi lain dari bagian log yang masuk ke Diagnostic Bundle.
+
 ### Diubah
 - Halaman Keymapping tidak lagi menjanjikan "Zero Ban Risk"; kini "No APK Changes", dengan catatan bahwa game dengan anti-cheat ketat tetap bisa mendeteksinya.
 

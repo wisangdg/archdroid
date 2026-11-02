@@ -1,55 +1,54 @@
-# Strategi update, distribusi, dan kunci rilis
+# Updates, distribution, and the release key
 
-## Keputusan: update manual, tanpa updater di dalam aplikasi
-ArchDroid **tidak** memiliki Tauri updater dan tidak mengunduh atau mengeksekusi
-artefak apa pun sendiri. Alasan: aplikasi ini sudah meminta akses root; updater
-menambah jalur eksekusi kode jarak jauh, dan CSP (`connect-src ipc:`) sengaja
-memblokir semua koneksi jaringan dari WebView. Akibatnya **tidak ada update yang
-mengeksekusi artefak tanpa signature**: pengguna selalu memasang paket secara
-eksplisit.
+## Decision: manual updates, no in-app updater
+ArchDroid has **no** Tauri updater and never downloads or runs its own artifacts. Reason: the app already asks for root; an updater would add a remote code execution path, and the CSP (`connect-src ipc:`) deliberately blocks every network connection from the WebView. So **no update ever runs an unsigned artifact**: you always install the package yourself.
 
-### Cara upgrade
-1. Arch: `pacman -U archdroid-bin-<versi>-x86_64.pkg.tar.zst`. AppImage: ganti file lama.
-   `.deb` adalah paket Tier 2 (teruji di Ubuntu 24.04, ikut ditandatangani sejak 0.1.3); `.rpm` adalah preview tanpa jaminan dan tidak dilampirkan.
-2. Verifikasi dulu sesuai [VERIFY-RELEASE.md](VERIFY-RELEASE.md)
-   (`gpg --verify SHA256SUMS.asc SHA256SUMS`, `sha256sum -c SHA256SUMS`).
-3. Cek versi terpasang di aplikasi/`archdroid --version`; bandingkan dengan halaman
-   Releases: <https://github.com/wisangdg/archdroid/releases>.
-4. Setiap rilis wajib punya release notes: perubahan, perubahan perilaku
-   privileged/keamanan, dan langkah migrasi (config profil bermigrasi otomatis,
-   lihat P1-7).
+### Upgrading
+1. Verify the download as in [VERIFY-RELEASE.md](VERIFY-RELEASE.md)
+   (`gpg --verify SHA256SUMS.asc SHA256SUMS`, `sha256sum -c --ignore-missing SHA256SUMS`).
+2. Install it:
+   - Arch: `sudo pacman -U archdroid-bin-<version>-1-x86_64.pkg.tar.zst`
+   - Debian/Ubuntu: `sudo apt install ./ArchDroid_<version>_amd64.deb` (Tier 2; signed in `SHA256SUMS` since 0.1.3)
+   - AppImage: replace the old file.
+   - The `.rpm` is a preview and is not attached to releases; build it from source.
+3. The sidebar shows the installed version (`ArchDroid v<version>`); compare it with <https://github.com/wisangdg/archdroid/releases>.
+4. Every release has release notes: changes, changes to privileged or security behaviour, and migration steps if any.
 
-Rollback: pasang kembali paket versi sebelumnya yang sudah terverifikasi;
-`profile.json` yang lebih baru tetap terbaca (field tak dikenal diabaikan).
+### Rolling back
+Install the previous verified package the same way; the package manager treats it as a downgrade:
+```bash
+sudo pacman -U archdroid-bin-<previous>-1-x86_64.pkg.tar.zst   # pacman warns "downgrading package"
+sudo apt install --allow-downgrades ./ArchDroid_<previous>_amd64.deb
+```
+State that survives a rollback:
+- **Add-on markers** (`~/.cache/archdroid/*_installed`): every release (since 0.1.0) reads `pending` and `verified`; markers from pre-release builds (`installed`) count as `pending`.
+- **Waydroid's own data** (`/var/lib/waydroid`, `~/.local/share/waydroid`) is not touched by installing or removing ArchDroid.
+- **`profile.json`**: a newer file stays readable (unknown fields are ignored). Release builds do not write it.
 
-## Kunci rilis GPG
+The rollback path was tested live (0.1.3 → 0.1.2 → 0.1.3 on Arch with GApps and libhoudini installed); see [P0-8.2-MATRIX-RESULTS.md](P0-8.2-MATRIX-RESULTS.md).
+
+## Release GPG key
 | | |
 |---|---|
 | Key ID | `18F47067ACC5BBF9` (ed25519, sign/certify) |
 | Fingerprint | `EB02 90C2 138F A472 E18F 0203 18F4 7067 ACC5 BBF9` |
-| Dibuat | 2026-10-31 (epoch 1793447911) |
-| Masa berlaku | **belum diset (tidak kedaluwarsa)** |
-| Kunci publik | `packaging/release/archdroid-release.asc` |
-| Kunci privat | hanya di mesin pemilik/offline; **tidak pernah ada di repo** (dijaga oleh `src/lib/release-hygiene.test.js`) |
+| Created | 2026-10-31 (epoch 1793447911) |
+| Expiry | **not set (does not expire)** |
+| Public key | `packaging/release/archdroid-release.asc` |
+| Private key | only on the owner's machine/offline; **never in the repo** (guarded by `src/lib/release-hygiene.test.js`) |
 
-### Tindakan yang harus dilakukan pemilik (tidak bisa dilakukan dari repo)
-- [ ] Set masa berlaku 2 tahun: `gpg --edit-key 18F47067ACC5BBF9` → `expire`, lalu terbitkan ulang `.asc`.
-- [ ] Simpan backup terenkripsi kunci privat + sertifikat revokasi di media offline
-      terpisah, lalu catat lokasinya di sini: `Lokasi backup: ______`.
-- [ ] Publikasikan fingerprint di kanal kedua selain repo: deskripsi halaman
-      GitHub Releases/profil pemilik, dan kunci di keyserver (`keys.openpgp.org`).
-      Fingerprint yang hanya ada di repo tidak melindungi bila repo dibobol.
-      Sebagian: fingerprint sudah ada di release notes
-      [v0.1.1](https://github.com/wisangdg/archdroid/releases/tag/v0.1.1);
-      profil pemilik dan keyserver belum.
+### Owner actions (cannot be done from the repo)
+- [ ] Set a 2-year expiry: `gpg --quick-set-expire EB0290C2138FA472E18F020318F47067ACC5BBF9 2y`, then republish the `.asc`.
+- [ ] Keep an encrypted backup of the private key and its revocation certificate (gpg created one in `~/.gnupg/openpgp-revocs.d/`) on separate offline media, and note the location here: `Backup location: ______`.
+- [ ] Publish the fingerprint on a second channel besides the repo: the owner's GitHub profile, and the key on a keyserver (`gpg --keyserver hkps://keys.openpgp.org --send-keys 18F47067ACC5BBF9`). A fingerprint that exists only in the repo does not help if the repo is compromised.
+      Partly done: the fingerprint is in the release notes since
+      [v0.1.1](https://github.com/wisangdg/archdroid/releases/tag/v0.1.1); profile and keyserver are not.
 
-### Rotasi
-1. Buat kunci baru, tandatangani pengumuman rotasi dengan kunci lama.
-2. Publikasikan fingerprint baru di semua kanal, ganti `.asc`, `VERIFY-RELEASE.md`,
-   dan `GPG_KEY_ID` default di `scripts/release/*.sh`.
-3. Rilis berikutnya ditandatangani kunci baru; kunci lama dibiarkan sampai kedaluwarsa.
+### Rotation
+1. Create a new key and sign the rotation announcement with the old key.
+2. Publish the new fingerprint on every channel; replace the `.asc`, `VERIFY-RELEASE.md`, and the default `GPG_KEY_ID` in `scripts/release/*.sh`.
+3. Sign the next release with the new key; let the old key expire.
 
-### Revokasi (kunci bocor/hilang)
-1. `gpg --import revoke.asc`, unggah ke keyserver, ganti `.asc` di repo dengan versi revoked.
-2. Umumkan di Releases dan kanal kedua; tandai semua rilis lama sejak kebocoran sebagai
-   tidak tepercaya dan terbitkan ulang dengan kunci baru.
+### Revocation (key leaked or lost)
+1. `gpg --import <revocation certificate>`, upload it to the keyserver, and replace the `.asc` in the repo with the revoked version.
+2. Announce it in Releases and on the second channel; mark every release since the leak as untrusted and re-issue it with a new key.

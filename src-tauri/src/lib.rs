@@ -129,13 +129,45 @@ impl CommandResult {
 
 /// Keep the wire contract the UI already relies on - a `status` plus a human
 /// readable `message` - and add the machine readable `code` next to it.
+/// Last error written by [`log_command_error`]; see there.
+static LAST_LOGGED_ERROR: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// Whether `entry` should be logged given the previous logged entry, which it
+/// replaces when it is.
+fn is_new_error(last: &mut Option<String>, entry: String) -> bool {
+    if last.as_deref() == Some(entry.as_str()) {
+        return false;
+    }
+    *last = Some(entry);
+    true
+}
+
+/// Record an error the UI is about to show, so a Diagnostic Bundle contains
+/// failures that happen before any program runs (preflight, invalid input,
+/// missing tools). The same message twice in a row is logged once: the UI
+/// polls some commands every few seconds and would otherwise flood the log
+/// tail the bundle includes.
+fn log_command_error(code: &str, message: &str) {
+    let entry = format!("[{code}] {}", redact_text(message));
+    if let Ok(mut last) = LAST_LOGGED_ERROR.lock() {
+        if is_new_error(&mut last, entry.clone()) {
+            log::warn!("command error {entry}");
+        }
+    }
+}
+
 impl From<AppError> for CommandResult {
     fn from(error: AppError) -> Self {
+        let message = error.to_string();
+        let code = error.code();
+        if code != error::code::CANCELLED {
+            log_command_error(code, &message);
+        }
         Self {
             status: "error".to_string(),
             data: None,
-            message: Some(error.to_string()),
-            code: Some(error.code().to_string()),
+            message: Some(message),
+            code: Some(code.to_string()),
         }
     }
 }
@@ -1684,6 +1716,19 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn repeated_command_errors_are_logged_once_in_a_row() {
+        let mut last = None;
+        let a = || "[not_found] cannot find \"cargo\" on PATH".to_string();
+        assert!(is_new_error(&mut last, a()));
+        assert!(!is_new_error(&mut last, a()));
+        assert!(is_new_error(
+            &mut last,
+            "[timeout] waydroid took too long".to_string()
+        ));
+        assert!(is_new_error(&mut last, a()));
+    }
+
     use super::*;
 
     #[test]

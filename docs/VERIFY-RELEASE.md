@@ -1,55 +1,56 @@
-# Verifikasi Integritas dan Tanda Tangan Artefak Rilis ArchDroid
+# Verifying ArchDroid release artifacts
 
-Setiap rilis resmi ArchDroid menyertakan file checksum `SHA256SUMS` dan tanda tangan digital GPG terpisah `SHA256SUMS.asc`.
+Every official ArchDroid release ships a `SHA256SUMS` checksum file and a detached GPG signature, `SHA256SUMS.asc`. Since 0.1.3, `SHA256SUMS` covers the `.pkg.tar.zst`, the `.AppImage`, and the `.deb`.
 
-## Kunci Publik Resmi Rilis
-- **Pemilik Kunci:** `ArchDroid Release Signing Key <gwisang45@gmail.com>`
+## Release signing key
+- **Owner:** `ArchDroid Release Signing Key <gwisang45@gmail.com>`
 - **Key ID:** `18F47067ACC5BBF9`
 - **Fingerprint:** `EB02 90C2 138F A472 E18F  0203 18F4 7067 ACC5 BBF9`
-- **File Kunci:** [`packaging/release/archdroid-release.asc`](../packaging/release/archdroid-release.asc)
+- **Key file:** [`packaging/release/archdroid-release.asc`](../packaging/release/archdroid-release.asc) (also attached to every release as `archdroid-release.asc`)
+
+Compare the fingerprint with a second source you trust (for example the release notes) before relying on it.
 
 ---
 
-## Cara Verifikasi Manual
+## Manual verification
 
-### 1. Impor Kunci Publik GPG
-Unduh file `archdroid-release.asc` atau impor langsung:
+### 1. Import the public key
 ```bash
 gpg --import archdroid-release.asc
 ```
 
-### 2. Verifikasi Tanda Tangan Digital Checksum
-Pastikan file `SHA256SUMS` dan `SHA256SUMS.asc` berada di direktori yang sama dengan artefak yang diunduh:
+### 2. Verify the checksum signature
+Put `SHA256SUMS` and `SHA256SUMS.asc` in the same directory as the files you downloaded:
 ```bash
 gpg --verify SHA256SUMS.asc SHA256SUMS
 ```
-Output yang valid akan menampilkan:
+A valid signature prints:
 ```text
 gpg: Good signature from "ArchDroid Release Signing Key <gwisang45@gmail.com>"
 Primary key fingerprint: EB02 90C2 138F A472 E18F  0203 18F4 7067 ACC5 BBF9
 ```
+gpg may also warn that the key is not certified with a trusted signature; that only means you have not signed the key yourself. The fingerprint check is what matters.
 
-### 3. Verifikasi Integritas SHA-256 Artefak
-Jalankan verifikasi hash:
+### 3. Verify the files
 ```bash
-sha256sum -c SHA256SUMS
+sha256sum -c --ignore-missing SHA256SUMS
 ```
-Pastikan artefak yang ingin Anda gunakan bertanda `OK`, misalnya:
+Every file you downloaded must say `OK`, for example:
 ```text
-ArchDroid_0.1.0_amd64.deb: OK
-ArchDroid_0.1.0_amd64.AppImage: OK
-archdroid-bin-0.1.0-1-x86_64.pkg.tar.zst: OK
-ArchDroid-0.1.0-1.x86_64.rpm: OK
+archdroid-bin-0.1.3-1-x86_64.pkg.tar.zst: OK
+ArchDroid_0.1.3_amd64.AppImage: OK
+ArchDroid_0.1.3_amd64.deb: OK
 ```
+`--ignore-missing` skips the artifacts you did not download. If a file you did download is reported as `FAILED`, or not listed at all, do not install it.
 
 ---
 
-## Verifikasi Otomatis Menggunakan Skrip
-Repo ini menyediakan skrip verifikasi mandiri menggunakan keyring terisolasi:
+## Automated verification
+The repository has a script that verifies with an isolated keyring:
 ```bash
 ./scripts/release/verify-release.sh [path/to/downloaded-files]
 ```
-atau via npm:
+or through npm:
 ```bash
 npm run release:verify
 ```
