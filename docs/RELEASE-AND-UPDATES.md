@@ -27,6 +27,12 @@ State that survives a rollback:
 
 The rollback path was tested live (0.1.3 → 0.1.2 → 0.1.3 on Arch with GApps and libhoudini installed); see [P0-8.2-MATRIX-RESULTS.md](P0-8.2-MATRIX-RESULTS.md).
 
+## Building a release
+1. Tag the commit and let CI pass.
+2. `.pkg.tar.zst` and `.deb`: build locally (`npm run package:arch`, `npm run build:bundles -- --bundles deb`).
+3. AppImage: download the [AppImage workflow](../.github/workflows/appimage.yml) artifact of the tagged commit (`gh run download <run> -n appimage-<sha> -D src-tauri/target/release/bundle/appimage`), check `SHA256SUMS.appimage` and that `BUILD-INFO.txt` names the tagged commit. It is built on Ubuntu 22.04 (glibc 2.35) without the bundled libwayland; a local Arch build needs glibc 2.44 and is rejected.
+4. `scripts/release/generate-release.sh` copies the artifacts, refuses an AppImage above glibc 2.35 (`check-glibc.sh`), and signs `SHA256SUMS`.
+
 ## Release GPG key
 | | |
 |---|---|
