@@ -1,120 +1,122 @@
 # Changelog
 
-Semua perubahan penting pada proyek ArchDroid akan dicatat dalam dokumen ini.
-Format ini mengacu pada [Keep a Changelog](https://keepachangelog.com/id/1.0.0/) dan mengikuti [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+All notable changes to ArchDroid are recorded here.
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
 ## [Unreleased]
 
-### Keamanan
-- Arsip GApps (MindTheGapps) dan libhoudini kini diunduh ArchDroid sendiri dan hanya dipakai bila SHA-256-nya sama dengan pin di kode (tahap "Verified Download" di stepper). Sebelumnya integritas arsip hanya dicek `waydroid_script` dengan MD5. File yang tidak cocok dihapus dan instalasi berhenti sebelum image diubah.
+### Security
+- ArchDroid now downloads the GApps (MindTheGapps) and libhoudini archives itself and uses them only if their SHA-256 matches the pin in the code (the "Verified Download" stage in the stepper). Before, only `waydroid_script` checked them, with MD5. A mismatching file is deleted and the install stops before the image is changed.
 
-### Distribusi
-- AppImage rilis kini dibangun oleh workflow CI di Ubuntu 22.04 (glibc 2.35) dan `generate-release.sh` menolak AppImage yang butuh glibc lebih baru (`scripts/release/check-glibc.sh`). AppImage 0.1.3 dibangun di Arch dan butuh glibc 2.44, sehingga tidak bisa jalan di Debian 12 (terbukti: `GLIBC_2.38 not found`) maupun Ubuntu 24.04.
-- Paket `.rpm` tidak lagi mewajibkan `waydroid` (kini *Recommends*): di openSUSE tidak ada paket waydroid resmi dan `zypper install` gagal dengan "nothing provides 'waydroid'".
-- Layar Setup dan `waydroid_init` kini menanyakan package manager (tanpa root) apakah repo menyediakan `waydroid`. Bila tidak (Debian/Ubuntu tanpa repo Waydroid, openSUSE), item Waydroid menjadi "Not in Repositories" dengan petunjuk sumbernya dan Initialize diblokir, alih-alih gagal setelah prompt root.
+### Distribution
+- Release AppImages are now built by a CI workflow on Ubuntu 22.04 (glibc 2.35), without the bundled libwayland, and `generate-release.sh` rejects an AppImage that needs a newer glibc (`scripts/release/check-glibc.sh`). The 0.1.3 AppImage was built on Arch and needs glibc 2.44, so it does not start on Debian 12 (seen: `GLIBC_2.38 not found`) or Ubuntu 24.04.
+- The `.rpm` no longer requires `waydroid` (it is now a Recommends): openSUSE has no official waydroid package, and `zypper install` failed with "nothing provides 'waydroid'". dnf still installs it on Fedora.
+- The setup screen and `waydroid_init` now ask the package manager, without root, whether any repository offers `waydroid`. If none does (Debian/Ubuntu without the Waydroid repository, openSUSE), the Waydroid item reads "Not in Repositories" with where to get it, and Initialize is blocked instead of failing after the root prompt.
 
 ### Observability
-- Log aplikasi kini mencatat baris `[STEP]`/`[ERROR]`/`[SUCCESS]` dari setiap installer dan, bila task gagal, 40 baris output terakhirnya; juga setiap error yang ditampilkan UI (mis. preflight Phantom), tanpa mengulang pesan identik berturut-turut. Diagnostic Bundle jadi memuat penyebab kegagalan instalasi.
-- Polling `waydroid status` tiap 5 detik tidak lagi ditulis ke log (level debug), sehingga tidak menggeser isi lain dari bagian log yang masuk ke Diagnostic Bundle.
+- The application log now records every installer's `[STEP]`/`[ERROR]`/`[SUCCESS]` lines, the last 40 output lines of a failed task, and every error shown in the UI (for example the Phantom preflight), without repeating an identical message. A Diagnostic Bundle therefore contains why an install failed.
+- The `waydroid status` poll (every 5 s) is no longer written to the log (debug level), so it no longer pushes everything else out of the part of the log a Diagnostic Bundle includes.
 
-### Diubah
-- Halaman Keymapping tidak lagi menjanjikan "Zero Ban Risk"; kini "No APK Changes", dengan catatan bahwa game dengan anti-cheat ketat tetap bisa mendeteksinya.
+### Changed
+- The Keymapping page no longer promises "Zero Ban Risk"; it now says "No APK Changes" and notes that games with strict anti-cheat may still detect it.
 
-### Diperbaiki
-- Panduan uninstall memakai nama paket yang benar untuk `.deb`/`.rpm` (`arch-droid`, bukan `archdroid`), dan contoh instalasi memakai nama file yang sebenarnya (`ArchDroid_*.deb`, `ArchDroid-*.rpm`); sebelumnya perintah itu gagal.
-- Start Engine kini melaporkan "Start Failed" beserta penyebab dari Waydroid (mis. `OSError: container failed to start`) bila container gagal start. Sebelumnya `waydroid session start` keluar dengan kode 0 setelah ~10 detik dan ArchDroid hanya menampilkan "Session Slow to Start". Start yang berhasil dilaporkan begitu status menunjukkan RUNNING.
+### Fixed
+- The uninstall guide uses the real `.deb`/`.rpm` package name (`arch-droid`, not `archdroid`), and the install examples use the real file names (`ArchDroid_*.deb`, `ArchDroid-*.rpm`); the old commands failed.
+- Start Engine now reports "Start Failed" with the reason Waydroid gave (for example `OSError: container failed to start`) when the container fails to start. Before, `waydroid session start` exited 0 after about 10 s and ArchDroid only showed "Session Slow to Start". A successful start is reported as soon as the status says RUNNING.
+
+### Documentation
+- README, PRIVACY, VERIFY-RELEASE, RELEASE-AND-UPDATES, and this changelog are now in English. Claims that did not match the code were corrected: release builds do not write `profile.json`; setup has no image-type choice; the PKGBUILD needs a local build first; and, in the 0.1.0 entry below, the setup wizard, the preset names, and the list of host checks.
 
 ## [0.1.3] - 2026-11-01
 
-Rilis perbaikan setelah uji live Tier 2 di Ubuntu 24.04. Paket `.deb` kini ikut dilampirkan dan ditandatangani.
+Fix release after the live Tier 2 test on Ubuntu 24.04. The `.deb` is now attached and signed.
 
-### Diperbaiki
-- Paket `.deb` (Tier 2 preview) tidak bisa dipasang di Ubuntu 24.04 karena mewajibkan paket `waydroid` yang tidak ada di repo resmi Ubuntu. `waydroid` kini menjadi *Recommends*; layar setup ArchDroid sudah menangani host tanpa Waydroid.
-- Di host `apt`, item diagnostik "Waydroid Package" kini menyebut repo resmi Waydroid bila `apt` tidak menemukan paket `waydroid` (mis. Ubuntu 24.04).
-- Daftar app kini diperbarui sendiri selama sesi berjalan. Sebelumnya, pada boot pertama setelah init (saat Waydroid baru menulis entri launcher) daftar tetap "0 applications" sampai ada aksi lain.
-- Peringatan "Session Slow to Start" kini mengarahkan ke Diagnostic Bundle, yang memuat log Waydroid. `waydroid session start` dapat keluar dengan kode 0 walaupun container gagal start.
+### Fixed
+- The `.deb` (Tier 2 preview) could not be installed on Ubuntu 24.04 because it required `waydroid`, which is not in Ubuntu's official repositories. `waydroid` is now a Recommends; the ArchDroid setup screen already handles a host without Waydroid.
+- On `apt` hosts, the "Waydroid Package" diagnostic now points to the official Waydroid repository when `apt` cannot find `waydroid` (for example Ubuntu 24.04).
+- The app list now refreshes by itself while the session runs. Before, on the first boot after init (while Waydroid was still writing launcher entries) it stayed at "0 applications" until another action.
+- The "Session Slow to Start" warning now points to the Diagnostic Bundle, which contains the Waydroid log. `waydroid session start` can exit 0 even when the container failed to start.
 
 ## [0.1.2] - 2026-11-01
 
-Rilis perbaikan setelah uji live CSP runtime dan drag-and-drop native di VM.
+Fix release after live tests of the runtime CSP and native drag-and-drop in the VM.
 
-### Ditambahkan
-- `archdroid --version` (atau `-V`) mencetak versi tanpa membuka jendela, sesuai panduan upgrade di `docs/RELEASE-AND-UPDATES.md`.
-- Diagnostic bundle (Settings → Diagnostic Bundle): satu file teks untuk laporan bug berisi versi OS/kernel/Waydroid, diagnostik host, status add-on, dan log terakhir. Dikumpulkan tanpa root, disamarkan, disimpan dengan mode `0600` di `~/Downloads`, dan tidak pernah diunggah.
+### Added
+- `archdroid --version` (or `-V`) prints the version without opening a window, as the upgrade guide in `docs/RELEASE-AND-UPDATES.md` describes.
+- Diagnostic Bundle (Settings → Diagnostic Bundle): one text file for bug reports with OS/kernel/Waydroid versions, host diagnostics, add-on status, and recent logs. Collected without root, redacted, saved with mode `0600` in `~/Downloads`, and never uploaded.
 
-### Diperbaiki
-- Baris log yang panjang di Settings (Application Log, Diagnostic Bundle) kini terbungkus dan tidak lagi melebarkan kartu.
-- `PRIVACY.md` menyebut lokasi preferensi dan log aplikasi yang sebenarnya.
-- `PRIVACY.md` kini mengungkap probe konektivitas otomatis (koneksi TCP tanpa data ke `1.1.1.1:53`, lalu `8.8.8.8:53` bila gagal) yang sudah ada sejak 0.1.0. Sebelumnya dokumen menyatakan semua koneksi jaringan hanya terjadi atas permintaan pengguna.
-- Teks panel Diagnostic Bundle, README, dan `PRIVACY.md` menyebut bahwa log di dalam bundle dapat memuat nama paket Android dan nama file APK.
-- Setelah Cancel, stepper tetap menandai tahap yang sudah selesai dan berhenti berputar, bukan kembali ke tahap 1.
-- Judul terminal wipe tidak lagi bertuliskan "in Progress..." setelah selesai.
-- Favicon WebView memakai ikon ArchDroid; sebelumnya merujuk `/vite.svg` yang tidak ada.
-- Install/uninstall APK saat container Waydroid sedang beku (*frozen*) kini langsung memperbarui daftar app. Sebelumnya container dibekukan lagi sesaat setelah `adb install`, sebelum Waydroid menulis entri launcher, sehingga app yang berhasil terpasang tidak muncul sampai container aktif kembali.
-- "Launch Keymapper" kini melaporkan error bila `phantom-gui` (atau terminal fallback) langsung keluar setelah dijalankan, bukan menampilkan "Keymapper Launched". Proses yang tetap berjalan di-*reap* agar tidak menjadi zombie.
-- Pesan setelah Cancel tidak lagi menyatakan "No modifications were completed"; tahap yang sudah selesai tetap diterapkan, dan tahap yang terputus mungkin belum lengkap.
+### Fixed
+- Long log lines in Settings (Application Log, Diagnostic Bundle) now wrap instead of widening the card.
+- `PRIVACY.md` names the real locations of preferences and the application log.
+- `PRIVACY.md` now discloses the automatic connectivity probe (a TCP connection without data to `1.1.1.1:53`, then `8.8.8.8:53` if that fails), which has existed since 0.1.0. Before, it said every network connection happened only at the user's request.
+- The Diagnostic Bundle panel, README, and `PRIVACY.md` say that the logs in the bundle can contain Android package names and APK file names.
+- After Cancel, the stepper keeps the completed stages marked and stops spinning instead of going back to stage 1.
+- The wipe terminal title no longer says "in Progress..." after it finished.
+- The WebView favicon uses the ArchDroid icon; it pointed to a missing `/vite.svg`.
+- Installing or uninstalling an APK while the Waydroid container is frozen now updates the app list right away. Before, the container was frozen again right after `adb install`, before Waydroid wrote the launcher entry, so an installed app did not appear until the container woke up.
+- "Launch Keymapper" now reports an error when `phantom-gui` (or the terminal fallback) exits right after starting, instead of showing "Keymapper Launched". A process that keeps running is reaped so it does not become a zombie.
+- The message after Cancel no longer says "No modifications were completed"; completed stages stay applied, and the interrupted stage may be incomplete.
 
 ## [0.1.1] - 2026-11-01
 
-Rilis pertama yang dipublikasikan. Artefak 0.1.0 tidak pernah dirilis: smoke test live di VM menemukan bug pembersihan pada Cancel/timeout task root.
+First published release. The 0.1.0 artifacts were never released: the live VM smoke test found a cleanup bug on Cancel/timeout of root tasks.
 
-### Diperbaiki
-- Cancel atau timeout pada task root (GApps, Houdini, multitouch, init, wipe) kini benar-benar menghapus direktori kerja privat `/var/tmp/archdroid.*`. Sebelumnya `set -e` membuat trap berhenti sebelum `rm -rf`, sehingga unduhan dan venv milik root tertinggal.
-- Task root yang dibatalkan kini berhenti di tempat; skrip tidak lagi melanjutkan ke perintah root berikutnya setelah sinyal.
-- Progress bar installer (tqdm/pip) tidak lagi tampil rusak (`â▯▯`): output kini didekode sebagai UTF-8 per baris, bukan per byte.
-- Modal terminal tidak lagi meluap dari jendela 1100×720, sehingga tombol Cancel di header dan tombol di footer selalu terlihat.
+### Fixed
+- Cancel or timeout of a root task (GApps, Houdini, multitouch, init, wipe) now really removes the private work directory `/var/tmp/archdroid.*`. Before, `set -e` stopped the trap before `rm -rf`, leaving root-owned downloads and venvs behind.
+- A cancelled root task now stops where it is; the script no longer goes on to the next root command after the signal.
+- Installer progress bars (tqdm/pip) no longer show garbage (`â▯▯`): output is now decoded as UTF-8 per line, not per byte.
+- The terminal modal no longer overflows the 1100×720 window, so the Cancel button in the header and the footer buttons stay visible.
 
 ## [0.1.0] - 2026-11-01
 
-### Ditambahkan
+### Added
 - **App Library & Game Launcher**:
-  - Manajemen visual aplikasi Android yang terpasang di container Waydroid.
-  - Ekstraksi ikon aplikasi otomatis, pencarian instan (`Ctrl+F`), dan filter kategori (All/User/System).
-  - Menu konteks klik kanan (Launch, Stop, Uninstall, App Info).
+  - Visual management of the Android apps installed in the Waydroid container.
+  - Automatic app icon extraction, instant search (`Ctrl+F`), and category filters (All/User/System).
+  - Right-click context menu (Launch, Stop, Uninstall, App Info).
 - **Drag-and-Drop APK Installer**:
-  - Dukungan pemasangan APK secara langsung dengan menarik file `.apk` ke dalam jendela aplikasi.
-- **Inisialisasi Container & Setup Wizard**:
-  - Deteksi otomatis status Waydroid dan image Android.
-  - Wizard inisialisasi interaktif dengan pemilihan image `VANILLA` murni vs `GAPPS` (Google Play Services).
-  - Host preflight diagnostics visual sebelum inisialisasi dijalankan.
-- **Injeksi Add-on Sistem (GApps & ARM Translation)**:
-  - Injeksi Google Mobile Services (MindTheGapps / OpenGApps).
-  - Injeksi Intel libhoudini ARM translation layer untuk menjalankan game Android 3D mobile pada CPU x86_64.
-  - Injeksi deklarasi hardware multitouch untuk kompatibilitas Google Play Store.
-- **Keamanan & Privilege Boundaries (Defensive Security)**:
-  - Dialog persetujuan eksplisit (*explicit consent*) dan peninjauan daftar paket distro (*package approval gating*) sebelum eskalasi hak akses root.
-  - Penolakan eksekusi otomatis jika ada paket distro di luar daftar yang disetujui.
-  - Isolasi eksekusi skrip root dalam direktori privat `mode 0700` (`mktemp -d`).
-  - Pembersihan environment sensitif (`SUDO_USER`) dan pengalihan cache root ke `$ARCHDROID_WORK/cache` agar tidak mencemari direktori pengguna.
-  - Pengecekan hash SHA-256 pada seluruh dependensi Python installer (`--require-hashes`).
-  - Content Security Policy (CSP) produksi yang ketat (`default-src 'self'`) tanpa remote font, CDN, atau inline string injection.
-  - Scoping capability IPC Tauri v2 yang memblokir akses plugin arbitrary shell/fs/http.
+  - Install an APK by dragging the `.apk` file onto the app window.
+- **Container Initialization & Setup Screen**:
+  - Automatic detection of Waydroid and the Android image.
+  - A setup screen with host preflight checks; Initialize runs `waydroid init` after an explicit consent dialog and shows each step with a live log. *(Corrected: an earlier version of this entry described a VANILLA/GAPPS image choice, which the app does not have.)*
+- **System Add-on Injection (GApps & ARM Translation)**:
+  - Google Mobile Services injection (MindTheGapps / OpenGApps).
+  - Intel libhoudini ARM translation layer, to run 3D Android games on x86_64 CPUs.
+  - Multitouch hardware declaration for Google Play Store compatibility.
+- **Security & Privilege Boundaries**:
+  - An explicit consent dialog and a review of the distro packages (package approval gating) before any root escalation.
+  - Refusal to run when a distro package outside the approved list is requested.
+  - Root scripts run in a private directory with mode `0700` (`mktemp -d`).
+  - Sensitive environment cleanup (`SUDO_USER`) and the root cache redirected to `$ARCHDROID_WORK/cache` so it never touches the user's directories.
+  - SHA-256 hash checks on every Python dependency of the installer (`--require-hashes`).
+  - A strict production Content Security Policy (`default-src 'self'`) with no remote fonts, CDNs, or inline script.
+  - Tauri v2 IPC capabilities that block arbitrary shell/fs/http plugin access.
 - **Display Profiles & Custom DPI**:
-  - Pilihan preset resolusi cepat (Tablet 1080p, Tablet 720p, Mobile Portrait, Gaming 2K).
-  - Kustomisasi DPI dinamis dengan verifikasi pembacaan ulang properti Android.
+  - Quick resolution presets (Tablet Full HD, Standard 720p, Mobile Phone, Desktop 2K / QHD) and a custom resolution. *(Corrected preset names.)*
+  - Custom DPI, verified by reading the Android property back.
 - **Smart Keymapping (Phantom Integration)**:
-  - Integrasi dengan keymapper virtual touchscreen Phantom di level pengguna *unprivileged*.
-- **Diagnostik Sistem Host (Host Diagnostics)**:
-  - 17 pemeriksaan kesehatan sistem secara langsung (KVM, binder, `/dev/dri`, Wayland, Polkit, disk, memori, jaringan).
+  - Integration with the Phantom virtual-touchscreen keymapper, running unprivileged.
+- **Host Diagnostics**:
+  - 17 live host checks (KVM, binder, `/dev/dri`, Wayland, polkit/sudo, tools, disk, network, Android image). *(Corrected: there is no memory check.)*
 - **Multi-Distro Packaging & Verification**:
-  - Target resmi Tier 1 untuk Arch Linux: `packaging/arch/PKGBUILD` dan binary package `archdroid-bin-*.pkg.tar.zst`.
-  - Standalone executable AppImage dengan pembersihan environment `PYTHONHOME`/`PYTHONPATH` bawaan AppRun.
-  - Target eksperimental Tier 2 (preview `.deb` dan `.rpm`).
-  - Penandatanganan rilis resmi dengan kunci GPG Ed25519 (`18F47067ACC5BBF9`) serta skrip verifikasi otomatis `verify-release.sh`.
-- **Keandalan Operasi**:
-  - Setiap task panjang punya `task_id`, deadline, dan tombol Cancel (termasuk install/remove APK); task kedua ditolak dengan code `busy`.
-  - Install dan uninstall APK diverifikasi lewat `adb` (fallback `waydroid app`), sehingga "sukses" berarti paket benar-benar terpasang atau terhapus.
-  - Perubahan properti dan resolusi dibaca ulang dari Android; toast sukses hanya muncul jika nilainya benar-benar berubah.
-  - Profil perangkat diberi versi dan disimpan secara atomik, dengan migrasi untuk file lama.
+  - Official Tier 1 target for Arch Linux: `packaging/arch/PKGBUILD` and the binary package `archdroid-bin-*.pkg.tar.zst`.
+  - A standalone AppImage, with the AppRun's own `PYTHONHOME`/`PYTHONPATH` cleared for host tools.
+  - Experimental Tier 2 targets (preview `.deb` and `.rpm`).
+  - Official release signing with an Ed25519 GPG key (`18F47067ACC5BBF9`) and the automated `verify-release.sh`.
+- **Reliable Operations**:
+  - Every long task has a `task_id`, a deadline, and a Cancel button (including APK install/remove); a second task is refused with code `busy`.
+  - APK install and uninstall are verified through `adb` (fallback `waydroid app`), so "success" means the package really was installed or removed.
+  - Property and resolution changes are read back from Android; the success toast only appears if the value really changed.
+  - The device profile is versioned and saved atomically, with migration for old files.
 - **First Run & Log**:
-  - Layar setup bertahap (Waydroid belum terpasang, belum diinisialisasi, sedang inisialisasi, siap).
-  - Panel log aplikasi dengan lokasi file log dan tombol hapus; isi skrip root tidak ditulis ke log dan pesan error diredaksi.
-- **Aksesibilitas**:
-  - Navigasi keyboard penuh, focus trap pada modal, dan semantik ARIA untuk kartu aplikasi, menu, dan dialog.
-- **Dokumentasi & Standar Komunitas**:
-  - `README.md` lengkap dengan panduan instalasi, model privilege root, troubleshooting, dan clean uninstall.
-  - `SECURITY.md` dengan alur pelaporan celah keamanan privat.
-  - `PRIVACY.md` yang menjamin zero telemetry, zero analytics, dan zero phone-home.
-  - `NOTICES.md` mencatat lisensi dan atribusi pihak ketiga.
+  - A staged setup screen (Waydroid not installed, not initialized, initializing, ready).
+  - An application log panel with the log file location and a clear button; root script contents are never written to the log and error messages are redacted.
+- **Accessibility**:
+  - Full keyboard navigation, focus traps in modals, and ARIA semantics for app cards, menus, and dialogs.
+- **Documentation & Community Standards**:
+  - `README.md` with installation, the root privilege model, troubleshooting, and clean uninstall.
+  - `SECURITY.md` with a private vulnerability reporting process.
+  - `PRIVACY.md` committing to zero telemetry, zero analytics, and zero phone-home.
+  - `NOTICES.md` with third-party licenses and attribution.
