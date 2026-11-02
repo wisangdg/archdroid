@@ -58,10 +58,8 @@
         "priority": "optional"
       },
       "rpm": {
-        "depends": [
-          "waydroid"
-        ],
         "recommends": [
+          "waydroid",
           "squashfs-tools",
           "lzip",
           "git"

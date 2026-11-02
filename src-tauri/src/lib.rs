@@ -789,6 +789,17 @@ async fn waydroid_init(app: AppHandle, approved_packages: Option<Vec<String>>) -
     let waydroid_missing = trusted_program("waydroid").is_none();
     let pm = platform::PackageManager::detect();
 
+    // Nothing to install it from: fail before the root prompt, not after it.
+    if let Some(pm) = pm.filter(|_| waydroid_missing) {
+        if diagnostics::waydroid_availability(pm) == platform::Availability::Unavailable {
+            return AppError::not_found(
+                "waydroid",
+                "No configured repository offers a waydroid package, so it cannot be installed. See Settings → Host Diagnostics → Waydroid Package for where to get it.",
+            )
+            .into();
+        }
+    }
+
     // Fast-fail before root elevation if Waydroid is missing on an unsupported distribution
     if waydroid_missing && pm.is_none() {
         return AppError::not_found(

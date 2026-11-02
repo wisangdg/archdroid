@@ -144,6 +144,74 @@ impl PackageManager {
     }
 }
 
+/// Whether the configured repositories offer a package, as far as an
+/// unprivileged query can tell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Availability {
+    Available,
+    /// The query ran and reported that no repository has the package.
+    Unavailable,
+    /// The query could not answer (no cache, timeout, unexpected exit).
+    Unknown,
+}
+
+impl PackageManager {
+    /// Unprivileged command that asks the local repository metadata whether
+    /// `package` can be installed. Read the result with
+    /// [`PackageManager::availability_from`].
+    pub fn availability_query(&self, package: &str) -> (&'static str, Vec<String>) {
+        let package = package.to_string();
+        match self {
+            PackageManager::Pacman => ("pacman", vec!["-Si".into(), package]),
+            // `apt-cache show` exits 0 for a name that is only referenced (for
+            // example by ArchDroid's own Recommends); `policy` prints the
+            // candidate, which is what `apt-get install` would use.
+            PackageManager::Apt => ("apt-cache", vec!["policy".into(), package]),
+            PackageManager::Dnf => (
+                "dnf",
+                vec!["-q".into(), "--cacheonly".into(), "info".into(), package],
+            ),
+            PackageManager::Zypper => (
+                "zypper",
+                vec![
+                    "--non-interactive".into(),
+                    "--no-refresh".into(),
+                    "search".into(),
+                    "--match-exact".into(),
+                    package,
+                ],
+            ),
+        }
+    }
+
+    /// Interpret the exit code and stdout of [`PackageManager::availability_query`].
+    /// Only an answer the tool gives on purpose counts as unavailable; anything
+    /// unexpected is unknown. dnf also fails when its cache is not readable, so
+    /// it never reports unavailable.
+    pub fn availability_from(&self, code: Option<i32>, stdout: &str) -> Availability {
+        match (self, code) {
+            (PackageManager::Apt, Some(0)) => {
+                let candidate = stdout
+                    .lines()
+                    .find_map(|line| line.trim().strip_prefix("Candidate:"))
+                    .map(str::trim);
+                match candidate {
+                    Some(version) if version != "(none)" && !version.is_empty() => {
+                        Availability::Available
+                    }
+                    // No entry at all, or one without an installable version.
+                    _ => Availability::Unavailable,
+                }
+            }
+            (_, Some(0)) => Availability::Available,
+            (PackageManager::Pacman, Some(1)) => Availability::Unavailable,
+            // ZYPPER_EXIT_INF_CAP_NOT_FOUND
+            (PackageManager::Zypper, Some(104)) => Availability::Unavailable,
+            _ => Availability::Unknown,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -378,5 +446,31 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn availability_is_unavailable_only_on_a_deliberate_answer() {
+        use Availability::*;
+        use PackageManager::*;
+        for pm in [Pacman, Apt, Dnf, Zypper] {
+            let (program, args) = pm.availability_query("waydroid");
+            assert!(!program.is_empty());
+            assert_eq!(args.last().map(String::as_str), Some("waydroid"));
+            assert_eq!(pm.availability_from(None, ""), Unknown);
+        }
+        assert_eq!(Pacman.availability_from(Some(0), ""), Available);
+        assert_eq!(Pacman.availability_from(Some(1), ""), Unavailable);
+        assert_eq!(Zypper.availability_from(Some(104), ""), Unavailable);
+        assert_eq!(Zypper.availability_from(Some(0), ""), Available);
+        assert_eq!(Zypper.availability_from(Some(4), ""), Unknown);
+        assert_eq!(Dnf.availability_from(Some(1), ""), Unknown);
+        assert_eq!(Dnf.availability_from(Some(0), ""), Available);
+        // apt-cache policy output as seen on Debian 12.
+        let referenced = "waydroid:\n  Installed: (none)\n  Candidate: (none)\n  Version table:\n";
+        assert_eq!(Apt.availability_from(Some(0), referenced), Unavailable);
+        assert_eq!(Apt.availability_from(Some(0), ""), Unavailable);
+        let present = "lzip:\n  Installed: 1.23-5\n  Candidate: 1.23-5\n";
+        assert_eq!(Apt.availability_from(Some(0), present), Available);
+        assert_eq!(Apt.availability_from(Some(100), ""), Unknown);
     }
 }

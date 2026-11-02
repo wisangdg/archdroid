@@ -6,6 +6,7 @@ import ProcessStepper from "../components/terminal/ProcessStepper";
 import SetupWizard from "../components/setup/SetupWizard";
 import InstallToolsView from "../components/tools/InstallToolsView";
 import { TASK_STEP_CONFIGS } from "../components/terminal/stepConfigs";
+import { invoke } from "@tauri-apps/api/core";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn().mockImplementation((cmd) => {
@@ -220,6 +221,45 @@ describe("SetupWizard preflight and diagnostic blocking", () => {
       name: /Initialize Android Emulator/i,
     });
     expect(initBtn.hasAttribute("disabled")).toBe(true);
+  });
+});
+
+describe("SetupWizard and the waydroid package", () => {
+  const waydroidItem = (value) => ({
+    key: "waydroid",
+    title: "Waydroid Package",
+    status: "error",
+    value,
+    detail: "detail",
+    remediation: null,
+  });
+
+  async function initButtonFor(value) {
+    invoke.mockImplementation((cmd) =>
+      Promise.resolve(
+        cmd === "check_host_diagnostics"
+          ? { items: [waydroidItem(value)], package_manager: "zypper" }
+          : { status: "success" }
+      )
+    );
+    const view = render(
+      <SetupWizard onInitWaydroid={vi.fn()} installing={false} />
+    );
+    await waitFor(() => expect(screen.getByText(value)).toBeTruthy());
+    const button = screen.getByRole("button", {
+      name: /Initialize Android Emulator/i,
+    });
+    const disabled = button.hasAttribute("disabled");
+    view.unmount();
+    return disabled;
+  }
+
+  it("lets the package manager install a missing waydroid", async () => {
+    expect(await initButtonFor("Not Installed")).toBe(false);
+  });
+
+  it("blocks Initialize when no repository offers waydroid", async () => {
+    expect(await initButtonFor("Not in Repositories")).toBe(true);
   });
 });
 

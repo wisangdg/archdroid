@@ -10,6 +10,11 @@ Format ini mengacu pada [Keep a Changelog](https://keepachangelog.com/id/1.0.0/)
 ### Keamanan
 - Arsip GApps (MindTheGapps) dan libhoudini kini diunduh ArchDroid sendiri dan hanya dipakai bila SHA-256-nya sama dengan pin di kode (tahap "Verified Download" di stepper). Sebelumnya integritas arsip hanya dicek `waydroid_script` dengan MD5. File yang tidak cocok dihapus dan instalasi berhenti sebelum image diubah.
 
+### Distribusi
+- AppImage rilis kini dibangun oleh workflow CI di Ubuntu 22.04 (glibc 2.35) dan `generate-release.sh` menolak AppImage yang butuh glibc lebih baru (`scripts/release/check-glibc.sh`). AppImage 0.1.3 dibangun di Arch dan butuh glibc 2.44, sehingga tidak bisa jalan di Debian 12 (terbukti: `GLIBC_2.38 not found`) maupun Ubuntu 24.04.
+- Paket `.rpm` tidak lagi mewajibkan `waydroid` (kini *Recommends*): di openSUSE tidak ada paket waydroid resmi dan `zypper install` gagal dengan "nothing provides 'waydroid'".
+- Layar Setup dan `waydroid_init` kini menanyakan package manager (tanpa root) apakah repo menyediakan `waydroid`. Bila tidak (Debian/Ubuntu tanpa repo Waydroid, openSUSE), item Waydroid menjadi "Not in Repositories" dengan petunjuk sumbernya dan Initialize diblokir, alih-alih gagal setelah prompt root.
+
 ### Observability
 - Log aplikasi kini mencatat baris `[STEP]`/`[ERROR]`/`[SUCCESS]` dari setiap installer dan, bila task gagal, 40 baris output terakhirnya; juga setiap error yang ditampilkan UI (mis. preflight Phantom), tanpa mengulang pesan identik berturut-turut. Diagnostic Bundle jadi memuat penyebab kegagalan instalasi.
 - Polling `waydroid status` tiap 5 detik tidak lagi ditulis ke log (level debug), sehingga tidak menggeser isi lain dari bagian log yang masuk ke Diagnostic Bundle.

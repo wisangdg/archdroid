@@ -29,12 +29,19 @@ else
     exit 1
 fi
 
-# 2. AppImage (Tier 1 Universal)
+# 2. AppImage. It bundles its libraries, so it must come from the AppImage
+# workflow (Ubuntu 22.04, glibc 2.35) of the tagged commit, not a local Arch
+# build: `gh run download <run> -n appimage-<sha> -D src-tauri/target/release/bundle/appimage`.
 APPIMAGE_PKG="$REPO_ROOT/src-tauri/target/release/bundle/appimage/ArchDroid_${VERSION}_amd64.AppImage"
 if [[ -f "$APPIMAGE_PKG" ]]; then
+    chmod +x "$APPIMAGE_PKG"
+    if ! "$REPO_ROOT/scripts/release/check-glibc.sh" "$APPIMAGE_PKG" 2.35; then
+        echo "Error: this AppImage needs a newer glibc than 2.35; use the AppImage workflow artifact" >&2
+        exit 1
+    fi
     cp -v "$APPIMAGE_PKG" "$OUT_DIR/"
 else
-    echo "Error: AppImage for $VERSION not found, run npm run build:bundles" >&2
+    echo "Error: AppImage for $VERSION not found; download the AppImage workflow artifact" >&2
     exit 1
 fi
 

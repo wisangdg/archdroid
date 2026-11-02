@@ -1,0 +1,61 @@
+name: AppImage
+
+# Release AppImages are built here, on the oldest supported base, because an
+# AppImage bundles its libraries: built on Arch (0.1.3) it required glibc 2.44
+# and did not start on Debian 12 or Ubuntu 24.04. The maintainer downloads the
+# artifact of the tagged commit, verifies it, and signs it with the release
+# (docs/RELEASE-AND-UPDATES.md).
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  appimage:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install Tauri system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: stable
+
+      - name: Build AppImage
+        run: |
+          npm ci
+          npm run build:bundles -- --bundles appimage
+
+      - name: glibc floor (2.35, Ubuntu 22.04)
+        run: scripts/release/check-glibc.sh src-tauri/target/release/bundle/appimage/ArchDroid_*.AppImage 2.35
+
+      - name: Record provenance
+        run: |
+          cd src-tauri/target/release/bundle/appimage
+          sha256sum ArchDroid_*.AppImage | tee SHA256SUMS.appimage
+          echo "commit $GITHUB_SHA, run $GITHUB_RUN_ID, $(lsb_release -ds), $(ldd --version | head -1)" > BUILD-INFO.txt
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: appimage-${{ github.sha }}
+          path: |
+            src-tauri/target/release/bundle/appimage/ArchDroid_*.AppImage
+            src-tauri/target/release/bundle/appimage/SHA256SUMS.appimage
+            src-tauri/target/release/bundle/appimage/BUILD-INFO.txt
+          if-no-files-found: error
+          retention-days: 90

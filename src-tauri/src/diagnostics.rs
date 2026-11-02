@@ -1,6 +1,7 @@
 //! Host diagnostics report behind the Settings > Diagnostics panel.
 
 use std::path::Path;
+use std::process::{Command, Stdio};
 
 use crate::*;
 
@@ -175,6 +176,16 @@ pub(crate) fn collect_diagnostics() -> DiagnosticsReport {
             status: "ok".to_string(),
             value: "Installed".to_string(),
             detail: "Waydroid command-line tool is available in system PATH.".to_string(),
+            remediation: None,
+        });
+    } else if pm.is_some_and(|pm| waydroid_availability(pm) == platform::Availability::Unavailable)
+    {
+        items.push(DiagnosticItem {
+            key: "waydroid".to_string(),
+            title: "Waydroid Package".to_string(),
+            status: "error".to_string(),
+            value: WAYDROID_NOT_IN_REPOS.to_string(),
+            detail: waydroid_unavailable_detail(pm),
             remediation: None,
         });
     } else {
@@ -518,6 +529,68 @@ pub(crate) fn collect_diagnostics() -> DiagnosticsReport {
 /// Debian and Ubuntu releases before Waydroid entered their archives (e.g.
 /// Ubuntu 24.04) have no `waydroid` package, so the apt command alone fails
 /// with "Unable to locate package"; upstream documents its own repository.
+/// Value of the `waydroid` item when no configured repository offers the
+/// package. The setup screen blocks Initialize on it: installing would fail
+/// only after the root prompt.
+pub(crate) const WAYDROID_NOT_IN_REPOS: &str = "Not in Repositories";
+
+/// Ask the package manager, without root and with a short deadline, whether
+/// any configured repository offers `waydroid`.
+pub(crate) fn waydroid_availability(pm: platform::PackageManager) -> platform::Availability {
+    let (program, args) = pm.availability_query("waydroid");
+    let Some(path) = trusted_program(program) else {
+        return platform::Availability::Unknown;
+    };
+    let Ok(mut child) = Command::new(path)
+        .args(&args)
+        .env("LC_ALL", "C")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+    else {
+        return platform::Availability::Unknown;
+    };
+    // Read on a thread so a chatty tool cannot block on a full pipe.
+    let mut stdout = child.stdout.take();
+    let reader = std::thread::spawn(move || {
+        let mut text = String::new();
+        if let Some(out) = stdout.as_mut() {
+            let _ = std::io::Read::read_to_string(out, &mut text);
+        }
+        text
+    });
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
+    let code = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status.code(),
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(50))
+            }
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break None;
+            }
+        }
+    };
+    let text = reader.join().unwrap_or_default();
+    pm.availability_from(code, &text)
+}
+
+fn waydroid_unavailable_detail(pm: Option<platform::PackageManager>) -> String {
+    let base = "None of the configured repositories offers a waydroid package, so ArchDroid cannot install it.";
+    match pm {
+        Some(platform::PackageManager::Apt) => format!(
+            "{base} Add the official Waydroid repository (https://docs.waydro.id/usage/install-on-desktops), run `sudo apt update`, then Re-check."
+        ),
+        Some(platform::PackageManager::Zypper) => format!(
+            "{base} openSUSE has no official Waydroid package or binder module: install Waydroid from a community OBS repository you trust (see https://en.opensuse.org/Mobile:MoreGuides:Waydroid), then Re-check."
+        ),
+        _ => format!("{base} Install Waydroid by other means, then Re-check."),
+    }
+}
+
 fn waydroid_missing_detail(pm: Option<platform::PackageManager>) -> String {
     let base = "Waydroid command is missing. It must be installed before starting or initializing containers.";
     match pm {
@@ -530,6 +603,14 @@ fn waydroid_missing_detail(pm: Option<platform::PackageManager>) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn unavailable_waydroid_explains_where_to_get_it() {
+        use crate::platform::PackageManager::*;
+        assert!(super::waydroid_unavailable_detail(Some(Apt)).contains("sudo apt update"));
+        assert!(super::waydroid_unavailable_detail(Some(Zypper)).contains("community OBS"));
+        assert!(super::waydroid_unavailable_detail(Some(Pacman)).contains("Re-check"));
+    }
+
     #[test]
     fn missing_waydroid_on_apt_points_to_the_upstream_repository() {
         let apt = super::waydroid_missing_detail(Some(crate::platform::PackageManager::Apt));

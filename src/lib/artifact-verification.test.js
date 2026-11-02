@@ -49,6 +49,31 @@ test("release generation and verification scripts exist and are executable", () 
   assert.ok((verifyMode & 0o111) !== 0, "verify-release.sh must be executable");
 });
 
+test("release AppImages come from the Ubuntu 22.04 workflow and pass the glibc floor", () => {
+  const gen = fs.readFileSync(
+    path.join(repoRoot, "scripts/release/generate-release.sh"),
+    "utf8"
+  );
+  assert.match(gen, /check-glibc\.sh" "\$APPIMAGE_PKG" 2\.35/);
+
+  const check = path.join(repoRoot, "scripts/release/check-glibc.sh");
+  assert.ok(
+    (fs.statSync(check).mode & 0o111) !== 0,
+    "check-glibc.sh must be executable"
+  );
+
+  const workflow = fs.readFileSync(
+    path.join(repoRoot, ".github/workflows/appimage.yml"),
+    "utf8"
+  );
+  assert.match(workflow, /runs-on: ubuntu-22\.04/);
+  assert.match(workflow, /check-glibc\.sh [^\n]*2\.35/);
+  // Third-party actions are pinned to a commit, like ci.yml.
+  for (const uses of workflow.match(/uses: \S+/g)) {
+    assert.match(uses, /@[0-9a-f]{40}$/, `${uses} is not pinned to a commit`);
+  }
+});
+
 test("verify-release.sh validates staged artifacts when present", (t) => {
   const distDir = path.join(repoRoot, "dist-release");
   if (!fs.existsSync(path.join(distDir, "SHA256SUMS"))) {
@@ -82,14 +107,16 @@ test("platform support claims in README strictly match test evidence", () => {
   assert.ok(readme.includes("Tier 2 (Best-Effort)"));
   assert.ok(readme.includes("live-tested in an Ubuntu 24.04 LTS VM"));
   assert.ok(readme.includes("live-tested in a Fedora 44 VM"));
+  assert.ok(readme.includes("The RHEL family is not live-tested."));
+  // openSUSE: the package and setup screen were tested, Waydroid was not.
+  const opensuse = readme
+    .split("\n")
+    .find((line) => line.startsWith("| **openSUSE"));
+  assert.ok(opensuse.includes("no official Waydroid package"));
+  assert.ok(opensuse.includes("Waydroid itself was not run"));
   assert.ok(
-    readme.includes(
-      "Debian, the RHEL family, and openSUSE are not live-tested yet"
-    )
-  );
-  assert.ok(
-    !/openSUSE[^\n|]*\|[^\n]*live-tested/.test(readme),
-    "openSUSE row must not claim live testing"
+    !/init via polkit|engine start/.test(opensuse),
+    "openSUSE row must not claim the Waydroid flow was tested"
   );
 
   // Package names and file names as the bundler produces them: the

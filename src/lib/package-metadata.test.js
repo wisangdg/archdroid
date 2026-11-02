@@ -30,8 +30,11 @@ test("tauri.conf.json bundle metadata is complete and accurately declared", () =
   assert.ok(conf.bundle.linux.deb.recommends.includes("lzip"));
   assert.ok(conf.bundle.linux.deb.recommends.includes("git"));
 
-  assert.ok(Array.isArray(conf.bundle.linux?.rpm?.depends));
-  assert.ok(conf.bundle.linux.rpm.depends.includes("waydroid"));
+  // Same for the .rpm: openSUSE has no official waydroid package, and
+  // "nothing provides 'waydroid'" blocked the install there. dnf and zypper
+  // still install Recommends by default, so Fedora still gets waydroid.
+  assert.ok(!(conf.bundle.linux?.rpm?.depends ?? []).includes("waydroid"));
+  assert.ok(conf.bundle.linux.rpm.recommends.includes("waydroid"));
 });
 
 test("package.json and LICENSE file declare matching licensing and repo metadata", () => {

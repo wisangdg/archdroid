@@ -37,7 +37,7 @@ ArchDroid is a desktop app for [Waydroid](https://waydroid.net/). Set up Android
    |---|---|
    | Arch Linux and derivatives | `sudo pacman -U archdroid-bin-*.pkg.tar.zst` |
    | Ubuntu 24.04 / Debian (preview) | Add the [official Waydroid repo](https://docs.waydro.id/usage/install-on-desktops) first (Ubuntu 24.04 does not ship `waydroid`), then `sudo apt install ./ArchDroid_*_amd64.deb` |
-   | Any x86_64 distro | `chmod +x ArchDroid_*.AppImage && ./ArchDroid_*.AppImage` |
+   | Other x86_64 distros | `chmod +x ArchDroid_*.AppImage && ./ArchDroid_*.AppImage` (0.1.3: Arch-like distros only, see [AppImage](#appimage-x86_64)) |
 
 3. **Open ArchDroid** and click **Initialize Android Emulator**. ArchDroid checks your system first, then downloads the Android image (about 1.2 GB) after you approve the root prompt.
 4. Click **Start Engine**. Your apps show up in **My Apps**.
@@ -53,9 +53,9 @@ ArchDroid detects your package manager and installs the right dependency package
 | Distribution | Package | Status |
 |---|---|---|
 | **Arch Linux, CachyOS, EndeavourOS, Manjaro** | `.pkg.tar.zst` (release), local PKGBUILD, AppImage | **Tier 1 (Fully Supported & Live-Tested)**<br>Live-tested in an Arch Linux QEMU/KVM VM, including Phantom and drag-and-drop on Wayland and X11. See [docs/P0-8.2-MATRIX-RESULTS.md](docs/P0-8.2-MATRIX-RESULTS.md) and [docs/P0-9.1-PACKAGING-RESULTS.md](docs/P0-9.1-PACKAGING-RESULTS.md). |
-| **Ubuntu, Debian, Linux Mint, Pop!_OS** | `.deb` (release), AppImage | **Tier 2 (Best-Effort)**<br>`.deb` live-tested in an Ubuntu 24.04 LTS VM: install, Waydroid installed by the app through `apt` (after adding the official Waydroid repo), init via polkit, engine start/stop, APK drag-and-drop, CSP. Debian, Mint, and Pop!_OS are untested. |
+| **Ubuntu, Debian, Linux Mint, Pop!_OS** | `.deb` (release), AppImage | **Tier 2 (Best-Effort)**<br>`.deb` live-tested in an Ubuntu 24.04 LTS VM: install, Waydroid installed by the app through `apt` (after adding the official Waydroid repo), init via polkit, engine start/stop, APK drag-and-drop, CSP. Debian 12: the `.deb` is live-tested for install, setup screen (before and after adding the Waydroid repo), CSP, and `apt remove`; Waydroid itself was not run there. Mint and Pop!_OS are untested. |
 | **Fedora, RHEL, Alma, Rocky Linux** | `.rpm` (build from source), AppImage | **Tier 2 (Best-Effort)**<br>`.rpm` live-tested in a Fedora 44 VM: `dnf install` (pulls `waydroid` from the Fedora repos), init via polkit, engine start/stop, app list, APK drag-and-drop, CSP, `dnf remove arch-droid`. RHEL/Alma/Rocky are untested. |
-| **openSUSE Tumbleweed / Leap** | `.rpm` (build from source), AppImage | **Tier 2 (Best-Effort)**<br>Package mapping is covered by backend unit tests (`platform.rs`); no live VM run yet. |
+| **openSUSE Tumbleweed / Leap** | `.rpm` (build from source), AppImage | **Tier 2 (Best-Effort)**<br>openSUSE has no official Waydroid package and its default kernel has no binder, so Waydroid must come from a community repository. In a Tumbleweed VM the `.rpm` installs with `zypper`, the setup screen explains this and keeps Initialize disabled, CSP holds, and `zypper remove arch-droid` works. Waydroid itself was not run. |
 
 **Not supported:**
 
@@ -67,7 +67,7 @@ ArchDroid detects your package manager and installs the right dependency package
 
 ## Requirements
 
-1. **Linux kernel** 5.x or newer with `binder` (or `binderfs`). Stock kernels on modern Arch, Ubuntu, Fedora, and openSUSE include it.
+1. **Linux kernel** 5.x or newer with `binder` (or `binderfs`). The stock kernels of Arch, Ubuntu, and Fedora include it; openSUSE's default kernel does not.
 2. **GPU render node** `/dev/dri/renderD128` with Mesa/Vulkan drivers.
 3. **Wayland session** (`WAYLAND_DISPLAY` set).
 4. **A polkit agent** in your desktop session (`hyprpolkitagent`, `polkit-gnome`, `polkit-kde-agent`, ...), or run ArchDroid from a terminal to use `sudo`.
@@ -96,12 +96,15 @@ cd packaging/arch
 makepkg -si
 ```
 
-### AppImage (any x86_64 distro)
+### AppImage (x86_64)
 
 ```bash
 chmod +x ArchDroid_*.AppImage
 ./ArchDroid_*.AppImage
 ```
+> [!WARNING]
+> The **0.1.3 AppImage** was built on Arch Linux and needs glibc 2.44, so it only starts on distributions with glibc 2.44 or newer, such as Arch. Elsewhere it stops with `version GLIBC_2.xx not found` (seen on Debian 12; Ubuntu 24.04 has 2.39). Use the `.deb`/`.rpm` there. Later AppImages are built on Ubuntu 22.04 by the [AppImage workflow](.github/workflows/appimage.yml) and need glibc 2.35 or newer.
+
 > [!TIP]
 > ArchDroid clears the AppImage's own `PYTHONHOME` and `PYTHONPATH` when it calls host tools such as `/usr/bin/waydroid`, so the host's Python modules keep working.
 
@@ -257,7 +260,7 @@ Full list of data locations: [docs/DATA-AND-UNINSTALL.md](docs/DATA-AND-UNINSTAL
 1. **One Android container per machine.** Waydroid uses a single global LXC container, so ArchDroid can't run several Android instances in parallel.
 2. **Wayland required.** There is no built-in X11 display server.
 3. **libhoudini depends on upstream.** It comes from an upstream Google Android TV image fetched by a pinned helper script. Games with kernel-level anti-cheat may not run in a container.
-4. **Distro coverage.** Full (Tier 1) live-verified support covers the Arch Linux family. Tier 2 distros are in preview: the `.deb` is live-tested on Ubuntu 24.04 LTS and the `.rpm` on Fedora 44, while Debian, the RHEL family, and openSUSE are not live-tested yet.
+4. **Distro coverage.** Full (Tier 1) live-verified support covers the Arch Linux family. Tier 2 distros are in preview: the full flow is live-tested with the `.deb` on Ubuntu 24.04 LTS and the `.rpm` on Fedora 44; on Debian 12 and openSUSE Tumbleweed only installing, the setup screen, and removing the package are (openSUSE has no official Waydroid package). The RHEL family is not live-tested.
 5. **Test coverage.** All main flows are live-tested in VMs (Arch, plus Ubuntu 24.04 and Fedora 44 for the core flow; see [`docs/P0-8.2-MATRIX-RESULTS.md`](docs/P0-8.2-MATRIX-RESULTS.md)). Not yet tested: real hardware across GPUs and desktops (GNOME/KDE/Hyprland, Intel/AMD/NVIDIA). If something fails on your system, attach a Diagnostic Bundle to your report.
 6. **Add-on sources.** GApps (MindTheGapps) and libhoudini come from third-party upstream archives. ArchDroid pins each archive's SHA-256 and refuses any other file, but it cannot vouch for what those upstream builds contain.
 7. **Connectivity check.** The "online" check opens a TCP connection, sending no data, to `1.1.1.1:53` (then `8.8.8.8:53`). On networks that block public DNS, diagnostics can say "Offline" even though downloads still work. See [PRIVACY.md](PRIVACY.md).

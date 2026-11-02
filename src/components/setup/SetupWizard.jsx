@@ -54,6 +54,9 @@ function badgeLabel(status) {
   }
 }
 
+/** Value the backend gives the `waydroid` item when no repository has it. */
+const WAYDROID_NOT_IN_REPOS = "Not in Repositories";
+
 /**
  * Init needs elevation, a working network, enough disk, and either a Waydroid
  * binary or a package manager that can install it. Everything else is advisory
@@ -68,7 +71,12 @@ function blocksInitialization(item, report) {
     case "disk":
       return item.status === "warning" || item.status === "error";
     case "waydroid":
-      return item.status === "error" && !report.package_manager;
+      // Missing is fine when a package manager can install it, unless no
+      // configured repository offers it (installing would fail after root).
+      return (
+        item.status === "error" &&
+        (!report.package_manager || item.value === WAYDROID_NOT_IN_REPOS)
+      );
     default:
       return false;
   }
