@@ -20,8 +20,10 @@ if [[ -d "$target" ]]; then
   root="$target"
 else
   work="$(mktemp -d)"
-  target="$(realpath "$target")"
-  (cd "$work" && "$target" --appimage-extract >/dev/null)
+  # Work on an executable copy: a downloaded AppImage usually has no +x.
+  cp "$target" "$work/app.AppImage"
+  chmod +x "$work/app.AppImage"
+  (cd "$work" && ./app.AppImage --appimage-extract >/dev/null)
   root="$work/squashfs-root"
 fi
 
