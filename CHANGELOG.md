@@ -7,6 +7,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-11-03
+
+Hardening release: pinned add-on archives, failure logging, repository checks before root, and packages that install on Debian 12 and openSUSE. The AppImage is now built in CI on Ubuntu 22.04.
+
 ### Security
 - ArchDroid now downloads the GApps (MindTheGapps) and libhoudini archives itself and uses them only if their SHA-256 matches the pin in the code (the "Verified Download" stage in the stepper). Before, only `waydroid_script` checked them, with MD5. A mismatching file is deleted and the install stops before the image is changed.
 

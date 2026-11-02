@@ -103,7 +103,7 @@ chmod +x ArchDroid_*.AppImage
 ./ArchDroid_*.AppImage
 ```
 > [!WARNING]
-> The **0.1.3 AppImage** was built on Arch Linux and needs glibc 2.44, so it only starts on distributions with glibc 2.44 or newer, such as Arch. Elsewhere it stops with `version GLIBC_2.xx not found` (seen on Debian 12; Ubuntu 24.04 has 2.39). Use the `.deb`/`.rpm` there. Later AppImages are built on Ubuntu 22.04 by the [AppImage workflow](.github/workflows/appimage.yml) and need glibc 2.35 or newer; that build was checked to start on Debian 12 and Arch.
+> The **0.1.3 AppImage** was built on Arch Linux and needs glibc 2.44, so it only starts on distributions with glibc 2.44 or newer, such as Arch. Elsewhere it stops with `version GLIBC_2.xx not found` (seen on Debian 12; Ubuntu 24.04 has 2.39). Use the `.deb`/`.rpm` there. From 0.1.4, AppImages are built on Ubuntu 22.04 by the [AppImage workflow](.github/workflows/appimage.yml) and need glibc 2.35 or newer; that build was checked to start on Debian 12 and Arch.
 
 AppImages need FUSE 2 (`fuse2` on Arch, `libfuse2t64` on Ubuntu 24.04). Without it, run `./ArchDroid_*.AppImage --appimage-extract-and-run`.
 
