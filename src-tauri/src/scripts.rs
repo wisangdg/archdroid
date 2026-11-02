@@ -54,6 +54,81 @@ fi
     )
 }
 
+/// An add-on archive that `waydroid_script` would download itself. Upstream
+/// only checks it against an MD5 embedded in the pinned commit; ArchDroid
+/// downloads it first and requires this SHA-256. `md5` is the upstream value
+/// for the same file: with the file already in place and matching it,
+/// `waydroid_script` skips its own download.
+pub(crate) struct PinnedArchive {
+    pub file_name: &'static str,
+    pub url: &'static str,
+    pub sha256: &'static str,
+    pub md5: &'static str,
+}
+
+/// `main.py install gapps` without `-a` selects Android 13 (the argparse
+/// default at `WAYDROID_SCRIPT_REV`), and the packages are x86_64 only.
+pub(crate) const GAPPS_ARCHIVE: PinnedArchive = PinnedArchive {
+    file_name: "gapps.zip",
+    url: "https://github.com/s1204IT/MindTheGappsBuilder/releases/download/20231028/MindTheGapps-13.0.0-x86_64-20231028.zip",
+    sha256: "be2b44bb877bd8a409b9c4f6e60603c40a73baf79e590d53267b9774b29959ef",
+    md5: "63ccebbf93d45c384f58d7c40049d398",
+};
+
+pub(crate) const HOUDINI_ARCHIVE: PinnedArchive = PinnedArchive {
+    file_name: "libhoudini.zip",
+    url: "https://github.com/supremegamers/vendor_intel_proprietary_houdini/archive/2f8f088671182e17e67321e098e8411a3972a628.zip",
+    sha256: "2e82cdc88ddc4d418f7fb861aeebb7c49c83a91b97f57da10510b5e1146a4ed5",
+    md5: "37fe0899f1e4da7f9a724cca1c1ab1ea",
+};
+
+/// Download `archive` into the directory `waydroid_script` reads
+/// (`$XDG_CACHE_HOME/waydroid-script/downloads`, and the root environment sets
+/// `XDG_CACHE_HOME` to the private work dir) and stop unless its SHA-256 is the
+/// pinned one. Uses only the Python standard library, which every supported
+/// host has once the dependency step passed.
+fn pinned_archive_prefetch(archive: &PinnedArchive) -> String {
+    format!(
+        r#"echo "[STEP] download"
+echo "[SYSTEM] Downloading {name} and verifying its SHA-256..."
+if ! python3 - {url} "$XDG_CACHE_HOME/waydroid-script/downloads" {name} {sha256} {md5} <<'PYEOF'
+import hashlib, os, sys, urllib.request
+url, dest_dir, name, want, want_md5 = sys.argv[1:6]
+os.makedirs(dest_dir, exist_ok=True)
+dest = os.path.join(dest_dir, name)
+part = dest + ".part"
+digest = hashlib.sha256()
+md5 = hashlib.md5()
+with urllib.request.urlopen(url, timeout=60) as resp, open(part, "wb") as out:
+    while True:
+        chunk = resp.read(1 << 20)
+        if not chunk:
+            break
+        digest.update(chunk)
+        md5.update(chunk)
+        out.write(chunk)
+got = digest.hexdigest()
+if got != want:
+    os.remove(part)
+    sys.exit(f"[ERROR] {{name}} SHA-256 mismatch: expected {{want}}, got {{got}}. The download was deleted.")
+if want_md5 and md5.hexdigest() != want_md5:
+    os.remove(part)
+    sys.exit(f"[ERROR] {{name}} matches the SHA-256 pin but not the MD5 waydroid_script expects; refusing to let it download again unverified.")
+os.replace(part, dest)
+print(f"[SYSTEM] {{name}} verified (sha256 {{got}}).")
+PYEOF
+then
+    echo "[ERROR] Could not download a verified {name}. Check your connection and retry." >&2
+    exit 1
+fi
+"#,
+        name = sh_quote(archive.file_name),
+        url = sh_quote(archive.url),
+        sha256 = sh_quote(archive.sha256),
+        md5 = sh_quote(archive.md5),
+    )
+}
+
 /// Fetch exactly `rev` into a fresh repository. `repo` is a shell expansion such
 /// as `"$repo"`, not a Rust path. The final `test` catches a server or checkout
 /// that silently resolved a different object.
@@ -142,7 +217,7 @@ echo "[STEP] deps"
 repo="$ARCHDROID_WORK/waydroid_script"
 {checkout}
 {setup}
-cd "$repo"
+{prefetch}cd "$repo"
 echo "[STEP] inject"
 echo "[SYSTEM] Injecting GApps into Android Image (this will take a while)..."
 if ! PYTHONUNBUFFERED=1 "$repo/venv/bin/python3" main.py install gapps; then
@@ -156,6 +231,7 @@ echo "[SUCCESS] GApps installation complete! Please Start Waydroid."
         dep_install = waydroid_script_dep_install(pm, approved, "installing GApps"),
         checkout = pinned_git_checkout("\"$repo\"", WAYDROID_SCRIPT_URL, WAYDROID_SCRIPT_REV),
         setup = waydroid_script_python_setup(),
+        prefetch = pinned_archive_prefetch(&GAPPS_ARCHIVE),
     )
 }
 
@@ -170,7 +246,7 @@ echo "[STEP] deps"
 repo="$ARCHDROID_WORK/waydroid_script"
 {checkout}
 {setup}
-cd "$repo"
+{prefetch}cd "$repo"
 echo "[STEP] inject"
 echo "[SYSTEM] Installing ARM Translation / libhoudini (this may take several minutes)..."
 if ! PYTHONUNBUFFERED=1 "$repo/venv/bin/python3" main.py install libhoudini; then
@@ -184,6 +260,7 @@ echo "[SUCCESS] ARM Translation installation complete!"
         dep_install = waydroid_script_dep_install(pm, approved, "installing ARM Translation"),
         checkout = pinned_git_checkout("\"$repo\"", WAYDROID_SCRIPT_URL, WAYDROID_SCRIPT_REV),
         setup = waydroid_script_python_setup(),
+        prefetch = pinned_archive_prefetch(&HOUDINI_ARCHIVE),
     )
 }
 
@@ -311,6 +388,96 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn addon_archives_are_sha256_pinned_and_fetched_before_waydroid_script() {
+        let pacman = platform::PackageManager::Pacman;
+        let approved = mapped_dependencies(pacman);
+        for (script, archive) in [
+            (
+                gapps_install_script(Some(pacman), &approved),
+                &GAPPS_ARCHIVE,
+            ),
+            (
+                houdini_install_script(Some(pacman), &approved),
+                &HOUDINI_ARCHIVE,
+            ),
+        ] {
+            assert_eq!(archive.sha256.len(), 64);
+            assert!(archive.sha256.chars().all(|c| c.is_ascii_hexdigit()));
+            assert_eq!(archive.md5.len(), 32);
+            assert!(archive.url.starts_with("https://"));
+            assert!(script.contains(archive.sha256));
+            assert!(script.contains(archive.url));
+            let fetch = script.find("[STEP] download").expect("download step");
+            let run = script.find("main.py install").expect("waydroid_script run");
+            assert!(fetch < run, "the verified download must happen first");
+        }
+    }
+
+    fn run_prefetch(dir: &std::path::Path, sha256: &str, md5: &str) -> std::process::Output {
+        let source = dir.join("source.zip");
+        std::fs::write(&source, b"pinned archive body").unwrap();
+        let archive = PinnedArchive {
+            file_name: "gapps.zip",
+            url: Box::leak(format!("file://{}", source.display()).into_boxed_str()),
+            sha256: Box::leak(sha256.to_string().into_boxed_str()),
+            md5: Box::leak(md5.to_string().into_boxed_str()),
+        };
+        Command::new("bash")
+            .args([
+                "-c",
+                &format!("set -eu\n{}", pinned_archive_prefetch(&archive)),
+            ])
+            .env("XDG_CACHE_HOME", dir.join("cache"))
+            .output()
+            .expect("failed to run bash")
+    }
+
+    #[test]
+    fn prefetch_keeps_only_an_archive_with_the_pinned_sha256() {
+        let dir = std::env::temp_dir().join(format!("archdroid-prefetch-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let dest = dir.join("cache/waydroid-script/downloads/gapps.zip");
+        let good = String::from_utf8(
+            Command::new("sh")
+                .args([
+                    "-c",
+                    "printf 'pinned archive body' | sha256sum | cut -d' ' -f1",
+                ])
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .unwrap();
+        let good = good.trim();
+        assert_eq!(good.len(), 64);
+
+        let bad = run_prefetch(&dir, &"0".repeat(64), "");
+        assert!(!bad.status.success());
+        assert!(String::from_utf8_lossy(&bad.stderr).contains("SHA-256 mismatch"));
+        assert!(
+            !dest.exists(),
+            "a mismatching archive must not be left for waydroid_script"
+        );
+        assert!(!dest.with_extension("zip.part").exists());
+
+        let stale_md5 = run_prefetch(&dir, good, &"0".repeat(32));
+        assert!(!stale_md5.status.success());
+        assert!(String::from_utf8_lossy(&stale_md5.stderr).contains("not the MD5"));
+        assert!(!dest.exists());
+
+        let ok = run_prefetch(&dir, good, "");
+        assert!(
+            ok.status.success(),
+            "{}",
+            String::from_utf8_lossy(&ok.stderr)
+        );
+        assert_eq!(std::fs::read(&dest).unwrap(), b"pinned archive body");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -522,11 +689,11 @@ mod tests {
         let pm = Some(platform::PackageManager::Pacman);
         assert_eq!(
             steps(&gapps_install_script(pm, &[])),
-            ["deps", "repo", "env", "inject"]
+            ["deps", "repo", "env", "download", "inject"]
         );
         assert_eq!(
             steps(&houdini_install_script(pm, &[])),
-            ["deps", "repo", "env", "inject"]
+            ["deps", "repo", "env", "download", "inject"]
         );
         assert_eq!(steps(&phantom_install_script()), ["repo", "build"]);
         assert_eq!(steps(wipe_script()), ["stop", "wipe"]);

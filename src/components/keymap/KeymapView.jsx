@@ -82,10 +82,11 @@ export default function KeymapView({
           <div className="feature-icon-badge">
             <ShieldCheck size={22} />
           </div>
-          <h4>Zero Ban Risk</h4>
+          <h4>No APK Changes</h4>
           <p>
-            Operates outside the Android container via native Linux uinput
-            without modifying APK binaries.
+            Runs outside the Android container via native Linux uinput and never
+            modifies APK binaries. Games with strict anti-cheat may still detect
+            or block it.
           </p>
         </div>
       </div>

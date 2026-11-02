@@ -63,14 +63,19 @@ source tree that will run with the corresponding privilege.
   - `libhoudini.so`, `houdini`, `houdini64`: Intel proprietary ARM translation
     prebuilts for Android Bionic container runtime. Not executed on the host.
 - **Network requests and integrity verification:**
-  - GApps (Android 11): `open_gapps-*-11.0-pico-*.zip` from SourceForge, verified
-    against hardcoded MD5 in `stuff/gapps.py`.
-  - GApps (Android 13): `MindTheGapps-13.0.0-*.zip` from GitHub release
-    `s1204IT/MindTheGappsBuilder`, verified against hardcoded MD5 in `stuff/gapps.py`.
-  - Houdini (Android 11 & 13): Zip archives from
-    `supremegamers/vendor_intel_proprietary_houdini` pinned to specific Git commit
-    hashes (`81f2a51...` and `2f8f088...`) in URL, verified against hardcoded MD5
-    in `stuff/houdini.py`.
+  - ArchDroid always runs `main.py install gapps|libhoudini` without `-a`, which
+    selects Android 13 x86_64. Before `waydroid_script` runs, the root script
+    downloads that archive itself and keeps it only if its **SHA-256** matches
+    the pin in `src-tauri/src/scripts.rs` (`GAPPS_ARCHIVE`, `HOUDINI_ARCHIVE`);
+    it must also match upstream's MD5, so `waydroid_script` accepts the file and
+    skips its own download. On a mismatch the file is deleted and the install
+    stops before anything is written to the image.
+    - GApps: `MindTheGapps-13.0.0-x86_64-20231028.zip` (GitHub release
+      `s1204IT/MindTheGappsBuilder`), sha256 `be2b44bb…59ef`.
+    - Houdini: `supremegamers/vendor_intel_proprietary_houdini` archive at commit
+      `2f8f088…`, sha256 `2e82cdc8…4ed5`.
+  - The Android 11 entries in `stuff/gapps.py`/`stuff/houdini.py` (OpenGApps,
+    Houdini `81f2a51…`) are never selected by ArchDroid.
   - Python dependencies: pinned to SHA-256 in `waydroid_script-requirements.lock`.
   - No arbitrary scripts (`.sh`, `.py`) are retrieved from unverified URLs or
     executed dynamically.

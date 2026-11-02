@@ -7,6 +7,12 @@ Format ini mengacu pada [Keep a Changelog](https://keepachangelog.com/id/1.0.0/)
 
 ## [Unreleased]
 
+### Keamanan
+- Arsip GApps (MindTheGapps) dan libhoudini kini diunduh ArchDroid sendiri dan hanya dipakai bila SHA-256-nya sama dengan pin di kode (tahap "Verified Download" di stepper). Sebelumnya integritas arsip hanya dicek `waydroid_script` dengan MD5. File yang tidak cocok dihapus dan instalasi berhenti sebelum image diubah.
+
+### Diubah
+- Halaman Keymapping tidak lagi menjanjikan "Zero Ban Risk"; kini "No APK Changes", dengan catatan bahwa game dengan anti-cheat ketat tetap bisa mendeteksinya.
+
 ### Diperbaiki
 - Panduan uninstall memakai nama paket yang benar untuk `.deb`/`.rpm` (`arch-droid`, bukan `archdroid`), dan contoh instalasi memakai nama file yang sebenarnya (`ArchDroid_*.deb`, `ArchDroid-*.rpm`); sebelumnya perintah itu gagal.
 - Start Engine kini melaporkan "Start Failed" beserta penyebab dari Waydroid (mis. `OSError: container failed to start`) bila container gagal start. Sebelumnya `waydroid session start` keluar dengan kode 0 setelah ~10 detik dan ArchDroid hanya menampilkan "Session Slow to Start". Start yang berhasil dilaporkan begitu status menunjukkan RUNNING.

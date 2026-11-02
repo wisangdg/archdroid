@@ -41,6 +41,8 @@ build; without it Tauri does not allow automation.
 | `tier2_engine.py ~/archdroid ~/out <apk>` | Start Engine, wait for the app list, drop an APK with `dnd.sh`, Stop Engine. |
 | `session_list_drop.py` | With the session already running: wait for the app list to fill, drop F-Droid with `dnd.sh`, Stop Engine. |
 | `start_probe.py ~/archdroid` | Click Start Engine and report the first outcome (Engine Running, "Start Failed …" or "Slow to Start"). Remove `$XDG_RUNTIME_DIR/pulse/native` first to reproduce a container that fails to start. |
+| `addon_verified.py ~/archdroid ~/out` | Install GApps, then ARM Translation, from Install Tools: the "Verified Download" stage, the `verified (sha256 …)` log line, and the result. Needs network and an initialized Waydroid. |
+| `rollback_probe.py /usr/bin/archdroid ~/out <tag>` | After `pacman -U` of another version (upgrade or downgrade): the version shown, the add-on badges (markers written by another version), Start Engine, app count, Stop Engine. |
 | `phantom_launch.py ~/archdroid` | Launch Keymapper with stub `phantom-gui` binaries (one exits 1, one keeps running). Tests the app's reporting, not Phantom itself. |
 
 WebKitWebDriver allows one session at a time. If a script dies without

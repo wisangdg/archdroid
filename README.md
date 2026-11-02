@@ -160,6 +160,7 @@ ArchDroid collects no telemetry and uploads nothing on its own. What it stores a
 ### Security measures
 
 - **Hash-pinned Python dependencies.** The add-on helper's Python packages are locked and verified by SHA-256 (`--require-hashes --only-binary=:all:`).
+- **SHA-256 pinned add-on archives.** ArchDroid downloads the GApps and libhoudini archives itself and stops unless the SHA-256 matches the pin, before the upstream helper (which only checks MD5) can use them.
 - **Pinned upstream code.** `waydroid_script` and Phantom are pinned to specific commits.
 - **Isolated root environment.** Privileged scripts run in `mktemp -d` (mode `0700`), with `SUDO_USER` unset and the cache in `$ARCHDROID_WORK/cache`.
 - **Package approval.** The backend refuses packages outside the approved plan (`approval_required` / `invalid_input`).
@@ -258,7 +259,7 @@ Full list of data locations: [docs/DATA-AND-UNINSTALL.md](docs/DATA-AND-UNINSTAL
 3. **libhoudini depends on upstream.** It comes from an upstream Google Android TV image fetched by a pinned helper script. Games with kernel-level anti-cheat may not run in a container.
 4. **Distro coverage.** Full (Tier 1) live-verified support covers the Arch Linux family. Tier 2 distros are in preview: the `.deb` is live-tested on Ubuntu 24.04 LTS and the `.rpm` on Fedora 44, while Debian, the RHEL family, and openSUSE are not live-tested yet.
 5. **Test coverage.** All main flows are live-tested in VMs (Arch, plus Ubuntu 24.04 and Fedora 44 for the core flow; see [`docs/P0-8.2-MATRIX-RESULTS.md`](docs/P0-8.2-MATRIX-RESULTS.md)). Not yet tested: real hardware across GPUs and desktops (GNOME/KDE/Hyprland, Intel/AMD/NVIDIA). If something fails on your system, attach a Diagnostic Bundle to your report.
-6. **Add-on archive integrity.** `waydroid_script` is pinned and its Python dependencies are SHA-256 verified, but the GApps/libhoudini archives it downloads are checked against the **MD5** hashes in that commit. That catches corrupted or swapped files, but it isn't strong cryptographic protection.
+6. **Add-on sources.** GApps (MindTheGapps) and libhoudini come from third-party upstream archives. ArchDroid pins each archive's SHA-256 and refuses any other file, but it cannot vouch for what those upstream builds contain.
 7. **Connectivity check.** The "online" check opens a TCP connection, sending no data, to `1.1.1.1:53` (then `8.8.8.8:53`). On networks that block public DNS, diagnostics can say "Offline" even though downloads still work. See [PRIVACY.md](PRIVACY.md).
 
 ---

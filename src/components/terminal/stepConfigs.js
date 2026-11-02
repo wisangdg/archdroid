@@ -13,6 +13,11 @@ export const TASK_STEP_CONFIGS = {
       description: "Isolated environment & wheels",
     },
     {
+      id: "download",
+      label: "Verified Download",
+      description: "MindTheGapps, SHA-256 pinned",
+    },
+    {
       id: "inject",
       label: "Injecting GApps",
       description: "Writing to rootfs",
@@ -31,6 +36,11 @@ export const TASK_STEP_CONFIGS = {
       id: "env",
       label: "Python Venv",
       description: "Isolated environment & wheels",
+    },
+    {
+      id: "download",
+      label: "Verified Download",
+      description: "libhoudini, SHA-256 pinned",
     },
     {
       id: "inject",
