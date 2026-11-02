@@ -41,6 +41,9 @@ jobs:
           npm ci
           npm run build:bundles -- --bundles appimage
 
+      - name: Drop bundled libwayland (host Mesa EGL needs the host's)
+        run: scripts/release/repack-appimage.sh
+
       - name: glibc floor (2.35, Ubuntu 22.04)
         run: scripts/release/check-glibc.sh src-tauri/target/release/bundle/appimage/ArchDroid_*.AppImage 2.35
 
@@ -48,7 +51,7 @@ jobs:
         run: |
           cd src-tauri/target/release/bundle/appimage
           sha256sum ArchDroid_*.AppImage | tee SHA256SUMS.appimage
-          echo "commit $GITHUB_SHA, run $GITHUB_RUN_ID, $(lsb_release -ds), $(ldd --version | head -1)" > BUILD-INFO.txt
+          echo "commit $GITHUB_SHA, run $GITHUB_RUN_ID, $(lsb_release -ds), glibc $(getconf GNU_LIBC_VERSION)" > BUILD-INFO.txt
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

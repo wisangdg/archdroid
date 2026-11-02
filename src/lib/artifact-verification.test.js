@@ -68,6 +68,8 @@ test("release AppImages come from the Ubuntu 22.04 workflow and pass the glibc f
   );
   assert.match(workflow, /runs-on: ubuntu-22\.04/);
   assert.match(workflow, /check-glibc\.sh [^\n]*2\.35/);
+  // Without this the Ubuntu 22.04 AppImage shows a blank window on Arch.
+  assert.match(workflow, /repack-appimage\.sh/);
   // Third-party actions are pinned to a commit, like ci.yml.
   for (const uses of workflow.match(/uses: \S+/g)) {
     assert.match(uses, /@[0-9a-f]{40}$/, `${uses} is not pinned to a commit`);
