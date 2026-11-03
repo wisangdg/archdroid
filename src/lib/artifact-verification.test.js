@@ -109,7 +109,12 @@ test("platform support claims in README strictly match test evidence", () => {
   assert.ok(readme.includes("Tier 2 (Best-Effort)"));
   assert.ok(readme.includes("live-tested in an Ubuntu 24.04 LTS VM"));
   assert.ok(readme.includes("live-tested in a Fedora 44 VM"));
-  assert.ok(readme.includes("The RHEL family is not live-tested."));
+  // RHEL family: AlmaLinux 10 install and setup screen only; RHEL and Rocky
+  // untested, and the Waydroid flow must not be claimed.
+  const rhel = readme.split("\n").find((line) => line.startsWith("| **Fedora"));
+  assert.ok(rhel.includes("AlmaLinux 10.2"));
+  assert.ok(rhel.includes("Waydroid itself was not run there"));
+  assert.ok(rhel.includes("RHEL and Rocky were not tested"));
   // openSUSE: the package and setup screen were tested, Waydroid was not.
   const opensuse = readme
     .split("\n")
