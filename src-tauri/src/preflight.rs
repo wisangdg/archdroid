@@ -2,7 +2,6 @@
 //! installer asks for root, plus the package-install plan shown for approval.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use crate::error::AppError;
 use crate::*;
@@ -33,7 +32,7 @@ pub(crate) fn check_available_disk_space_kb(path: &Path) -> Option<u64> {
         Path::new("/")
     };
 
-    let output = Command::new("df")
+    let output = crate::hostenv::host_command("df")
         .args(["-Pk", probe_path.to_str().unwrap_or("/")])
         .output()
         .ok()?;
@@ -65,7 +64,7 @@ pub(crate) fn check_python_venv_available() -> (bool, bool) {
     if !has_python3 {
         return (false, false);
     }
-    let has_venv = Command::new("python3")
+    let has_venv = crate::hostenv::host_command("python3")
         .args(["-c", "import venv, ensurepip"])
         .output()
         .map(|o| o.status.success())
@@ -79,7 +78,7 @@ fn check_trusted_python_venv() -> (bool, bool) {
     let Some(python) = trusted_program("python3") else {
         return (false, false);
     };
-    let has_venv = Command::new(python)
+    let has_venv = crate::hostenv::host_command(python)
         .args(["-c", "import venv, ensurepip"])
         .output()
         .map(|o| o.status.success())

@@ -357,7 +357,7 @@ fn signal_process_group(pid: u32, signal: &str) -> bool {
     let Some(kill) = trusted_program("kill") else {
         return false;
     };
-    Command::new(kill)
+    crate::hostenv::host_command(kill)
         .args([signal, "--", &format!("-{pid}")])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -641,7 +641,7 @@ fn run_user_script(
         finish_stream(app, task_id, &attempt, Completion::None);
         return attempt;
     };
-    let mut command = Command::new(shell);
+    let mut command = crate::hostenv::host_command(shell);
     command
         .arg("--noprofile")
         .arg("--norc")

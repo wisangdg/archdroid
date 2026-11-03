@@ -20,7 +20,7 @@ export const STAGE_COPY = {
   uninitialized: {
     title: "Android System Image Required",
     description:
-      "Your Linux machine is ready to host Waydroid, but the base Android system container has not been initialized yet. Click below to download the official LineageOS image (~1 GB) and configure your emulator automatically.",
+      "Your Linux machine is ready to host Waydroid, but the base Android system container has not been initialized yet. Click below to download the official LineageOS images (~1.2 GB) and configure your emulator automatically.",
   },
   initializing: {
     title: "Initializing Android System",

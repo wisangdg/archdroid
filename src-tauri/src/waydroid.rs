@@ -22,7 +22,7 @@
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, ExitStatus, Stdio};
+use std::process::{Child, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -262,7 +262,7 @@ impl Waydroid {
     /// the real daemon (same reason as `with_program`).
     fn session_start_argv(&self, args: &[String], grace_secs: u64) -> Result<()> {
         let program = self.program.to_string_lossy().to_string();
-        let mut command = Command::new(&self.program);
+        let mut command = crate::hostenv::host_command(&self.program);
         command
             .args(args)
             .env_remove("PYTHONHOME")
@@ -390,7 +390,7 @@ pub(crate) fn run_program(
 ) -> Result<String> {
     let program = program_path.to_string_lossy().to_string();
     let started = Instant::now();
-    let mut command = Command::new(program_path);
+    let mut command = crate::hostenv::host_command(program_path);
     command
         .args(args)
         .env_remove("PYTHONHOME")

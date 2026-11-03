@@ -292,6 +292,7 @@ echo "[SUCCESS] Phantom Keymapper installed successfully!"
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::Command;
 
     fn mapped_dependencies(pm: platform::PackageManager) -> Vec<&'static str> {
         pm.mapped_packages(&["git", "python3", "python3-venv", "squashfs", "lzip"])

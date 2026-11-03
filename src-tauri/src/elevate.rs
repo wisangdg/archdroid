@@ -316,7 +316,7 @@ const PRIVILEGED_ENV_REMOVE: &[&str] = &[
 pub(crate) fn elevated_command(helper: &str, body: &str) -> Option<Command> {
     let program = trusted_program(helper)?;
     let shell = trusted_program("bash")?;
-    let mut command = Command::new(program);
+    let mut command = crate::hostenv::host_command(program);
     command
         .arg(shell)
         .arg("--noprofile")

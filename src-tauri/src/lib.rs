@@ -3,7 +3,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{BufReader, IsTerminal, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::thread;
@@ -18,6 +17,7 @@ mod device;
 mod diagnostics;
 mod elevate;
 mod error;
+mod hostenv;
 mod markers;
 mod platform;
 mod preflight;
@@ -737,7 +737,7 @@ fn open_shared_folder_sync() -> CommandResult {
         .into();
     }
 
-    match Command::new("xdg-open").arg(&path).spawn() {
+    match crate::hostenv::host_command("xdg-open").arg(&path).spawn() {
         Ok(_) => CommandResult::with_message("Opened shared media folder in file manager."),
         Err(error) => AppError::from_spawn(
             "xdg-open",
@@ -1560,7 +1560,7 @@ fn run_phantom_sync() -> CommandResult {
         });
 
     if let Some(gui_path) = gui_bin {
-        return match Command::new(&gui_path).spawn() {
+        return match crate::hostenv::host_command(&gui_path).spawn() {
             Ok(child) => match watch_launch(child, LAUNCH_GRACE) {
                 Ok(()) => CommandResult::with_message("Launched Phantom Keymapper GUI."),
                 Err(status) => AppError::command_failed(format!(
@@ -1597,10 +1597,10 @@ fn run_phantom_sync() -> CommandResult {
 
         let cli_str = cli_path.to_string_lossy().to_string();
         let result = match term.as_str() {
-            "gnome-terminal" => Command::new("gnome-terminal")
+            "gnome-terminal" => crate::hostenv::host_command("gnome-terminal")
                 .args(["--", "bash", "-c", &cli_str])
                 .spawn(),
-            _ => Command::new(&term)
+            _ => crate::hostenv::host_command(&term)
                 .args(["-e", "bash", "-c", &cli_str])
                 .spawn(),
         };
@@ -1741,6 +1741,7 @@ mod tests {
     }
 
     use super::*;
+    use std::process::Command;
 
     #[test]
     fn apk_check_rejects_text_and_manifestless_zips() {

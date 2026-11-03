@@ -1,7 +1,7 @@
 //! Host diagnostics report behind the Settings > Diagnostics panel.
 
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 use crate::*;
 
@@ -541,7 +541,7 @@ pub(crate) fn waydroid_availability(pm: platform::PackageManager) -> platform::A
     let Some(path) = trusted_program(program) else {
         return platform::Availability::Unknown;
     };
-    let Ok(mut child) = Command::new(path)
+    let Ok(mut child) = crate::hostenv::host_command(path)
         .args(&args)
         .env("LC_ALL", "C")
         .stdin(Stdio::null())
