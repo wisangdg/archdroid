@@ -54,7 +54,7 @@ ArchDroid detects your package manager and installs the right dependency package
 |---|---|---|
 | **Arch Linux, CachyOS, EndeavourOS, Manjaro** | `.pkg.tar.zst` (release), local PKGBUILD, AppImage | **Tier 1 (Fully Supported & Live-Tested)**<br>Live-tested in an Arch Linux QEMU/KVM VM, including Phantom and drag-and-drop on Wayland and X11. See [docs/P0-8.2-MATRIX-RESULTS.md](docs/P0-8.2-MATRIX-RESULTS.md) and [docs/P0-9.1-PACKAGING-RESULTS.md](docs/P0-9.1-PACKAGING-RESULTS.md). |
 | **Ubuntu, Debian, Linux Mint, Pop!_OS** | `.deb` (release), AppImage | **Tier 2 (Best-Effort)**<br>`.deb` live-tested in an Ubuntu 24.04 LTS VM: install, Waydroid installed by the app through `apt` (after adding the official Waydroid repo), init via polkit, engine start/stop, APK drag-and-drop, CSP. Debian 12: the `.deb` is live-tested for install, setup screen (before and after adding the Waydroid repo), CSP, and `apt remove`; Waydroid itself was not run there. Mint and Pop!_OS are untested. |
-| **Fedora, RHEL, Alma, Rocky Linux** | `.rpm` (build from source), AppImage | **Tier 2 (Best-Effort)**<br>`.rpm` live-tested in a Fedora 44 VM: `dnf install` (pulls `waydroid` from the Fedora repos), init via polkit, engine start/stop, app list, APK drag-and-drop, CSP, `dnf remove arch-droid`. RHEL/Alma/Rocky are untested. |
+| **Fedora, RHEL, Alma, Rocky Linux** | `.rpm` (build from source), AppImage | **Tier 2 (Best-Effort)**<br>`.rpm` live-tested in a Fedora 44 VM: `dnf install` (pulls `waydroid` from the Fedora repos), init via polkit, engine start/stop, app list, APK drag-and-drop, CSP, `dnf remove arch-droid`. AlmaLinux 10.2 (RHEL family): the `.rpm` installs once EPEL is enabled (`webkit2gtk4.1` comes from EPEL), the setup screen reports that no repository offers `waydroid` and keeps Initialize disabled, CSP holds. Waydroid itself was not run there; RHEL and Rocky were not tested. |
 | **openSUSE Tumbleweed / Leap** | `.rpm` (build from source), AppImage | **Tier 2 (Best-Effort)**<br>openSUSE has no official Waydroid package and its default kernel has no binder, so Waydroid must come from a community repository. In a Tumbleweed VM the `.rpm` installs with `zypper`, the setup screen explains this and keeps Initialize disabled, CSP holds, and `zypper remove arch-droid` works. Waydroid itself was not run. |
 
 **Not supported:**
@@ -105,10 +105,13 @@ chmod +x ArchDroid_*.AppImage
 > [!WARNING]
 > The **0.1.3 AppImage** was built on Arch Linux and needs glibc 2.44, so it only starts on distributions with glibc 2.44 or newer, such as Arch. Elsewhere it stops with `version GLIBC_2.xx not found` (seen on Debian 12; Ubuntu 24.04 has 2.39). Use the `.deb`/`.rpm` there. From 0.1.4, AppImages are built on Ubuntu 22.04 by the [AppImage workflow](.github/workflows/appimage.yml) and need glibc 2.35 or newer; that build was checked to start on Debian 12 and Arch.
 
+> [!WARNING]
+> In the **0.1.4 AppImage**, every Waydroid command fails on hosts whose Python GObject uses glib's `girepository-2.0` (seen on Arch with glib 2.90: `undefined symbol: g_once_init_leave_pointer` in the application log; the app shows "Engine Stopped" and cannot start the engine). Use the `.pkg.tar.zst`/`.deb` there; the next release fixes it. The 0.1.4 `.pkg.tar.zst` and `.deb` are not affected.
+
 AppImages need FUSE 2 (`fuse2` on Arch, `libfuse2t64` on Ubuntu 24.04). Without it, run `./ArchDroid_*.AppImage --appimage-extract-and-run`.
 
 > [!TIP]
-> ArchDroid clears the AppImage's own `PYTHONHOME` and `PYTHONPATH` when it calls host tools such as `/usr/bin/waydroid`, so the host's Python modules keep working.
+> ArchDroid starts host tools such as `/usr/bin/waydroid` without the AppImage's own paths (`LD_LIBRARY_PATH`, `GI_TYPELIB_PATH`, `PYTHONHOME`, `PATH`, ...), so they load the host's libraries and Python modules.
 
 ### Debian / Ubuntu (Tier 2 preview)
 
@@ -117,7 +120,9 @@ Ubuntu 24.04 has no `waydroid` package in its official repos. Add the [official 
 sudo apt install ./ArchDroid_*_amd64.deb
 ```
 
-### Fedora / openSUSE (Tier 2 preview)
+### Fedora / RHEL family / openSUSE (Tier 2 preview)
+
+On RHEL, AlmaLinux, and Rocky Linux, enable EPEL first (`sudo dnf install epel-release`): `webkit2gtk4.1` is only there. None of their repositories, EPEL included, offers `waydroid`; install it from a source you trust.
 
 The `.rpm` is not attached to releases yet. Build it from source (`npm ci && npm run tauri build`; the package lands in `src-tauri/target/release/bundle/rpm/`), then:
 ```bash
@@ -262,8 +267,8 @@ Full list of data locations: [docs/DATA-AND-UNINSTALL.md](docs/DATA-AND-UNINSTAL
 1. **One Android container per machine.** Waydroid uses a single global LXC container, so ArchDroid can't run several Android instances in parallel.
 2. **Wayland required.** There is no built-in X11 display server.
 3. **libhoudini depends on upstream.** It comes from an upstream Google Android TV image fetched by a pinned helper script. Games with kernel-level anti-cheat may not run in a container.
-4. **Distro coverage.** Full (Tier 1) live-verified support covers the Arch Linux family. Tier 2 distros are in preview: the full flow is live-tested with the `.deb` on Ubuntu 24.04 LTS and the `.rpm` on Fedora 44; on Debian 12 and openSUSE Tumbleweed only installing, the setup screen, and removing the package are (openSUSE has no official Waydroid package). The RHEL family is not live-tested.
-5. **Test coverage.** All main flows are live-tested in VMs (Arch, plus Ubuntu 24.04 and Fedora 44 for the core flow; see [`docs/P0-8.2-MATRIX-RESULTS.md`](docs/P0-8.2-MATRIX-RESULTS.md)). Not yet tested: real hardware across GPUs and desktops (GNOME/KDE/Hyprland, Intel/AMD/NVIDIA). If something fails on your system, attach a Diagnostic Bundle to your report.
+4. **Distro coverage.** Full (Tier 1) live-verified support covers the Arch Linux family. Tier 2 distros are in preview: the full flow is live-tested with the `.deb` on Ubuntu 24.04 LTS and the `.rpm` on Fedora 44; on Debian 12, openSUSE Tumbleweed, and AlmaLinux 10 only installing, the setup screen, and (Debian, openSUSE) removing the package are (openSUSE and the RHEL family have no official Waydroid package).
+5. **Test coverage.** All main flows are live-tested in VMs (Arch, plus Ubuntu 24.04 and Fedora 44 for the core flow; see [`docs/P0-8.2-MATRIX-RESULTS.md`](docs/P0-8.2-MATRIX-RESULTS.md)). Real hardware: one laptop so far (Intel Raptor Lake + NVIDIA RTX 4050 hybrid, Hyprland, Arch): the CI AppImage renders, starts the engine, launches an Android app, and stops the engine. Not yet tested: GNOME and KDE, and AMD GPUs. If something fails on your system, attach a Diagnostic Bundle to your report.
 6. **Add-on sources.** GApps (MindTheGapps) and libhoudini come from third-party upstream archives. ArchDroid pins each archive's SHA-256 and refuses any other file, but it cannot vouch for what those upstream builds contain.
 7. **Connectivity check.** The "online" check opens a TCP connection, sending no data, to `1.1.1.1:53` (then `8.8.8.8:53`). On networks that block public DNS, diagnostics can say "Offline" even though downloads still work. See [PRIVACY.md](PRIVACY.md).
 
