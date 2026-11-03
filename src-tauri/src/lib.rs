@@ -846,13 +846,7 @@ fi
 echo "[STEP] pkg"
 {install_snippet}echo "[STEP] download"
 echo "==> Initializing Waydroid (this will download ~1GB of data)..."
-if waydroid init; then
-    echo ""
-    echo "[SUCCESS] Waydroid initialized successfully!"
-else
-    echo "[ERROR] waydroid init failed. Check your network connection and try again."
-    exit 1
-fi
+{WAYDROID_INIT_SNIPPET}
 "#
     );
     stream_privileged_script(
@@ -864,6 +858,27 @@ fi
     .await
     .into_command_result()
 }
+
+/// Root script that runs `waydroid init` and fails unless Waydroid really
+/// was initialized.
+///
+/// Fedora's waydroid 1.6.3 ships without default OTA channels: `waydroid init`
+/// then logs "You must provide 'System OTA' and 'Vendor OTA' URLs" and exits 0,
+/// which ArchDroid reported as success. The consent dialog promises the
+/// official images, so the official channels are passed unless the
+/// distribution configured its own in channels.cfg, and success requires the
+/// config file that a completed init writes.
+const WAYDROID_INIT_SNIPPET: &str = r#"set -- init
+if ! grep -qsE '^[[:space:]]*system_channel[[:space:]]*=[[:space:]]*[^[:space:]]' /usr/share/waydroid-extra/channels.cfg; then
+    set -- init --system_channel https://ota.waydro.id/system --vendor_channel https://ota.waydro.id/vendor
+fi
+if waydroid "$@" && [ -f "${WAYDROID_CONFIG:-/var/lib/waydroid/waydroid.cfg}" ]; then
+    echo ""
+    echo "[SUCCESS] Waydroid initialized successfully!"
+else
+    echo "[ERROR] waydroid init did not initialize Waydroid. See the output above; a network problem or missing OTA channels are the usual causes."
+    exit 1
+fi"#;
 
 fn gapps_state() -> CommandResult {
     let marker = marker_file("gapps_installed");
@@ -1742,6 +1757,71 @@ mod tests {
 
     use super::*;
     use std::process::Command;
+
+    /// Run `WAYDROID_INIT_SNIPPET` with a fake `waydroid` that records its
+    /// arguments and writes the config only when `writes_cfg`.
+    fn run_init_snippet(writes_cfg: bool) -> (bool, String, String) {
+        let dir = std::env::temp_dir().join(format!(
+            "archdroid-init-{}-{writes_cfg}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let cfg = dir.join("waydroid.cfg");
+        let _ = std::fs::remove_file(&cfg);
+        let fake = dir.join("waydroid");
+        std::fs::write(
+            &fake,
+            format!(
+                "#!/bin/sh\necho \"$@\" > '{}/args'\n{}exit 0\n",
+                dir.display(),
+                if writes_cfg {
+                    format!("touch '{}'\n", cfg.display())
+                } else {
+                    "echo \"ERROR: You must provide 'System OTA' and 'Vendor OTA' URLs.\"\n".into()
+                }
+            ),
+        )
+        .unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let out = Command::new("bash")
+            .arg("-c")
+            .arg(WAYDROID_INIT_SNIPPET)
+            .env("PATH", format!("{}:/usr/bin:/bin", dir.display()))
+            .env("WAYDROID_CONFIG", &cfg)
+            .output()
+            .unwrap();
+        let args = std::fs::read_to_string(dir.join("args")).unwrap_or_default();
+        let _ = std::fs::remove_dir_all(&dir);
+        (
+            out.status.success(),
+            String::from_utf8_lossy(&out.stdout).into_owned(),
+            args,
+        )
+    }
+
+    #[test]
+    fn waydroid_init_that_exits_0_without_initializing_is_a_failure() {
+        // Seen on Fedora 44 (waydroid 1.6.3): exit 0, nothing initialized.
+        let (ok, stdout, _) = run_init_snippet(false);
+        assert!(!ok);
+        assert!(stdout.contains("[ERROR]"));
+        assert!(!stdout.contains("[SUCCESS]"));
+    }
+
+    #[test]
+    fn waydroid_init_succeeds_when_the_config_was_written() {
+        let (ok, stdout, args) = run_init_snippet(true);
+        assert!(ok, "{stdout}");
+        assert!(stdout.contains("[SUCCESS]"));
+        // Without a distribution channels.cfg the official channels are passed.
+        if !std::path::Path::new("/usr/share/waydroid-extra/channels.cfg").exists() {
+            assert_eq!(
+                args.trim(),
+                "init --system_channel https://ota.waydro.id/system --vendor_channel https://ota.waydro.id/vendor"
+            );
+        }
+    }
 
     #[test]
     fn apk_check_rejects_text_and_manifestless_zips() {
