@@ -72,7 +72,7 @@ fn current_uid() -> Option<u32> {
         .and_then(|status| parse_status_id(&status, "Uid:"))
         .or_else(|| {
             let id = trusted_program("id")?;
-            let output = Command::new(id)
+            let output = crate::hostenv::host_command(id)
                 .arg("-ru")
                 .env_clear()
                 .env("PATH", SAFE_PATH)
@@ -133,7 +133,7 @@ fn user_home(uid: u32) -> Option<PathBuf> {
     }
 
     let getent = trusted_program("getent")?;
-    let output = Command::new(getent)
+    let output = crate::hostenv::host_command(getent)
         .arg("passwd")
         .arg(uid.to_string())
         .env_clear()
