@@ -7,6 +7,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Fixed
+- AppImage: every Waydroid command failed on hosts with a new glib (seen on Arch with glib 2.90, Intel + NVIDIA, Hyprland): the AppImage passed its own `LD_LIBRARY_PATH`, `GI_TYPELIB_PATH`, `PATH`, `XDG_DATA_DIRS`, ... to host programs, so `/usr/bin/waydroid` loaded the bundled Ubuntu 22.04 glib and stopped with `undefined symbol: g_once_init_leave_pointer`. The app showed "Engine Stopped" and could not start, stop, or read Waydroid. Host programs are now started without the AppImage's paths; a test keeps every new host command on that path. The `.pkg.tar.zst` and `.deb` were not affected.
+- The setup screen gives the image size as ~1.2 GB, like the Initialize dialog (it said ~1 GB).
+
 ## [0.1.4] - 2026-11-03
 
 Hardening release: pinned add-on archives, failure logging, repository checks before root, and packages that install on Debian 12 and openSUSE. The AppImage is now built in CI on Ubuntu 22.04.

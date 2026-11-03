@@ -587,6 +587,9 @@ fn waydroid_unavailable_detail(pm: Option<platform::PackageManager>) -> String {
         Some(platform::PackageManager::Zypper) => format!(
             "{base} openSUSE has no official Waydroid package or binder module: install Waydroid from a community OBS repository you trust (see https://en.opensuse.org/Mobile:MoreGuides:Waydroid), then Re-check."
         ),
+        Some(platform::PackageManager::Dnf) => format!(
+            "{base} Fedora ships it in its own repositories; RHEL, AlmaLinux and Rocky Linux have it in neither the base nor the EPEL repositories. Install Waydroid from a source you trust (for example a Copr repository), then Re-check."
+        ),
         _ => format!("{base} Install Waydroid by other means, then Re-check."),
     }
 }
@@ -608,6 +611,7 @@ mod tests {
         use crate::platform::PackageManager::*;
         assert!(super::waydroid_unavailable_detail(Some(Apt)).contains("sudo apt update"));
         assert!(super::waydroid_unavailable_detail(Some(Zypper)).contains("community OBS"));
+        assert!(super::waydroid_unavailable_detail(Some(Dnf)).contains("EPEL"));
         assert!(super::waydroid_unavailable_detail(Some(Pacman)).contains("Re-check"));
     }
 

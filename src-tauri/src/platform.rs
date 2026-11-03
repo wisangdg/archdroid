@@ -167,9 +167,17 @@ impl PackageManager {
             // example by ArchDroid's own Recommends); `policy` prints the
             // candidate, which is what `apt-get install` would use.
             PackageManager::Apt => ("apt-cache", vec!["policy".into(), package]),
+            // `repoquery` exits 0 with no output when no repository has the
+            // package and 1 when the cache cannot be read (dnf4 and dnf5);
+            // `info` exits 1 for both.
             PackageManager::Dnf => (
                 "dnf",
-                vec!["-q".into(), "--cacheonly".into(), "info".into(), package],
+                vec![
+                    "-q".into(),
+                    "--cacheonly".into(),
+                    "repoquery".into(),
+                    package,
+                ],
             ),
             PackageManager::Zypper => (
                 "zypper",
@@ -186,8 +194,7 @@ impl PackageManager {
 
     /// Interpret the exit code and stdout of [`PackageManager::availability_query`].
     /// Only an answer the tool gives on purpose counts as unavailable; anything
-    /// unexpected is unknown. dnf also fails when its cache is not readable, so
-    /// it never reports unavailable.
+    /// unexpected is unknown.
     pub fn availability_from(&self, code: Option<i32>, stdout: &str) -> Availability {
         match (self, code) {
             (PackageManager::Apt, Some(0)) => {
@@ -203,6 +210,7 @@ impl PackageManager {
                     _ => Availability::Unavailable,
                 }
             }
+            (PackageManager::Dnf, Some(0)) if stdout.trim().is_empty() => Availability::Unavailable,
             (_, Some(0)) => Availability::Available,
             (PackageManager::Pacman, Some(1)) => Availability::Unavailable,
             // ZYPPER_EXIT_INF_CAP_NOT_FOUND
@@ -463,8 +471,13 @@ mod tests {
         assert_eq!(Zypper.availability_from(Some(104), ""), Unavailable);
         assert_eq!(Zypper.availability_from(Some(0), ""), Available);
         assert_eq!(Zypper.availability_from(Some(4), ""), Unknown);
+        // Seen on AlmaLinux 10 (dnf 4.20) and Fedora 44 (dnf5 5.4).
         assert_eq!(Dnf.availability_from(Some(1), ""), Unknown);
-        assert_eq!(Dnf.availability_from(Some(0), ""), Available);
+        assert_eq!(Dnf.availability_from(Some(0), ""), Unavailable);
+        assert_eq!(
+            Dnf.availability_from(Some(0), "waydroid-0:1.6.3-1.fc44.noarch\n"),
+            Available
+        );
         // apt-cache policy output as seen on Debian 12.
         let referenced = "waydroid:\n  Installed: (none)\n  Candidate: (none)\n  Version table:\n";
         assert_eq!(Apt.availability_from(Some(0), referenced), Unavailable);
