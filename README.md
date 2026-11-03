@@ -54,8 +54,8 @@ ArchDroid detects your package manager and installs the right dependency package
 |---|---|---|
 | **Arch Linux, CachyOS, EndeavourOS, Manjaro** | `.pkg.tar.zst` (release), local PKGBUILD, AppImage | **Tier 1 (Fully Supported & Live-Tested)**<br>Live-tested in an Arch Linux QEMU/KVM VM, including Phantom and drag-and-drop on Wayland and X11. See [docs/P0-8.2-MATRIX-RESULTS.md](docs/P0-8.2-MATRIX-RESULTS.md) and [docs/P0-9.1-PACKAGING-RESULTS.md](docs/P0-9.1-PACKAGING-RESULTS.md). |
 | **Ubuntu, Debian, Linux Mint, Pop!_OS** | `.deb` (release), AppImage | **Tier 2 (Best-Effort)**<br>`.deb` live-tested in an Ubuntu 24.04 LTS VM: install, Waydroid installed by the app through `apt` (after adding the official Waydroid repo), init via polkit, engine start/stop, APK drag-and-drop, CSP. Debian 12: the `.deb` is live-tested for install, setup screen (before and after adding the Waydroid repo), CSP, `apt remove`, and, on the generic kernel, init via polkit and engine start (12 apps). Mint and Pop!_OS are untested. |
-| **Fedora, RHEL, Alma, Rocky Linux** | `.rpm` (build from source), AppImage | **Tier 2 (Best-Effort)**<br>`.rpm` live-tested in a Fedora 44 VM: `dnf install` (pulls `waydroid` from the Fedora repos), init via polkit, engine start/stop, app list, APK drag-and-drop, CSP, `dnf remove arch-droid`. AlmaLinux 10.2 (RHEL family): the `.rpm` installs once EPEL is enabled (`webkit2gtk4.1` comes from EPEL), the setup screen reports that no repository offers `waydroid` and keeps Initialize disabled, CSP holds. Waydroid itself was not run there; RHEL and Rocky were not tested. |
-| **openSUSE Tumbleweed / Leap** | `.rpm` (build from source), AppImage | **Tier 2 (Best-Effort)**<br>openSUSE has no official Waydroid package and its default kernel has no binder, so Waydroid must come from a community repository. In a Tumbleweed VM the `.rpm` installs with `zypper`, the setup screen explains this and keeps Initialize disabled, CSP holds, and `zypper remove arch-droid` works. Waydroid itself was not run. |
+| **Fedora, RHEL, Alma, Rocky Linux** | `.rpm` (release since 0.1.5), AppImage | **Tier 2 (Best-Effort)**<br>`.rpm` live-tested in a Fedora 44 VM: `dnf install` (pulls `waydroid` from the Fedora repos), init via polkit, engine start/stop, app list, APK drag-and-drop, CSP, `dnf remove arch-droid`. AlmaLinux 10.2 (RHEL family): the `.rpm` installs once EPEL is enabled (`webkit2gtk4.1` comes from EPEL), the setup screen reports that no repository offers `waydroid` and keeps Initialize disabled, CSP holds. Waydroid itself was not run there; RHEL and Rocky were not tested. |
+| **openSUSE Tumbleweed / Leap** | `.rpm` (release since 0.1.5), AppImage | **Tier 2 (Best-Effort)**<br>openSUSE has no official Waydroid package and its default kernel has no binder, so Waydroid must come from a community repository. In a Tumbleweed VM the `.rpm` installs with `zypper`, the setup screen explains this and keeps Initialize disabled, CSP holds, and `zypper remove arch-droid` works. Waydroid itself was not run. |
 
 **Not supported:**
 
@@ -106,7 +106,7 @@ chmod +x ArchDroid_*.AppImage
 > The **0.1.3 AppImage** was built on Arch Linux and needs glibc 2.44, so it only starts on distributions with glibc 2.44 or newer, such as Arch. Elsewhere it stops with `version GLIBC_2.xx not found` (seen on Debian 12; Ubuntu 24.04 has 2.39). Use the `.deb`/`.rpm` there. From 0.1.4, AppImages are built on Ubuntu 22.04 by the [AppImage workflow](.github/workflows/appimage.yml) and need glibc 2.35 or newer; that build was checked to start on Debian 12 and Arch.
 
 > [!WARNING]
-> In the **0.1.4 AppImage**, every Waydroid command fails on hosts whose Python GObject uses glib's `girepository-2.0` (seen on Arch with glib 2.90: `undefined symbol: g_once_init_leave_pointer` in the application log; the app shows "Engine Stopped" and cannot start the engine). Use the `.pkg.tar.zst`/`.deb` there; the next release fixes it. The 0.1.4 `.pkg.tar.zst` and `.deb` are not affected.
+> In the **0.1.4 AppImage**, every Waydroid command fails on hosts whose Python GObject uses glib's `girepository-2.0` (seen on Arch with glib 2.90: `undefined symbol: g_once_init_leave_pointer` in the application log; the app shows "Engine Stopped" and cannot start the engine). Fixed in 0.1.5; the 0.1.4 `.pkg.tar.zst` and `.deb` were not affected.
 
 AppImages need FUSE 2 (`fuse2` on Arch, `libfuse2t64` on Ubuntu 24.04). Without it, run `./ArchDroid_*.AppImage --appimage-extract-and-run`.
 
@@ -124,7 +124,7 @@ sudo apt install ./ArchDroid_*_amd64.deb
 
 On RHEL, AlmaLinux, and Rocky Linux, enable EPEL first (`sudo dnf install epel-release`): `webkit2gtk4.1` is only there. None of their repositories, EPEL included, offers `waydroid`; install it from a source you trust.
 
-The `.rpm` is not attached to releases yet. Build it from source (`npm ci && npm run tauri build`; the package lands in `src-tauri/target/release/bundle/rpm/`), then:
+Download `ArchDroid-<version>-1.x86_64.rpm` from the [latest release](https://github.com/wisangdg/archdroid/releases/latest) (attached and signed in `SHA256SUMS` since 0.1.5), verify it as in [VERIFY-RELEASE.md](docs/VERIFY-RELEASE.md), then:
 ```bash
 sudo dnf install ./ArchDroid-*.x86_64.rpm
 ```

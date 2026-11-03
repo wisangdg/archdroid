@@ -1,6 +1,6 @@
 # Verifying ArchDroid release artifacts
 
-Every official ArchDroid release ships a `SHA256SUMS` checksum file and a detached GPG signature, `SHA256SUMS.asc`. Since 0.1.3, `SHA256SUMS` covers the `.pkg.tar.zst`, the `.AppImage`, and the `.deb`.
+Every official ArchDroid release ships a `SHA256SUMS` checksum file and a detached GPG signature, `SHA256SUMS.asc`. Since 0.1.3, `SHA256SUMS` covers the `.pkg.tar.zst`, the `.AppImage`, and the `.deb`; since 0.1.5 also the `.rpm`.
 
 ## Release signing key
 - **Owner:** `ArchDroid Release Signing Key <gwisang45@gmail.com>`

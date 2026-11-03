@@ -7,6 +7,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-11-03
+
+Fixes the 0.1.4 AppImage on current distributions, detects a missing Waydroid package on the RHEL family, attaches a signed `.rpm`, and gives the release key an expiry date. First release tested on real hardware.
+
+### Security
+- The release key now expires on 2028-11-02 (it had no expiry) and is published on keys.openpgp.org. Its fingerprint is unchanged: `EB02 90C2 138F A472 E18F 0203 18F4 7067 ACC5 BBF9`. Re-import `archdroid-release.asc` to see the new expiry.
+
+### Distribution
+- The `.rpm` is now attached to releases and covered by the signed `SHA256SUMS` (tested on Fedora 44, openSUSE Tumbleweed, and AlmaLinux 10 with EPEL).
+
 ### Tested
 - First run on real hardware (Intel + NVIDIA hybrid laptop, Hyprland, Arch): the CI AppImage starts the engine, opens an Android app, and stops the engine from the UI. AlmaLinux 10: the `.rpm` installs with EPEL. Debian 12 (generic kernel): init from the setup screen and engine start.
 

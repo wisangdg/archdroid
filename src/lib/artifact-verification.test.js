@@ -55,6 +55,13 @@ test("release AppImages come from the Ubuntu 22.04 workflow and pass the glibc f
     "utf8"
   );
   assert.match(gen, /check-glibc\.sh" "\$APPIMAGE_PKG" 2\.35/);
+  // Since 0.1.5 every attached package, the .rpm included, is in the signed
+  // SHA256SUMS; nothing is staged unsigned.
+  assert.match(
+    gen,
+    /sha256sum \$\(ls \*\.pkg\.tar\.zst \*\.AppImage \*\.deb \*\.rpm/
+  );
+  assert.ok(!gen.includes("PREVIEW_DIR"), "no unsigned preview staging");
 
   const check = path.join(repoRoot, "scripts/release/check-glibc.sh");
   assert.ok(
