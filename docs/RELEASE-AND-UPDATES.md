@@ -50,7 +50,7 @@ The rollback path was tested live (0.1.3 → 0.1.2 → 0.1.3 on Arch with GApps 
       Done: the fingerprint is in the release notes since
       [v0.1.1](https://github.com/wisangdg/archdroid/releases/tag/v0.1.1), and the key was uploaded to
       [keys.openpgp.org](https://keys.openpgp.org/search?q=EB0290C2138FA472E18F020318F47067ACC5BBF9) on 2026-11-03.
-      Open: keys.openpgp.org serves the user ID only after the owner confirms the verification e-mail (until then `gpg --recv-keys` skips the key); the GitHub profile.
+      The e-mail address was verified, so `gpg --recv-keys` imports the key with its user ID (checked 2026-11-03: the 0.1.5 release verifies with the keyserver copy alone). Open: the GitHub profile.
 
 ### Rotation
 1. Create a new key and sign the rotation announcement with the old key.

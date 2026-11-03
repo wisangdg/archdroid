@@ -6,9 +6,14 @@ Every official ArchDroid release ships a `SHA256SUMS` checksum file and a detach
 - **Owner:** `ArchDroid Release Signing Key <gwisang45@gmail.com>`
 - **Key ID:** `18F47067ACC5BBF9`
 - **Fingerprint:** `EB02 90C2 138F A472 E18F  0203 18F4 7067 ACC5 BBF9`
+- **Expires:** 2028-11-02 (the expiry is extended before then; re-import the key to see it)
 - **Key file:** [`packaging/release/archdroid-release.asc`](../packaging/release/archdroid-release.asc) (also attached to every release as `archdroid-release.asc`)
+- **Keyserver:** [keys.openpgp.org](https://keys.openpgp.org/search?q=EB0290C2138FA472E18F020318F47067ACC5BBF9), with the e-mail address verified
 
-Compare the fingerprint with a second source you trust (for example the release notes) before relying on it.
+Compare the fingerprint with a second source you trust before relying on it. The keyserver is independent of this repository, so you can import the key from there instead of from the release:
+```bash
+gpg --keyserver hkps://keys.openpgp.org --recv-keys EB0290C2138FA472E18F020318F47067ACC5BBF9
+```
 
 ---
 
