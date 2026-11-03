@@ -53,6 +53,37 @@ describe("useEngineStatus", () => {
     expect(result.current.isInitialized).toBe(true);
   });
 
+  it("reports a failing status command once instead of only showing stopped", async () => {
+    const broken = {
+      status: "error",
+      code: "exit",
+      message: "ImportError: undefined symbol: g_once_init_leave_pointer",
+    };
+    const { result, addToast } = setup([broken, broken, STOPPED, broken]);
+    const notResponding = () =>
+      addToast.mock.calls.filter(
+        ([t]) => t.title === "Waydroid Not Responding"
+      );
+    await waitFor(() => expect(notResponding()).toHaveLength(1));
+    expect(notResponding()[0][0].message).toMatch(/g_once_init_leave_pointer/);
+    expect(result.current.status).toBe("offline");
+    await act(() => result.current.checkStatus()); // same error again: no repeat
+    expect(notResponding()).toHaveLength(1);
+    await act(() => result.current.checkStatus()); // status readable again
+    await act(() => result.current.checkStatus()); // fails again: reported
+    expect(notResponding()).toHaveLength(2);
+  });
+
+  it("does not report a missing or uninitialized Waydroid as not responding", async () => {
+    const { addToast } = setup([
+      { status: "error", code: "not_initialized", message: "init first" },
+    ]);
+    await waitFor(() => expect(invoke).toHaveBeenCalled());
+    expect(addToast).not.toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Waydroid Not Responding" })
+    );
+  });
+
   it("surfaces a failed start and releases isOperating", async () => {
     const { result, addToast } = setup([STOPPED], {
       waydroid_start: { status: "error", message: "binder missing" },

@@ -14,6 +14,24 @@ export function useEngineStatus({ addToast, onOnline }) {
   const statusCheckInFlight = useRef(false);
   const onOnlineRef = useRef(onOnline);
   onOnlineRef.current = onOnline;
+  const addToastRef = useRef(addToast);
+  addToastRef.current = addToast;
+  // The last status error shown, so a poll every 5 s reports it once.
+  const lastStatusErrorRef = useRef(null);
+
+  // `waydroid status` failing is not the same as a stopped session: the 0.1.4
+  // AppImage showed "Engine Stopped" while every waydroid call failed with an
+  // ImportError. Say so once per distinct error.
+  const reportStatusError = useCallback((message) => {
+    const text = message || "unknown error";
+    if (lastStatusErrorRef.current === text) return;
+    lastStatusErrorRef.current = text;
+    addToastRef.current?.({
+      type: "warning",
+      title: "Waydroid Not Responding",
+      message: `ArchDroid could not read the Waydroid status, so the engine is shown as stopped: ${text} A Diagnostic Bundle (Settings) includes the full error.`,
+    });
+  }, []);
 
   const checkStatus = useCallback(async () => {
     if (statusCheckInFlight.current) return;
@@ -27,24 +45,29 @@ export function useEngineStatus({ addToast, onOnline }) {
       ) {
         setStatus("online");
         setIsInitialized(true);
+        lastStatusErrorRef.current = null;
         if (prevStatusRef.current !== "online") {
           onOnlineRef.current?.();
         }
       } else {
         setStatus("offline");
-        if (res.code === "not_found" || res.code === "not_initialized") {
-          setIsInitialized(false);
+        const missing =
+          res.code === "not_found" || res.code === "not_initialized";
+        setIsInitialized(!missing);
+        if (res.status === "error" && !missing) {
+          reportStatusError(res.message);
         } else {
-          setIsInitialized(true);
+          lastStatusErrorRef.current = null;
         }
       }
     } catch (e) {
       console.error("Status check failed:", e);
       setStatus("offline");
+      reportStatusError(String(e));
     } finally {
       statusCheckInFlight.current = false;
     }
-  }, []);
+  }, [reportStatusError]);
 
   const pollStatusUntil = useCallback(
     async (targetStatus, maxAttempts = 15, intervalMs = 400) => {

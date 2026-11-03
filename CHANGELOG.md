@@ -7,6 +7,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Fixed
+- When `waydroid status` itself fails (for example the 0.1.4 AppImage's `ImportError`, or a timeout), the app now says "Waydroid Not Responding" with Waydroid's error, once per distinct error, instead of only showing "Engine Stopped". A missing or uninitialized Waydroid keeps its own setup screen.
+
 ## [0.1.5] - 2026-11-03
 
 Fixes the 0.1.4 AppImage on current distributions, detects a missing Waydroid package on the RHEL family, attaches a signed `.rpm`, and gives the release key an expiry date. First release tested on real hardware.
