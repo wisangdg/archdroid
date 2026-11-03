@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import AppCard from "../components/apps/AppCard";
+import AppRow from "../components/apps/AppRow";
 import ResolutionPresets from "../components/settings/ResolutionPresets";
 import ContextMenu from "../components/apps/ContextMenu";
 import ConfirmModal from "../components/ui/ConfirmModal";
@@ -10,87 +10,58 @@ import fs from "node:fs";
 import path from "node:path";
 
 describe("Accessibility (P1-3)", () => {
-  describe("AppCard keyboard accessibility", () => {
+  describe("AppRow keyboard accessibility", () => {
     const mockApp = {
       name: "F-Droid",
       package: "org.fdroid.fdroid",
       icon: null,
     };
+    const renderRow = (props = {}) => {
+      const handlers = {
+        onSelect: vi.fn(),
+        onLaunch: vi.fn(),
+        onMove: vi.fn(),
+        onContextMenu: vi.fn(),
+      };
+      render(<AppRow app={mockApp} system={false} {...handlers} {...props} />);
+      return {
+        row: screen.getByRole("button", { name: /F-Droid/ }),
+        ...handlers,
+      };
+    };
 
-    it("has button role, tabIndex, and aria-label", () => {
-      render(
-        <AppCard
-          app={mockApp}
-          onLaunch={vi.fn()}
-          onUninstall={vi.fn()}
-          onContextMenu={vi.fn()}
-        />
-      );
-
-      const card = screen.getByRole("button", { name: "Launch F-Droid" });
-      expect(card).toBeTruthy();
-      expect(card.getAttribute("tabIndex")).toBe("0");
-      expect(card.getAttribute("aria-disabled")).toBe("false");
+    it("is a real button that marks the selected row", () => {
+      const { row } = renderRow({ selected: true });
+      expect(row.tagName).toBe("BUTTON");
+      expect(row.getAttribute("aria-current")).toBe("true");
     });
 
-    it("launches app when Enter or Space is pressed", () => {
-      const handleLaunch = vi.fn();
-      render(
-        <AppCard
-          app={mockApp}
-          onLaunch={handleLaunch}
-          onUninstall={vi.fn()}
-          onContextMenu={vi.fn()}
-        />
-      );
-
-      const card = screen.getByRole("button", { name: "Launch F-Droid" });
-
-      fireEvent.keyDown(card, { key: "Enter" });
-      expect(handleLaunch).toHaveBeenCalledWith("org.fdroid.fdroid");
-
-      fireEvent.keyDown(card, { key: " " });
-      expect(handleLaunch).toHaveBeenCalledTimes(2);
+    it("selects on click and launches on double-click", () => {
+      const { row, onSelect, onLaunch } = renderRow();
+      fireEvent.click(row);
+      expect(onSelect).toHaveBeenCalledWith("org.fdroid.fdroid");
+      fireEvent.doubleClick(row);
+      expect(onLaunch).toHaveBeenCalledWith("org.fdroid.fdroid");
     });
 
-    it("opens context menu when ContextMenu or Shift+F10 is pressed", () => {
-      const handleContextMenu = vi.fn();
-      render(
-        <AppCard
-          app={mockApp}
-          onLaunch={vi.fn()}
-          onUninstall={vi.fn()}
-          onContextMenu={handleContextMenu}
-        />
-      );
-
-      const card = screen.getByRole("button", { name: "Launch F-Droid" });
-
-      fireEvent.keyDown(card, { key: "ContextMenu" });
-      expect(handleContextMenu).toHaveBeenCalledTimes(1);
-
-      fireEvent.keyDown(card, { key: "F10", shiftKey: true });
-      expect(handleContextMenu).toHaveBeenCalledTimes(2);
+    it("moves through the list with the arrow keys", () => {
+      const { row, onMove } = renderRow();
+      fireEvent.keyDown(row, { key: "ArrowDown" });
+      fireEvent.keyDown(row, { key: "ArrowUp" });
+      expect(onMove.mock.calls).toEqual([[1], [-1]]);
     });
 
-    it("prevents keyboard action when disabled", () => {
-      const handleLaunch = vi.fn();
-      render(
-        <AppCard
-          app={mockApp}
-          onLaunch={handleLaunch}
-          onUninstall={vi.fn()}
-          onContextMenu={vi.fn()}
-          disabled={true}
-        />
-      );
+    it("opens the context menu with the menu key or Shift+F10", () => {
+      const { row, onContextMenu } = renderRow();
+      fireEvent.keyDown(row, { key: "ContextMenu" });
+      fireEvent.keyDown(row, { key: "F10", shiftKey: true });
+      expect(onContextMenu).toHaveBeenCalledTimes(2);
+    });
 
-      const card = screen.getByRole("button", { name: "Launch F-Droid" });
-      expect(card.getAttribute("tabIndex")).toBe("-1");
-      expect(card.getAttribute("aria-disabled")).toBe("true");
-
-      fireEvent.keyDown(card, { key: "Enter" });
-      expect(handleLaunch).not.toHaveBeenCalled();
+    it("does not launch while another task is running", () => {
+      const { row, onLaunch } = renderRow({ disabled: true });
+      fireEvent.doubleClick(row);
+      expect(onLaunch).not.toHaveBeenCalled();
     });
   });
 
@@ -265,7 +236,7 @@ describe("Accessibility (P1-3)", () => {
 
       expect(css).toContain("@media (prefers-reduced-motion: reduce)");
       expect(css).toContain(":focus-visible");
-      expect(css).toContain(".app-card:focus-visible");
+      expect(css).toContain(".app-row:focus-visible");
       expect(css).toContain(".preset-card:focus-visible");
     });
   });

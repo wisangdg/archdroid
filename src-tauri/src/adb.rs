@@ -60,7 +60,6 @@ pub fn shell(args: &[&str]) -> Result<String> {
 
 /// Explicit user action: resume a frozen container first, then freeze it again
 /// afterwards if this call was the one that resumed it.
-#[cfg(feature = "dev-commands")]
 pub fn shell_active(args: &[&str]) -> Result<String> {
     shell_mode(args, true)
 }

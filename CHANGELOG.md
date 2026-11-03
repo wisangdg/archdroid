@@ -7,6 +7,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Changed
+- **New "Control Center" layout.** A top bar replaces the sidebar: the four sections, the shared folder, and the engine state with Start/Restart/Stop, visible on every page. My Apps is now a list (icon, name, package, User/System tag) next to a detail panel for the selected app with Launch, Force stop, Keymapping, Copy package ID, and Uninstall, so no action hides behind a right-click any more. Double-click a row to launch, use Up/Down to move through the list, and the menu key or Shift+F10 for the context menu. Apps without an icon show their initials instead of an emoji.
+- Text on green (primary) buttons is now dark, for contrast; white on the accent green was below 4.5:1.
+
+### Added
+- **Force stop** for the selected app (`adb shell am force-stop`; needs adb and a running engine). `waydroid_kill_app` is now part of the release build, with its UI and tests.
+
 ### Fixed
 - When `waydroid status` itself fails (for example the 0.1.4 AppImage's `ImportError`, or a timeout), the app now says "Waydroid Not Responding" with Waydroid's error, once per distinct error, instead of only showing "Engine Stopped". A missing or uninitialized Waydroid keeps its own setup screen.
 

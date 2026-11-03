@@ -15,7 +15,6 @@ const DEV_COMMANDS = [
   "profile_get",
   "profile_apply",
   "waydroid_reboot",
-  "waydroid_kill_app",
   "waydroid_getprop_all",
   "waydroid_adb_cmd",
   "waydroid_version",

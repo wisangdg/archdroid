@@ -1393,7 +1393,8 @@ async fn waydroid_reboot(app: AppHandle) -> CommandResult {
     .into_command_result()
 }
 
-#[cfg(feature = "dev-commands")]
+/// Force-stop one Android app (the app detail's "Force stop"). Needs adb,
+/// because Waydroid only allows `shell` as root.
 #[tauri::command]
 async fn waydroid_kill_app(package: String) -> CommandResult {
     off_main_thread(move || {
@@ -1704,7 +1705,6 @@ pub fn run() {
             profile_apply,
             #[cfg(feature = "dev-commands")]
             waydroid_reboot,
-            #[cfg(feature = "dev-commands")]
             waydroid_kill_app,
             #[cfg(feature = "dev-commands")]
             waydroid_getprop_all,

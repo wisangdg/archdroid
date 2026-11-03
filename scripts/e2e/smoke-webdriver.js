@@ -4,7 +4,7 @@
  *
  * Runs headless Chromium via W3C WebDriver (ChromeDriver) against the built
  * frontend (`dist/`), testing critical UI workflows and matrices:
- *   1. Startup & Initialized app loading (online status badge, app grid, header)
+ *   1. Startup & Initialized app loading (engine status, Control Center app list)
  *   2. Tab navigation (My Apps, Keymapping, Install Tools, Settings)
  *   3. Setup wizard preflight blocking on uninitialized & failed diagnostics
  *   4. Drag-and-drop non-APK rejection toast
@@ -433,12 +433,30 @@ async function runSmokeTests() {
       'return document.querySelector(".brand-title")?.textContent === "ArchDroid";'
     );
     await driver.waitFor(
-      'return document.querySelector(".status-badge")?.classList?.contains("status-online") || document.querySelector(".status-pill-mini")?.textContent?.includes("Online");'
+      'return document.querySelector(".status-badge")?.classList?.contains("status-online");'
     );
     await driver.waitFor(
-      'return document.querySelectorAll(".app-card").length >= 2;'
+      'return document.querySelectorAll(".app-row").length >= 2;'
     );
-    console.log("  ✔ Startup, brand header, and app grid rendered successfully.");
+    console.log("  ✔ Startup, brand header, and app list rendered successfully.");
+
+    // --- Scenario 1b: Control Center selection and Force stop ---
+    console.log("[E2E] Scenario 1b: Testing app selection and Force stop...");
+    await driver.execute(
+      'document.querySelector(\'.app-row[data-package="com.android.gallery3d"]\').click();'
+    );
+    await driver.waitFor(
+      'return document.querySelector("#app-detail-title")?.textContent === "Gallery";'
+    );
+    await driver.execute(`
+      const btn = Array.from(document.querySelectorAll(".app-detail-actions button"))
+        .find(b => b.textContent.includes("Force stop"));
+      if (btn) btn.click();
+    `);
+    await driver.waitFor(
+      'return Array.from(document.querySelectorAll(".toast-title")).some(t => t.textContent === "App Stopped");'
+    );
+    console.log("  ✔ Selecting a row updates the detail panel; Force stop reports success.");
 
     // --- Scenario 2: Tab Navigation ---
     console.log("[E2E] Scenario 2: Testing tab navigation...");
@@ -484,7 +502,7 @@ async function runSmokeTests() {
       if (appsTab) appsTab.click();
     `);
     await driver.waitFor(
-      'return document.querySelectorAll(".app-card").length >= 2;'
+      'return document.querySelectorAll(".app-row").length >= 2;'
     );
     console.log("  ✔ Returned to My Apps tab.");
 

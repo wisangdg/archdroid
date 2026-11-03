@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
-import { Plus, Search, X, PackagePlus, AlertCircle } from "lucide-react";
-import AppCard from "./AppCard";
+import { Search, X, PackagePlus, AlertCircle } from "lucide-react";
+import AppRow from "./AppRow";
+import AppDetail from "./AppDetail";
 import ContextMenu from "./ContextMenu";
 
 const SYSTEM_PREFIXES = [
@@ -10,24 +11,39 @@ const SYSTEM_PREFIXES = [
   "com.google.android.inputmethod",
 ];
 
-function isSystemApp(pkg) {
+export function isSystemApp(pkg) {
   return SYSTEM_PREFIXES.some((prefix) => pkg.startsWith(prefix));
 }
 
+const FILTERS = [
+  { id: "all", label: "All" },
+  { id: "user", label: "User" },
+  { id: "system", label: "System" },
+];
+
+/**
+ * "Control Center" app library: a dense list on the left, the selected app
+ * with all of its actions on the right.
+ */
 export default function MyAppsView({
   apps,
+  engineOnline = false,
   onLaunchApp,
+  onForceStopApp,
+  onOpenKeymap,
   onInstallApk,
   onUninstallApp,
   onCopyPackage,
   busy = false,
 }) {
   const [searchQuery, setSearchQuery] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState("all"); // 'all' | 'user' | 'system'
-  const [contextMenu, setContextMenu] = useState(null); // { position: { x, y }, app }
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [selectedPackage, setSelectedPackage] = useState(null);
+  const [contextMenu, setContextMenu] = useState(null); // { position, app }
   const searchInputRef = useRef(null);
+  const listRef = useRef(null);
 
-  // Global hotkey: Ctrl+F to focus search
+  // Ctrl+F focuses the search field.
   useEffect(() => {
     const handleKeyDown = (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
@@ -35,33 +51,24 @@ export default function MyAppsView({
         searchInputRef.current?.focus();
       }
     };
-
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
   const counts = useMemo(() => {
-    let user = 0;
-    let system = 0;
-    apps.forEach((app) => {
-      if (isSystemApp(app.package)) system++;
-      else user++;
-    });
-    return { all: apps.length, user, system };
+    const system = apps.filter((app) => isSystemApp(app.package)).length;
+    return { all: apps.length, user: apps.length - system, system };
   }, [apps]);
 
   const filteredApps = useMemo(() => {
     let list = apps;
-
     if (categoryFilter === "user") {
       list = list.filter((app) => !isSystemApp(app.package));
     } else if (categoryFilter === "system") {
       list = list.filter((app) => isSystemApp(app.package));
     }
-
-    if (!searchQuery.trim()) return list;
-
     const query = searchQuery.toLowerCase().trim();
+    if (!query) return list;
     return list.filter(
       (app) =>
         app.name.toLowerCase().includes(query) ||
@@ -69,28 +76,60 @@ export default function MyAppsView({
     );
   }, [apps, categoryFilter, searchQuery]);
 
-  const handleOpenContextMenu = (e, app) => {
-    setContextMenu({
-      position: { x: e.clientX, y: e.clientY },
-      app,
-    });
+  // The selection follows the visible list: if the selected app is filtered
+  // out or uninstalled, the first visible app is shown instead.
+  const selectedApp =
+    filteredApps.find((app) => app.package === selectedPackage) ??
+    filteredApps[0] ??
+    null;
+
+  const moveSelection = (delta) => {
+    if (!selectedApp) return;
+    const index = filteredApps.indexOf(selectedApp);
+    const next = filteredApps[index + delta];
+    if (!next) return;
+    setSelectedPackage(next.package);
+    const row = [...(listRef.current?.querySelectorAll(".app-row") ?? [])].find(
+      (el) => el.dataset.package === next.package
+    );
+    row?.focus();
   };
 
-  const handleCloseContextMenu = () => {
-    setContextMenu(null);
-  };
+  const subtitle = `${apps.length} application${apps.length === 1 ? "" : "s"} ready to launch`;
 
   return (
-    <div className="apps-view-container">
-      {/* Search & Actions Bar */}
-      <div className="apps-toolbar">
+    <div className="control-center">
+      <section className="app-list-pane" aria-labelledby="app-list-title">
+        <div className="app-list-head">
+          <div className="app-list-titles">
+            <h2 id="app-list-title">
+              Applications <span className="app-list-count">{apps.length}</span>
+            </h2>
+            <p className="app-list-subtitle">{subtitle}</p>
+          </div>
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            onClick={onInstallApk}
+            disabled={busy}
+            title="Install an APK from your computer, or drop one on the window"
+          >
+            <PackagePlus size={16} aria-hidden="true" />
+            <span>Install APK</span>
+          </button>
+        </div>
+
         <div className="search-box">
-          <Search size={18} className="search-icon" />
+          <Search size={16} className="search-icon" aria-hidden="true" />
+          <label htmlFor="app-search" className="sr-only">
+            Search apps or packages
+          </label>
           <input
+            id="app-search"
             ref={searchInputRef}
             type="text"
             className="search-input"
-            placeholder="Search apps or packages... (Ctrl + F)"
+            placeholder="Search name or package (Ctrl + F)"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
@@ -99,155 +138,106 @@ export default function MyAppsView({
               type="button"
               className="search-clear-btn"
               onClick={() => setSearchQuery("")}
+              aria-label="Clear search"
               title="Clear search"
             >
-              <X size={15} />
+              <X size={15} aria-hidden="true" />
             </button>
           )}
         </div>
 
-        <button
-          className="btn btn-primary btn-install-top"
-          onClick={onInstallApk}
-          disabled={busy}
-          title="Install an APK from your computer"
-        >
-          <PackagePlus size={18} />
-          <span>Install APK</span>
-        </button>
-      </div>
-
-      {/* Category Filter Pills Bar */}
-      <div className="category-filter-bar">
-        <div className="category-pills">
-          <button
-            type="button"
-            className={`category-pill ${categoryFilter === "all" ? "active" : ""}`}
-            onClick={() => setCategoryFilter("all")}
-          >
-            <span>All Apps</span>
-            <span className="pill-count">{counts.all}</span>
-          </button>
-          <button
-            type="button"
-            className={`category-pill ${categoryFilter === "user" ? "active" : ""}`}
-            onClick={() => setCategoryFilter("user")}
-          >
-            <span>User Apps & Games</span>
-            <span className="pill-count">{counts.user}</span>
-          </button>
-          <button
-            type="button"
-            className={`category-pill ${categoryFilter === "system" ? "active" : ""}`}
-            onClick={() => setCategoryFilter("system")}
-          >
-            <span>System & GApps</span>
-            <span className="pill-count">{counts.system}</span>
-          </button>
+        <div className="segmented" role="group" aria-label="Filter apps">
+          {FILTERS.map((filter) => (
+            <button
+              key={filter.id}
+              type="button"
+              className={`segmented-btn ${categoryFilter === filter.id ? "active" : ""}`}
+              aria-pressed={categoryFilter === filter.id}
+              onClick={() => setCategoryFilter(filter.id)}
+            >
+              {filter.label}
+              <span className="segmented-count">{counts[filter.id]}</span>
+            </button>
+          ))}
         </div>
 
-        {searchQuery && (
-          <span className="search-results-summary">
-            Found {filteredApps.length} match
-            {filteredApps.length === 1 ? "" : "es"}
-          </span>
-        )}
-      </div>
-
-      {/* App Grid */}
-      <div className="app-grid">
-        {/* Dashed Quick Install Card */}
-        <div
-          className="app-card dashed"
-          onClick={busy ? undefined : onInstallApk}
-          role="button"
-          tabIndex={busy ? -1 : 0}
-          aria-disabled={busy}
-        >
-          <div className="dashed-icon-circle">
-            <Plus size={32} />
-          </div>
-          <div className="app-meta">
-            <span className="app-name highlight">Install APK</span>
-            <span className="app-package">Browse .apk file</span>
-          </div>
-        </div>
-
-        {/* Render App Cards */}
-        {filteredApps.map((app) => (
-          <AppCard
-            key={app.package || app.id || app.name}
-            app={app}
-            onLaunch={onLaunchApp}
-            onUninstall={onUninstallApp}
-            onContextMenu={handleOpenContextMenu}
-            disabled={busy}
-          />
-        ))}
-      </div>
-
-      {/* Empty State when Search Matches Nothing */}
-      {filteredApps.length === 0 && apps.length > 0 && (
-        <div className="empty-search-state">
-          <AlertCircle size={36} className="empty-icon" />
-          <h3>No applications found</h3>
-          <p>
-            No installed apps matched "{searchQuery}" in category "
-            {categoryFilter === "all"
-              ? "All Apps"
-              : categoryFilter === "user"
-                ? "User Apps"
-                : "System"}
-            ".
-          </p>
-          <div
-            style={{
-              display: "flex",
-              gap: "10px",
-              justifyContent: "center",
-              marginTop: "14px",
-            }}
-          >
-            {searchQuery && (
-              <button
-                className="btn btn-outline btn-sm"
-                onClick={() => setSearchQuery("")}
-              >
-                Clear Search
-              </button>
-            )}
-            {categoryFilter !== "all" && (
-              <button
-                className="btn btn-outline btn-sm"
-                onClick={() => setCategoryFilter("all")}
-              >
-                Show All Categories
-              </button>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Empty State when No Apps Installed At All */}
-      {apps.length === 0 && (
-        <div className="empty-library-banner">
-          <div className="empty-library-content">
-            <h3>No Android Apps Installed Yet</h3>
+        {apps.length === 0 ? (
+          <div className="empty-library-banner">
+            <h3>No Android apps installed yet</h3>
             <p>
-              Get started by clicking <strong>"Install APK"</strong> to sideload
-              an APK file, or head over to <strong>"Install Tools"</strong> to
-              set up Google Play Store.
+              Click <strong>Install APK</strong> or drop an <code>.apk</code> on
+              the window. To get Google Play, open{" "}
+              <strong>Install Tools</strong>.
             </p>
           </div>
-        </div>
-      )}
+        ) : filteredApps.length === 0 ? (
+          <div className="empty-search-state">
+            <AlertCircle size={30} className="empty-icon" aria-hidden="true" />
+            <h3>No applications found</h3>
+            <p>Nothing matches “{searchQuery}” in this filter.</p>
+            <div className="empty-search-actions">
+              {searchQuery && (
+                <button
+                  type="button"
+                  className="btn btn-outline btn-sm"
+                  onClick={() => setSearchQuery("")}
+                >
+                  Clear Search
+                </button>
+              )}
+              {categoryFilter !== "all" && (
+                <button
+                  type="button"
+                  className="btn btn-outline btn-sm"
+                  onClick={() => setCategoryFilter("all")}
+                >
+                  Show All Apps
+                </button>
+              )}
+            </div>
+          </div>
+        ) : (
+          <ul className="app-list" ref={listRef} aria-label="Installed apps">
+            {filteredApps.map((app) => (
+              <li key={app.package || app.name}>
+                <AppRow
+                  app={app}
+                  system={isSystemApp(app.package)}
+                  selected={app === selectedApp}
+                  onSelect={setSelectedPackage}
+                  onLaunch={onLaunchApp}
+                  onMove={moveSelection}
+                  onContextMenu={(e, target) =>
+                    setContextMenu({
+                      position: { x: e.clientX, y: e.clientY },
+                      app: target,
+                    })
+                  }
+                  disabled={busy}
+                />
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
 
-      {/* Custom Context Menu */}
+      <AppDetail
+        app={selectedApp}
+        system={selectedApp ? isSystemApp(selectedApp.package) : false}
+        engineOnline={engineOnline}
+        busy={busy}
+        onLaunch={onLaunchApp}
+        onForceStop={onForceStopApp}
+        onOpenKeymap={onOpenKeymap}
+        onCopyPackage={onCopyPackage}
+        onUninstall={onUninstallApp}
+      />
+
       {contextMenu && (
         <ContextMenu
           position={contextMenu.position}
           app={contextMenu.app}
-          onClose={handleCloseContextMenu}
+          onClose={() => setContextMenu(null)}
           onLaunch={onLaunchApp}
           onCopyPackage={onCopyPackage}
           onUninstall={onUninstallApp}

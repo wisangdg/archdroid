@@ -11,7 +11,7 @@ ArchDroid has **no** Tauri updater and never downloads or runs its own artifacts
    - Debian/Ubuntu: `sudo apt install ./ArchDroid_<version>_amd64.deb` (Tier 2; signed in `SHA256SUMS` since 0.1.3)
    - AppImage: replace the old file.
    - Fedora/RHEL family/openSUSE: `sudo dnf install ./ArchDroid-<version>-1.x86_64.rpm` or `sudo zypper install ./ArchDroid-<version>-1.x86_64.rpm` (Tier 2; signed in `SHA256SUMS` since 0.1.5)
-3. The sidebar shows the installed version (`ArchDroid v<version>`); compare it with <https://github.com/wisangdg/archdroid/releases>.
+3. The top bar shows the installed version (`v<version>` next to the ArchDroid name); compare it with <https://github.com/wisangdg/archdroid/releases>.
 4. Every release has release notes: changes, changes to privileged or security behaviour, and migration steps if any.
 
 ### Rolling back

@@ -2,8 +2,8 @@ import React, { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { PackagePlus } from "lucide-react";
 
-import Sidebar from "./components/Sidebar";
-import Header from "./components/Header";
+import TopBar from "./components/TopBar";
+import PageHeading from "./components/PageHeading";
 import MyAppsView from "./components/apps/MyAppsView";
 import InstallToolsView from "./components/tools/InstallToolsView";
 import KeymapView from "./components/keymap/KeymapView";
@@ -194,6 +194,33 @@ export default function App() {
     }
   };
 
+  const handleForceStopApp = async (pkg, name = pkg) => {
+    try {
+      const res = await invoke("waydroid_kill_app", { package: pkg });
+      if (res?.status === "success") {
+        addToast({
+          type: "success",
+          title: "App Stopped",
+          message: `${name} was force-stopped.`,
+          duration: 2500,
+        });
+      } else {
+        addToast({
+          type: "error",
+          title: "Force Stop Failed",
+          message: res?.message || `Could not stop ${name}.`,
+        });
+      }
+    } catch (e) {
+      console.error("Force stop error:", e);
+      addToast({
+        type: "error",
+        title: "Force Stop Failed",
+        message: String(e),
+      });
+    }
+  };
+
   const handleCopyPackage = async (pkg) => {
     try {
       await navigator.clipboard.writeText(pkg);
@@ -209,7 +236,8 @@ export default function App() {
   };
 
   const handleUninstallApp = (eOrPkg, pkgOrName, maybeName) => {
-    // Support invocation from both AppCard (e, pkg, name) and ContextMenu (pkg, name)
+    // Called as (e, pkg, name) from a click handler or (pkg, name) from the
+    // app detail panel and the context menu.
     let pkg = "";
     let name = "";
     if (typeof eOrPkg === "object" && eOrPkg.stopPropagation) {
@@ -592,29 +620,24 @@ export default function App() {
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      {/* Sidebar */}
-      <Sidebar
+      <TopBar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         appCount={apps.length}
         status={status}
+        isInitialized={isInitialized}
+        isOperating={isOperating}
+        busy={installing}
+        onStart={handleStart}
+        onStop={handleStop}
+        onRestart={handleRestart}
         onOpenSharedFolder={handleOpenSharedFolder}
       />
 
-      {/* Main Content Area */}
-      <main className="main-content">
-        <Header
-          activeTab={activeTab}
-          status={status}
-          isInitialized={isInitialized}
-          appCount={apps.length}
-          onStart={handleStart}
-          onStop={handleStop}
-          onRestart={handleRestart}
-          isOperating={isOperating}
-          busy={installing}
-        />
-
+      <main
+        className={`main-content ${isInitialized && activeTab === "home" ? "main-content-split" : ""}`}
+      >
+        <PageHeading activeTab={isInitialized ? activeTab : "setup"} />
         <div className="content-scrollable">
           {!isInitialized ? (
             <SetupWizard
@@ -626,7 +649,10 @@ export default function App() {
               {activeTab === "home" && (
                 <MyAppsView
                   apps={apps}
+                  engineOnline={status === "online"}
                   onLaunchApp={handleLaunchApp}
+                  onForceStopApp={handleForceStopApp}
+                  onOpenKeymap={() => setActiveTab("keymap")}
                   onInstallApk={handleInstallApk}
                   onUninstallApp={handleUninstallApp}
                   onCopyPackage={handleCopyPackage}

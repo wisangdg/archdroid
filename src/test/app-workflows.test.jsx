@@ -108,8 +108,12 @@ describe("App state & workflow integration", () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByText("F-Droid")).toBeTruthy();
-      expect(screen.getByText("Online")).toBeTruthy();
+      // Control Center: the row in the list and the selected app's heading.
+      expect(screen.getByRole("button", { name: /F-Droid/ })).toBeTruthy();
+      expect(
+        screen.getByRole("heading", { level: 2, name: "F-Droid" })
+      ).toBeTruthy();
+      expect(screen.getByText("Engine Running")).toBeTruthy();
     });
   });
 
@@ -131,7 +135,9 @@ describe("App state & workflow integration", () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
       render(<App />);
-      await waitFor(() => expect(screen.getByText("Online")).toBeTruthy());
+      await waitFor(() =>
+        expect(screen.getByText("Engine Running")).toBeTruthy()
+      );
       expect(screen.queryByText("Settings App")).toBeNull();
 
       // First boot after init: Waydroid writes the launcher entries later.
@@ -142,7 +148,9 @@ describe("App state & workflow integration", () => {
         vi.advanceTimersByTime(10000);
       });
       await waitFor(() =>
-        expect(screen.getByText("Settings App")).toBeTruthy()
+        expect(
+          screen.getByRole("heading", { level: 2, name: "Settings App" })
+        ).toBeTruthy()
       );
     } finally {
       vi.useRealTimers();
@@ -230,7 +238,7 @@ describe("App state & workflow integration", () => {
     render(<App />);
 
     // Switch to Install Tools view
-    const toolsTab = screen.getByText("Install Tools");
+    const toolsTab = screen.getByRole("button", { name: "Install Tools" });
     fireEvent.click(toolsTab);
 
     await waitFor(() => {
@@ -311,7 +319,7 @@ describe("App state & workflow integration", () => {
 
     render(<App />);
 
-    const toolsTab = screen.getByText("Install Tools");
+    const toolsTab = screen.getByRole("button", { name: "Install Tools" });
     fireEvent.click(toolsTab);
 
     await waitFor(() => {
@@ -372,7 +380,7 @@ describe("App state & workflow integration", () => {
 
     render(<App />);
 
-    const toolsTab = screen.getByText("Install Tools");
+    const toolsTab = screen.getByRole("button", { name: "Install Tools" });
     fireEvent.click(toolsTab);
 
     await waitFor(() => {
@@ -423,7 +431,7 @@ describe("App state & workflow integration", () => {
 
     render(<App />);
 
-    fireEvent.click(screen.getByText("Install Tools"));
+    fireEvent.click(screen.getByRole("button", { name: "Install Tools" }));
 
     await waitFor(() => {
       expect(screen.getByText("Install GApps")).toBeTruthy();
@@ -490,7 +498,7 @@ describe("App state & workflow integration", () => {
 
     render(<App />);
 
-    fireEvent.click(screen.getByText("Settings"));
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
 
     await waitFor(() => {
       expect(screen.getByText("Factory Reset (Wipe All Data)")).toBeTruthy();
@@ -541,7 +549,7 @@ describe("App state & workflow integration", () => {
 
     render(<App />);
 
-    fireEvent.click(screen.getByText("Install Tools"));
+    fireEvent.click(screen.getByRole("button", { name: "Install Tools" }));
 
     await waitFor(() => {
       expect(screen.getByText("Install GApps")).toBeTruthy();
@@ -560,5 +568,43 @@ describe("App state & workflow integration", () => {
         screen.getByText("Another privileged operation is currently in flight.")
       ).toBeTruthy();
     });
+  });
+
+  it("Force stop in the app detail stops the selected app", async () => {
+    let killReply = { status: "success" };
+    invoke.mockImplementation((cmd) => {
+      if (cmd === "waydroid_status") {
+        return Promise.resolve({
+          status: "success",
+          data: "Session: RUNNING\nContainer: RUNNING\n",
+        });
+      }
+      if (cmd === "get_waydroid_apps") {
+        return Promise.resolve([
+          { name: "F-Droid", package: "org.fdroid.fdroid", icon: null },
+        ]);
+      }
+      if (cmd === "waydroid_kill_app") return Promise.resolve(killReply);
+      if (cmd === "waydroid_prop_get")
+        return Promise.resolve({ status: "success", data: "false" });
+      return Promise.resolve({ status: "not_installed" });
+    });
+
+    render(<App />);
+    const forceStop = await screen.findByRole("button", { name: "Force stop" });
+    await waitFor(() => expect(forceStop.disabled).toBe(false));
+
+    fireEvent.click(forceStop);
+    await waitFor(() => expect(screen.getByText("App Stopped")).toBeTruthy());
+    expect(invoke).toHaveBeenCalledWith("waydroid_kill_app", {
+      package: "org.fdroid.fdroid",
+    });
+
+    killReply = { status: "error", message: "adb is not installed" };
+    fireEvent.click(forceStop);
+    await waitFor(() =>
+      expect(screen.getByText("Force Stop Failed")).toBeTruthy()
+    );
+    expect(screen.getByText("adb is not installed")).toBeTruthy();
   });
 });
