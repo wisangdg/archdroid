@@ -8,7 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 ## [Unreleased]
 
 ### Tested
-- First run on real hardware (Intel + NVIDIA hybrid laptop, Hyprland, Arch): the CI AppImage starts the engine, opens an Android app, and stops the engine from the UI. AlmaLinux 10: the `.rpm` installs with EPEL.
+- First run on real hardware (Intel + NVIDIA hybrid laptop, Hyprland, Arch): the CI AppImage starts the engine, opens an Android app, and stops the engine from the UI. AlmaLinux 10: the `.rpm` installs with EPEL. Debian 12 (generic kernel): init from the setup screen and engine start.
 
 ### Fixed
 - AppImage: every Waydroid command failed on hosts with a new glib (seen on Arch with glib 2.90, Intel + NVIDIA, Hyprland): the AppImage passed its own `LD_LIBRARY_PATH`, `GI_TYPELIB_PATH`, `PATH`, `XDG_DATA_DIRS`, ... to host programs, so `/usr/bin/waydroid` loaded the bundled Ubuntu 22.04 glib and stopped with `undefined symbol: g_once_init_leave_pointer`. The app showed "Engine Stopped" and could not start, stop, or read Waydroid. Host programs are now started without the AppImage's paths; a test keeps every new host command on that path. The `.pkg.tar.zst` and `.deb` were not affected.
