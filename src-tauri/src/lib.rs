@@ -23,6 +23,7 @@ mod platform;
 mod preflight;
 mod scripts;
 mod stream;
+mod touchmode;
 mod waydroid;
 
 use diagnostics::*;
@@ -1050,6 +1051,47 @@ async fn install_multitouch(app: AppHandle) -> CommandResult {
     )
 }
 
+/// Touch mode: left clicks over Waydroid windows become finger touches. The
+/// status is cheap (no root, no container), so the UI can poll it.
+#[tauri::command]
+async fn touch_mode_status() -> touchmode::TouchModeStatus {
+    tauri::async_runtime::spawn_blocking(touchmode::status)
+        .await
+        .unwrap_or_else(|_| touchmode::status())
+}
+
+#[tauri::command]
+async fn touch_mode_set(enabled: bool) -> CommandResult {
+    // The UI re-reads `touch_mode_status` afterwards, so success says nothing.
+    off_main_thread(move || match touchmode::set_enabled(enabled) {
+        Ok(_) => CommandResult::success(),
+        Err(message) => AppError::command_failed(message).into(),
+    })
+    .await
+}
+
+/// Installs the udev rule for installs that did not ship it (AppImage,
+/// source builds). Packages install it under `/usr/lib/udev/rules.d`.
+#[tauri::command]
+async fn install_touch_mode_access(app: AppHandle) -> CommandResult {
+    if has_elevation_tool().is_none() {
+        return AppError::elevation_denied(
+            "No root elevation tool (pkexec or sudo) found on host. Cannot perform administrative operations.",
+        )
+        .into();
+    }
+    stream_privileged_script(
+        app,
+        touchmode::install_rule_script(),
+        Completion::None,
+        waydroid::TIMEOUT_NORMAL,
+    )
+    .await
+    .into_command_result_with_message(
+        "Touch mode access granted. If touch mode still cannot start, log out and back in once.",
+    )
+}
+
 /// One dashboard object, assembled from `waydroid status` plus the cheapest
 /// probes. Values that need a running container degrade instead of failing:
 /// this is a read-only overview, not an action.
@@ -1673,6 +1715,12 @@ fn points_into_bundle(value: &str, appdir: Option<&str>) -> bool {
 pub fn run() {
     sanitize_appimage_env();
     tauri::Builder::default()
+        .setup(|_| {
+            // Off the main thread: restoring grabs input devices and must not
+            // delay the first window.
+            thread::spawn(touchmode::restore);
+            Ok(())
+        })
         .plugin(tauri_plugin_dialog::init())
         // Defaults already log to stdout and `<app log dir>/<app name>.log`
         // (40 KB, keep-one rotation); Info keeps chatty deps out of the trace.
@@ -1731,6 +1779,9 @@ pub fn run() {
             install_gapps,
             install_houdini,
             install_multitouch,
+            touch_mode_status,
+            touch_mode_set,
+            install_touch_mode_access,
             install_phantom,
             run_phantom,
             check_host_diagnostics,

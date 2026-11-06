@@ -1,0 +1,4 @@
+# ArchDroid touch mode: lets the logged-in desktop user turn mouse clicks over
+# Waydroid windows into touches. Keyboards are deliberately not included.
+KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinput"
+SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_MOUSE}=="1", ENV{ID_INPUT_KEYBOARD}!="1", TAG+="uaccess"

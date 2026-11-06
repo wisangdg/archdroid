@@ -3147,3 +3147,30 @@ body {
     scroll-behavior: auto !important;
   }
 }
+
+/* Touch mode panel (Keymapping view) */
+.touch-mode-panel {
+  padding: 6px;
+}
+
+.touch-mode-panel .config-toggle-item {
+  background: transparent;
+  border: none;
+}
+
+.touch-mode-info h4 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.touch-mode-hint {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.touch-mode-error {
+  color: var(--warning-primary);
+}

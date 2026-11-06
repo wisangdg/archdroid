@@ -22,6 +22,12 @@ Operasi administratif sistem (seperti instalasi paket distro, inisialisasi `/var
 4. **Verifikasi Hash Dependensi Pihak Ketiga**:
    Skrip otomasi pendukung (seperti `waydroid_script`) mengunci seluruh paket dependensi Python menggunakan hash SHA-256 (`--require-hashes --only-binary=:all:`).
 
+### Touch mode (akses perangkat input)
+- **Apa yang diberikan**: aturan udev `70-archdroid-touch.rules` memberi user yang sedang login (tag `uaccess`, pola yang sama dengan `60-steam-input.rules` milik Steam) akses ke `/dev/uinput` dan ke node `event*` milik **mouse**. Perangkat yang ditandai keyboard (`ID_INPUT_KEYBOARD=1`) sengaja dikecualikan, jadi touch mode tidak pernah bisa membaca ketikan.
+- **Konsekuensi**: proses apa pun milik user yang login dapat membuat perangkat input virtual dan membaca gerakan mouse. Itu setara dengan yang diberikan Steam Input. Hapus file aturan dan jalankan `udevadm control --reload-rules` untuk mencabutnya.
+- **Saat aktif**: ArchDroid meng-*grab* mouse fisik dan meneruskannya lewat mouse virtual. Jika ArchDroid berhenti atau crash, file descriptor tertutup dan kernel melepas grab, sehingga mouse kembali normal.
+- **Tanpa root saat berjalan**: touch mode tidak memakai root. Root hanya dipakai sekali oleh tombol "Enable access" pada instalasi yang tidak membawa aturan tersebut.
+
 ---
 
 ## 2. Versi yang Didukung

@@ -237,6 +237,10 @@ Catatan:
 
 Catatan penting: CachyDroid tidak memiliki surface render Waydroid, jadi injeksi input harus eksplisit. **Phantom** sudah dipakai lewat `install_phantom`/`run_phantom` — backend tinggal menyediakan model mapping + injeksi dasar.
 
+- [x] **P1 M — Touch mode: klik mouse jadi sentuhan jari** (`src/touchmode.rs`, command `touch_mode_status`/`touch_mode_set`/`install_touch_mode_access`)
+  Waydroid meneruskan mouse sebagai `TOOL_TYPE_MOUSE`; WebView (mis. pemilih tanggal EA di PvZ2) mengabaikannya, dan `persist.waydroid.fake_touch` hanya mengganti *source*, bukan tool type. Touch mode meng-grab mouse fisik, meneruskannya lewat mouse virtual, dan mengubah klik kiri di atas jendela `waydroid.*`/`Waydroid` menjadi sentuhan di touchscreen virtual (jalur `wl_touch` Waydroid → jari asli). Selama jari turun kursor tidak digerakkan, karena event hover dari mouse membuat Android membatalkan gesture sentuh; saat jari diangkat kursor dipindah ke titik akhir. Posisi kursor/jendela dari IPC Hyprland (compositor lain: `supported=false`, pesan jelas). Akses: aturan udev `uaccess` untuk `/dev/uinput` + mouse (bukan keyboard), dibawa paket; tombol "Enable access" untuk instalasi lain.
+  *DoD:* mesin status murni (`Bridge::on_frame`) + parser Hyprland + pemetaan koordinat punya unit test; dua test live `#[ignore]` (`live_bridge`, `live_synthetic_click`) membuka dan menggeser pemilih tanggal PvZ2 lewat jembatan pada Hyprland 0.56. **Belum**: touchpad, multi-monitor dengan pemetaan touchscreen selain monitor fokus, rotasi output.
+
 - [ ] **P1 M — Primitive input**
   `input_tap(x,y)`, `input_swipe(x1,y1,x2,y2,ms)`, `input_text(s)`, `input_key(keycode)` → `waydroid shell input`.
   *DoD:* test bahwa argv tidak bisa di-inject lewat `s`/angka.

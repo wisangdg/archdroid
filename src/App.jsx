@@ -14,6 +14,7 @@ import ToastContainer from "./components/ui/ToastContainer";
 import ConfirmModal from "./components/ui/ConfirmModal";
 import { useToasts } from "./hooks/useToasts";
 import { useStreamingTask } from "./hooks/useStreamingTask";
+import { useTouchMode } from "./hooks/useTouchMode";
 import { useEngineStatus } from "./hooks/useEngineStatus";
 import { useDeviceConfig } from "./hooks/useDeviceConfig";
 import { useApkInstall } from "./hooks/useApkInstall";
@@ -463,6 +464,48 @@ export default function App() {
     }
   };
 
+  const touchMode = useTouchMode({ addToast });
+
+  const executeEnableTouchAccess = async () => {
+    try {
+      const result = await runStreamingTask("install_touch_mode_access", {
+        taskType: "touch-access",
+        title: "Granting Touch Mode Access",
+      });
+      if (result?.status === "success") {
+        await touchMode.refresh();
+      }
+    } catch (e) {
+      console.error("Touch mode access error:", e);
+      addToast({
+        type: "error",
+        title: "Touch Mode Error",
+        message: String(e),
+      });
+    }
+  };
+
+  const handleEnableTouchAccess = () => {
+    setConfirmModal({
+      isOpen: true,
+      title: "Enable Touch Mode Access (Root Required)",
+      description:
+        "This installs a udev rule at /etc/udev/rules.d/70-archdroid-touch.rules.\n\n" +
+        "• Grants: the logged-in desktop user may create virtual input devices (/dev/uinput) and read mice. Keyboards are never included.\n" +
+        "• Why: touch mode turns your mouse clicks over Android windows into finger touches.\n" +
+        "• Privilege: Requires Administrator (Root) access via Polkit or sudo\n" +
+        '• Undo: delete that file and run "udevadm control --reload-rules".\n\n' +
+        "Do you want to proceed?",
+      confirmText: "Proceed & Authorize Root",
+      confirmVariant: "primary",
+      iconType: "shield",
+      onConfirm: async () => {
+        setConfirmModal((prev) => ({ ...prev, isOpen: false }));
+        await executeEnableTouchAccess();
+      },
+    });
+  };
+
   const handleInstallPhantom = async () => {
     try {
       await runStreamingTask("install_phantom", {
@@ -665,6 +708,9 @@ export default function App() {
                   onRunPhantom={handleRunPhantom}
                   onInstallPhantom={handleInstallPhantom}
                   installing={installing}
+                  touchMode={touchMode}
+                  onToggleTouchMode={touchMode.setEnabled}
+                  onEnableTouchAccess={handleEnableTouchAccess}
                 />
               )}
 

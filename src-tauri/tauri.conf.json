@@ -55,7 +55,10 @@
           "git"
         ],
         "section": "utils",
-        "priority": "optional"
+        "priority": "optional",
+        "files": {
+          "/usr/lib/udev/rules.d/70-archdroid-touch.rules": "../packaging/udev/70-archdroid-touch.rules"
+        }
       },
       "rpm": {
         "recommends": [
@@ -64,7 +67,10 @@
           "lzip",
           "git"
         ],
-        "release": "1"
+        "release": "1",
+        "files": {
+          "/usr/lib/udev/rules.d/70-archdroid-touch.rules": "../packaging/udev/70-archdroid-touch.rules"
+        }
       }
     },
     "android": {
