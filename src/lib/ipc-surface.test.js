@@ -63,7 +63,8 @@ function handlerCommands() {
       attributes += line;
       continue;
     }
-    const entry = line.match(/^([a-z_][a-z0-9_]*),?$/);
+    // `logs::app_log_read` registers as `app_log_read`.
+    const entry = line.match(/^(?:[a-z_][a-z0-9_]*::)*([a-z_][a-z0-9_]*),?$/);
     if (entry) {
       (attributes.includes('feature = "dev-commands"')
         ? gated
