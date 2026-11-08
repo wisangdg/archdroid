@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { sessionRunning } from "../lib/waydroidStatus";
 
 /**
  * Waydroid session state: polling, and the Start/Stop/Restart handlers that
@@ -38,11 +39,7 @@ export function useEngineStatus({ addToast, onOnline }) {
     statusCheckInFlight.current = true;
     try {
       const res = await invoke("waydroid_status");
-      if (
-        res.status === "success" &&
-        res.data &&
-        res.data.includes("RUNNING")
-      ) {
+      if (sessionRunning(res)) {
         setStatus("online");
         setIsInitialized(true);
         lastStatusErrorRef.current = null;
@@ -74,9 +71,7 @@ export function useEngineStatus({ addToast, onOnline }) {
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
         await new Promise((resolve) => setTimeout(resolve, intervalMs));
         const res = await invoke("waydroid_status");
-        const isRunning =
-          res.status === "success" && res.data && res.data.includes("RUNNING");
-        const current = isRunning ? "online" : "offline";
+        const current = sessionRunning(res) ? "online" : "offline";
         if (current === targetStatus) {
           await checkStatus();
           return true;
