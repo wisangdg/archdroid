@@ -65,3 +65,18 @@ jobs:
       - name: Bundle build check
         run: |
           npm run build:bundles -- --bundles deb
+
+      # The release binary itself, in WebKitGTK: starts, answers IPC, and
+      # enforces the production CSP (test:e2e above uses Chromium and a fake
+      # IPC layer). Without Waydroid it shows the setup screen.
+      - name: Real binary smoke
+        run: |
+          sudo apt-get install -y webkit2gtk-driver xvfb
+          export TAURI_WEBVIEW_AUTOMATION=true
+          xvfb-run -a bash -c '
+            WebKitWebDriver --port=4444 &
+            driver=$!
+            trap "kill $driver" EXIT
+            python3 scripts/e2e/real-binary-smoke.py src-tauri/target/release/archdroid
+          '
+
