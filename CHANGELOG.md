@@ -16,6 +16,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - **Force stop** for the selected app (`adb shell am force-stop`; needs adb and a running engine). `waydroid_kill_app` is now part of the release build, with its UI and tests.
 
 ### Fixed
+- Retry after a failed **Enable access** (touch mode) now asks for consent again; it did nothing.
+- The Install Tools multitouch card is read on start (also with the engine stopped) and after every finished task, instead of only when the session came online.
+- Settings reads the Multi-Window, Invert Colors, and display properties again when the session comes online. Before, they were read once at start, usually while the engine was stopped, and showed defaults. The two toggles are disabled while the engine is stopped, because Waydroid cannot change properties then.
 - When `waydroid status` itself fails (for example the 0.1.4 AppImage's `ImportError`, or a timeout), the app now says "Waydroid Not Responding" with Waydroid's error, once per distinct error, instead of only showing "Engine Stopped". A missing or uninitialized Waydroid keeps its own setup screen.
 
 ## [0.1.5] - 2026-11-03

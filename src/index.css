@@ -1168,6 +1168,12 @@ body {
   color: var(--text-muted);
 }
 
+.config-offline-note {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
 .config-toggle-list {
   display: flex;
   flex-direction: column;

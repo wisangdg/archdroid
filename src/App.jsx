@@ -42,12 +42,15 @@ export default function App() {
       checkGappsStatus();
       checkHoudiniStatus();
       checkMultitouchStatus();
+      // Waydroid properties can only be read while the session runs.
+      loadConfigs();
     },
   });
   const {
     multiWindow,
     invertColors,
     displayRes,
+    loadConfigs,
     toggleMultiWindow,
     toggleInvertColors,
     handleApplyResolution,
@@ -71,6 +74,7 @@ export default function App() {
     onTaskSuccess: () => {
       checkGappsStatus();
       checkHoudiniStatus();
+      checkMultitouchStatus();
       loadApps();
     },
   });
@@ -108,6 +112,8 @@ export default function App() {
     loadApps();
     checkGappsStatus();
     checkHoudiniStatus();
+    // Answers from the overlay file and marker even while the engine is off.
+    checkMultitouchStatus();
   }, []);
 
   const checkGappsStatus = async () => {
@@ -622,9 +628,14 @@ export default function App() {
     // the root scope may have changed since the first attempt, so a retry must
     // never call an installer command directly.
     if (
-      ["gapps", "houdini", "multitouch", "init", "wipe"].includes(
-        terminalTaskType
-      )
+      [
+        "gapps",
+        "houdini",
+        "multitouch",
+        "touch-access",
+        "init",
+        "wipe",
+      ].includes(terminalTaskType)
     ) {
       setTerminalOpen(false);
     }
@@ -638,6 +649,9 @@ export default function App() {
         break;
       case "multitouch":
         handleInstallMultitouch();
+        break;
+      case "touch-access":
+        handleEnableTouchAccess();
         break;
       case "init":
         handleInitWaydroid();

@@ -162,6 +162,7 @@ export function useDeviceConfig({ addToast }) {
     multiWindow,
     invertColors,
     displayRes,
+    loadConfigs,
     toggleMultiWindow,
     toggleInvertColors,
     handleApplyResolution,

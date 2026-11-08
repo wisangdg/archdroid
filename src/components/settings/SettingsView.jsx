@@ -77,6 +77,11 @@ export default function SettingsView({
           </div>
         </div>
 
+        {!engineRunning && (
+          <p className="config-offline-note" role="note">
+            Start the engine to read and change these settings.
+          </p>
+        )}
         <div className="config-toggle-list">
           {/* Multi Window Mode */}
           <div className="config-toggle-item">
@@ -92,7 +97,7 @@ export default function SettingsView({
               type="button"
               className={`toggle-switch ${multiWindow ? "active" : ""}`}
               onClick={onToggleMultiWindow}
-              disabled={busy}
+              disabled={busy || !engineRunning}
               aria-label="Toggle Multi-Window Mode"
             >
               <div className="toggle-switch-handle">
@@ -114,7 +119,7 @@ export default function SettingsView({
               type="button"
               className={`toggle-switch ${invertColors ? "active" : ""}`}
               onClick={onToggleInvertColors}
-              disabled={busy}
+              disabled={busy || !engineRunning}
               aria-label="Toggle Invert Colors"
             >
               <div className="toggle-switch-handle">
