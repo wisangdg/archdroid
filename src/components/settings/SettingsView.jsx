@@ -164,7 +164,8 @@ export default function SettingsView({
           </div>
           <span className="prop-form-hint">
             Tip: Common keys include <code>persist.waydroid.width</code>,{" "}
-            <code>persist.waydroid.height</code>, <code>ro.sf.lcd_density</code>
+            <code>persist.waydroid.height</code>,{" "}
+            <code>persist.waydroid.multi_windows</code>
           </span>
         </form>
       </div>

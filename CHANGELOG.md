@@ -19,6 +19,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 ### Fixed
 - On a first run the window no longer shows the empty app library for a moment before the setup screen; it says it is reading the Waydroid status until the first reply.
 - The Initialize stepper no longer has an "Initialize" stage that never lit up: `waydroid init` downloads and configures in one step, now shown as "Download & Initialize".
+- **Display presets could never set the DPI.** They wrote `ro.sf.lcd_density` with `waydroid prop set`, but Android sets that property at boot and Waydroid rejects a runtime write (seen: "Sending reply failed", value unchanged), so every preset with a DPI ended in "Display Config Failed". The DPI is now set with `adb shell wm density`, which applies at once and survives a session restart (checked on Waydroid 1.6.3 / LineageOS 20), and is read back before success is shown. Needs adb (android-tools).
 - **View Logs** (Settings) reads the Waydroid log without a root prompt when the file is readable (Waydroid creates it with mode `0644`); root is only requested when the user may not read it.
 - Retry after a failed **Enable access** (touch mode) now asks for consent again; it did nothing.
 - The Install Tools multitouch card is read on start (also with the engine stopped) and after every finished task, instead of only when the session came online.

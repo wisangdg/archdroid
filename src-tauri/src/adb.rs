@@ -252,6 +252,63 @@ pub fn booted() -> bool {
     shell(&["getprop", "sys.boot_completed"]).is_ok_and(|output| output.trim() == "1")
 }
 
+/// Lowest and highest density the Display presets may set. Android's own
+/// buckets run from ldpi (120) to xxxhdpi (640).
+pub const DENSITY_RANGE: std::ops::RangeInclusive<u32> = 120..=640;
+
+/// The density Android uses: `wm density` prints the physical density and,
+/// once set, an override, which wins.
+pub fn parse_wm_density(output: &str) -> Option<u32> {
+    let mut physical = None;
+    let mut override_density = None;
+    for line in output.lines() {
+        let Some((label, value)) = line.split_once(':') else {
+            continue;
+        };
+        let Ok(value) = value.trim().parse::<u32>() else {
+            continue;
+        };
+        match label.trim().to_ascii_lowercase().as_str() {
+            "physical density" => physical = Some(value),
+            "override density" => override_density = Some(value),
+            _ => {}
+        }
+    }
+    override_density.or(physical)
+}
+
+/// Current display density (override or physical). Passive: a frozen
+/// container answers "not now" instead of being resumed.
+pub fn density() -> Result<u32> {
+    let output = shell(&["wm", "density"])?;
+    parse_wm_density(&output).ok_or_else(|| {
+        AppError::command_failed(format!("Could not read the display density from: {output}"))
+    })
+}
+
+/// Set the display density with `wm density`, which applies at once and
+/// survives a session restart (checked on Waydroid 1.6.3 / LineageOS 20).
+/// `ro.sf.lcd_density` cannot be used for this: it is set at boot and
+/// Waydroid rejects a runtime write.
+pub fn set_density(dpi: u32) -> Result<()> {
+    if !DENSITY_RANGE.contains(&dpi) {
+        return Err(AppError::invalid_input(format!(
+            "DPI must be between {} and {}.",
+            DENSITY_RANGE.start(),
+            DENSITY_RANGE.end()
+        )));
+    }
+    let output = shell_active(&["wm", "density", &dpi.to_string()])?;
+    let applied = shell_active(&["wm", "density"])?;
+    match parse_wm_density(&applied) {
+        Some(actual) if actual == dpi => Ok(()),
+        actual => Err(AppError::command_failed(format!(
+            "Android did not apply density {dpi} (now {actual:?}). {}",
+            output.trim()
+        ))),
+    }
+}
+
 /// Whether Android finished booting, for the top bar after Start: `"booted"`
 /// or `"booting"`. Passive, so it never resumes a frozen container.
 pub fn boot_state() -> Result<&'static str> {
@@ -607,6 +664,25 @@ fn append_key(path: &Path, key: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_override_density_wins_over_the_physical_one() {
+        let both = "Physical density: 225\r\nOverride density: 200\r\n";
+        assert_eq!(parse_wm_density(both), Some(200));
+        assert_eq!(parse_wm_density("Physical density: 225\n"), Some(225));
+        assert_eq!(parse_wm_density("error: no display"), None);
+    }
+
+    #[test]
+    fn a_density_outside_android_buckets_is_refused_before_adb() {
+        for dpi in [0, 119, 641, 10_000] {
+            assert_eq!(
+                set_density(dpi).unwrap_err().code(),
+                crate::error::code::INVALID_INPUT,
+                "{dpi}"
+            );
+        }
+    }
 
     #[test]
     fn boot_state_follows_sys_boot_completed() {

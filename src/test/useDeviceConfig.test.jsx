@@ -7,10 +7,17 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 
 const ok = (data) => ({ status: "success", data });
 
-function setup({ props = {}, set = () => ok() } = {}) {
+function setup({
+  props = {},
+  set = () => ok(),
+  density = "",
+  setDensity = () => ok(),
+} = {}) {
   invoke.mockImplementation(async (cmd, args) => {
     if (cmd === "waydroid_prop_get") return ok(props[args.key] ?? "");
     if (cmd === "waydroid_prop_set") return set(args);
+    if (cmd === "waydroid_density_get") return ok(density);
+    if (cmd === "waydroid_density_set") return setDensity(args);
     return ok();
   });
   const addToast = vi.fn();
@@ -30,8 +37,8 @@ describe("useDeviceConfig", () => {
         "persist.waydroid.multi_windows": "true",
         "persist.waydroid.width": "1080",
         "persist.waydroid.height": "1920",
-        "ro.sf.lcd_density": "420",
       },
+      density: "420",
     });
     await waitFor(() => expect(result.current.multiWindow).toBe(true));
     expect(result.current.invertColors).toBe(false);
@@ -80,8 +87,9 @@ describe("useDeviceConfig", () => {
     expect(setCalls().map(([, a]) => a.key)).toEqual([
       "persist.waydroid.width",
       "persist.waydroid.height",
-      "ro.sf.lcd_density",
     ]);
+    // The density goes through `wm density`, never the read-only property.
+    expect(invoke).toHaveBeenCalledWith("waydroid_density_set", { dpi: 320 });
     expect(addToast).toHaveBeenCalledWith(
       expect.objectContaining({ title: "Display Profile Updated" })
     );
@@ -111,6 +119,29 @@ describe("useDeviceConfig", () => {
     );
     expect(addToast).not.toHaveBeenCalledWith(
       expect.objectContaining({ title: "Display Profile Updated" })
+    );
+  });
+
+  it("reports a density Android refused instead of claiming success", async () => {
+    const { result, addToast } = setup({
+      setDensity: () => ({
+        status: "error",
+        message: "DPI must be between 120 and 640.",
+      }),
+    });
+    await waitFor(() => expect(invoke).toHaveBeenCalled());
+    await act(() =>
+      result.current.handleApplyResolution({
+        width: "",
+        height: "",
+        dpi: "9000",
+      })
+    );
+    expect(addToast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Display Config Failed",
+        message: "DPI must be between 120 and 640.",
+      })
     );
   });
 });

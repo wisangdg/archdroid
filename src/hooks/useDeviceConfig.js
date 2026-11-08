@@ -6,7 +6,6 @@ const PROP = {
   invertColors: "persist.waydroid.invert_colors",
   width: "persist.waydroid.width",
   height: "persist.waydroid.height",
-  dpi: "ro.sf.lcd_density",
 };
 
 /** `waydroid_prop_set` that throws on a backend error result instead of ignoring it. */
@@ -14,6 +13,19 @@ async function setProp(key, value) {
   const res = await invoke("waydroid_prop_set", { key, value });
   if (res?.status === "error") {
     throw new Error(res.message || `Failed to set ${key}.`);
+  }
+  return res;
+}
+
+/**
+ * Set the display density through `wm density` (the backend reads it back).
+ * Not `ro.sf.lcd_density`: Android sets it at boot and Waydroid rejects a
+ * runtime write, so the preset always failed.
+ */
+async function setDensity(dpi) {
+  const res = await invoke("waydroid_density_set", { dpi: Number(dpi) });
+  if (res?.status === "error") {
+    throw new Error(res.message || `Failed to set DPI ${dpi}.`);
   }
   return res;
 }
@@ -43,7 +55,7 @@ export function useDeviceConfig({ addToast }) {
       const [widthRes, heightRes, dpiRes] = [
         await get(PROP.width),
         await get(PROP.height),
-        await get(PROP.dpi),
+        await invoke("waydroid_density_get"),
       ];
       const value = (res) => (res.status === "success" ? res.data || "" : "");
       setDisplayRes({
@@ -109,12 +121,12 @@ export function useDeviceConfig({ addToast }) {
     try {
       if (width) await setProp(PROP.width, width);
       if (height) await setProp(PROP.height, height);
-      if (dpi) await setProp(PROP.dpi, dpi);
+      if (dpi) await setDensity(dpi);
       await loadConfigs();
       addToast({
         type: "success",
         title: "Display Profile Updated",
-        message: `Applied ${width} × ${height} (${dpi} DPI). Restart Waydroid session to apply changes.`,
+        message: `Applied ${width} × ${height} (${dpi} DPI). The DPI applies now; restart the Waydroid session for the resolution.`,
         duration: 5000,
       });
     } catch (err) {

@@ -1310,6 +1310,25 @@ async fn waydroid_reboot(app: AppHandle) -> CommandResult {
     .into_command_result()
 }
 
+/// The display density for Settings' Display presets.
+#[tauri::command]
+async fn waydroid_density_get() -> CommandResult {
+    off_main_thread(|| match adb::density() {
+        Ok(dpi) => CommandResult::with_data(dpi.to_string()),
+        Err(error) => error.into(),
+    })
+    .await
+}
+
+#[tauri::command]
+async fn waydroid_density_set(dpi: u32) -> CommandResult {
+    run_exclusive("display density", move |_| match adb::set_density(dpi) {
+        Ok(()) => CommandResult::success(),
+        Err(error) => error.into(),
+    })
+    .await
+}
+
 /// `"booted"` or `"booting"` while the session runs; polled by the UI after
 /// Start until Android reports `sys.boot_completed`.
 #[tauri::command]
@@ -1641,6 +1660,8 @@ pub fn run() {
             waydroid_reboot,
             waydroid_kill_app,
             waydroid_boot_state,
+            waydroid_density_get,
+            waydroid_density_set,
             #[cfg(feature = "dev-commands")]
             waydroid_getprop_all,
             #[cfg(feature = "dev-commands")]
