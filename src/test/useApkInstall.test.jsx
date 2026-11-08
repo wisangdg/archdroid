@@ -92,11 +92,22 @@ describe("useApkInstall", () => {
     expect(result.current.isDraggingOver).toBe(true);
     await act(async () =>
       dropHandler({
-        payload: { type: "drop", paths: ["/a/one.APK", "/a/notes.txt"] },
+        payload: {
+          type: "drop",
+          paths: [
+            "/a/one.APK",
+            "/a/notes.txt",
+            "/a/game.xapk",
+            "/a/x.apkm.txt",
+          ],
+        },
       })
     );
-    await waitFor(() => expect(installCalls()).toHaveLength(1));
-    expect(installCalls()[0][1]).toEqual({ path: "/a/one.APK" });
+    await waitFor(() => expect(installCalls()).toHaveLength(2));
+    expect(installCalls().map(([, args]) => args.path)).toEqual([
+      "/a/one.APK",
+      "/a/game.xapk",
+    ]);
     expect(result.current.isDraggingOver).toBe(false);
   });
 

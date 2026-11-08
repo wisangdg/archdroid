@@ -1,0 +1,391 @@
+//! APK files dropped on the window or picked in the file dialog: a single
+//! `.apk`, or a split-APK bundle (`.apks`, `.xapk`, `.apkm`), which is a ZIP of
+//! the base APK and its configuration splits that must be installed together.
+
+use std::io::{Read, Seek, SeekFrom};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
+
+use crate::adb;
+use crate::error::{AppError, Result};
+use crate::waydroid;
+
+/// Bundle file extensions; everything else must be a plain `.apk`.
+pub(crate) const BUNDLE_EXTENSIONS: [&str; 3] = ["apks", "xapk", "apkm"];
+/// More splits than any real app ships (base + ABI + density + languages).
+const MAX_SPLITS: usize = 64;
+/// Uncompressed size limit for all splits together.
+const MAX_BUNDLE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Kind {
+    Apk,
+    Bundle,
+}
+
+pub(crate) fn kind(path: &str) -> Result<Kind> {
+    let extension = Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_default();
+    if extension == "apk" {
+        Ok(Kind::Apk)
+    } else if BUNDLE_EXTENSIONS.contains(&extension.as_str()) {
+        Ok(Kind::Bundle)
+    } else {
+        Err(AppError::invalid_input(format!(
+            "{path} is not an .apk, .apks, .xapk or .apkm file."
+        )))
+    }
+}
+
+/// Install a single APK or a split-APK bundle, verified by the package manager.
+pub(crate) fn install_blocking(path: String, cancel: Option<&AtomicBool>) -> Result<()> {
+    match kind(&path)? {
+        Kind::Apk => install_single(path, cancel),
+        Kind::Bundle => install_bundle(&path, cancel),
+    }
+}
+
+/// How much of each end of an APK to scan for the manifest entry. The local
+/// header for `AndroidManifest.xml` is normally in the first block; the central
+/// directory is at the end. This rejects text files and zips that are not APKs
+/// before the slow install call, without adding a zip dependency.
+const APK_SCAN_BYTES: u64 = 8 * 1024 * 1024;
+
+fn contains_marker(bytes: &[u8], marker: &[u8]) -> bool {
+    bytes.windows(marker.len()).any(|window| window == marker)
+}
+
+pub(crate) fn apk_looks_installable(path: &str) -> Result<()> {
+    let mut file = std::fs::File::open(path)?;
+    let len = file.metadata()?.len();
+    let mut magic = [0u8; 4];
+    if file.read_exact(&mut magic).is_err() || (magic != *b"PK\x03\x04" && magic != *b"PK\x05\x06")
+    {
+        return Err(AppError::invalid_input(format!(
+            "{path} is not an APK/ZIP archive."
+        )));
+    }
+
+    let marker = b"AndroidManifest.xml";
+    let mut scan = Vec::with_capacity(APK_SCAN_BYTES.min(len) as usize);
+    file.seek(SeekFrom::Start(0))?;
+    (&mut file).take(APK_SCAN_BYTES).read_to_end(&mut scan)?;
+    if contains_marker(&scan, marker) {
+        return Ok(());
+    }
+
+    if len > APK_SCAN_BYTES {
+        scan.clear();
+        file.seek(SeekFrom::End(-(APK_SCAN_BYTES as i64)))?;
+        (&mut file).take(APK_SCAN_BYTES).read_to_end(&mut scan)?;
+        if contains_marker(&scan, marker) {
+            return Ok(());
+        }
+    }
+
+    Err(AppError::invalid_input(format!(
+        "{path} is a ZIP file without AndroidManifest.xml; it is not a valid APK."
+    )))
+}
+
+/// Adb is authoritative when it is installed: `adb install` waits for the
+/// Android package manager and `adb uninstall` reports the real result. Without
+/// adb, `waydroid app install/remove` is used, and the obvious non-APK case is
+/// rejected before the CLI can report a false success.
+fn install_single(path: String, cancel: Option<&AtomicBool>) -> Result<()> {
+    apk_looks_installable(&path)?;
+    if adb::available() {
+        adb::install_apk(&path, cancel)?;
+    } else {
+        waydroid::Waydroid::detect()?.app_install(&path, cancel)?;
+    }
+    Ok(())
+}
+
+/// Split bundles need `adb install-multiple`: `waydroid app install` takes a
+/// single file. The splits are unpacked into a private directory that is
+/// removed afterwards, whatever the outcome.
+fn install_bundle(path: &str, cancel: Option<&AtomicBool>) -> Result<()> {
+    if !adb::available() {
+        return Err(AppError::not_found(
+            "adb",
+            "Split APK bundles (.apks, .xapk, .apkm) are installed with adb install-multiple. Install adb (android-tools) and try again.",
+        ));
+    }
+    let work = PrivateDir::create()?;
+    let splits = extract_splits(Path::new(path), work.path())?;
+    for split in &splits {
+        apk_looks_installable(&split.to_string_lossy())?;
+    }
+    let splits: Vec<String> = splits
+        .iter()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect();
+    adb::install_apks(&splits, cancel)?;
+    Ok(())
+}
+
+/// A `0700` directory under the temp dir, removed on drop.
+struct PrivateDir(PathBuf);
+
+impl PrivateDir {
+    fn create() -> Result<Self> {
+        use std::os::unix::fs::DirBuilderExt;
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let dir =
+            std::env::temp_dir().join(format!("archdroid-splits-{}-{nanos}", std::process::id()));
+        std::fs::DirBuilder::new().mode(0o700).create(&dir)?;
+        Ok(Self(dir))
+    }
+
+    fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for PrivateDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// Unpack every `.apk` entry of `archive` into `into` and return their paths.
+///
+/// Only the file name of an entry is used, so `../` or absolute entry names
+/// cannot write outside `into`. Duplicate names, too many splits, oversized
+/// content, and OBB game data (which `install-multiple` cannot place) are
+/// refused rather than half-installed.
+pub(crate) fn extract_splits(archive: &Path, into: &Path) -> Result<Vec<PathBuf>> {
+    let file = std::fs::File::open(archive)?;
+    let mut zip = zip::ZipArchive::new(file).map_err(|e| {
+        AppError::invalid_input(format!(
+            "{} is not a split APK bundle (ZIP): {e}",
+            archive.display()
+        ))
+    })?;
+    let mut splits: Vec<PathBuf> = Vec::new();
+    let mut total: u64 = 0;
+    for index in 0..zip.len() {
+        let mut entry = zip
+            .by_index(index)
+            .map_err(|e| AppError::invalid_input(format!("Unreadable bundle entry: {e}")))?;
+        let name = entry.name().to_string();
+        if entry.is_dir() {
+            continue;
+        }
+        if name.to_ascii_lowercase().ends_with(".obb") {
+            return Err(AppError::invalid_input(format!(
+                "{} contains OBB game data ({name}), which ArchDroid cannot install yet. Install the APKs and copy the OBB folder to Android/obb in the shared folder by hand.",
+                archive.display()
+            )));
+        }
+        if !name.to_ascii_lowercase().ends_with(".apk") {
+            continue;
+        }
+        let file_name = name
+            .rsplit(['/', '\\'])
+            .next()
+            .filter(|base| !base.is_empty() && !base.starts_with('.'))
+            .ok_or_else(|| AppError::invalid_input(format!("Invalid bundle entry name {name:?}")))?
+            .to_string();
+        if splits.len() == MAX_SPLITS {
+            return Err(AppError::invalid_input(format!(
+                "The bundle has more than {MAX_SPLITS} APKs."
+            )));
+        }
+        total = total.saturating_add(entry.size());
+        if total > MAX_BUNDLE_BYTES {
+            return Err(AppError::invalid_input(
+                "The bundle's APKs are larger than 4 GiB together.",
+            ));
+        }
+        let target = into.join(&file_name);
+        let mut out = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&target)
+            .map_err(|e| match e.kind() {
+                std::io::ErrorKind::AlreadyExists => {
+                    AppError::invalid_input(format!("The bundle contains {file_name} twice."))
+                }
+                _ => AppError::Io(e),
+            })?;
+        // `take` holds the copy to the declared size even if the header lies.
+        let size = entry.size();
+        std::io::copy(&mut (&mut entry).take(size), &mut out)?;
+        splits.push(target);
+    }
+    if splits.is_empty() {
+        return Err(AppError::invalid_input(format!(
+            "{} contains no APK.",
+            archive.display()
+        )));
+    }
+    splits.sort();
+    Ok(splits)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error;
+    use std::io::Write;
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("archdroid-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn bundle(path: &Path, entries: &[(&str, &[u8])]) {
+        let mut zip = zip::ZipWriter::new(std::fs::File::create(path).unwrap());
+        for (name, body) in entries {
+            zip.start_file(*name, zip::write::SimpleFileOptions::default())
+                .unwrap();
+            zip.write_all(body).unwrap();
+        }
+        zip.finish().unwrap();
+    }
+
+    const SPLIT: &[u8] = b"PK\x03\x04AndroidManifest.xml";
+
+    #[test]
+    fn apk_check_rejects_text_and_manifestless_zips() {
+        let dir = std::env::temp_dir().join(format!("archdroid-apk-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let text = dir.join("text.apk");
+        std::fs::write(&text, "this is not an APK\n").unwrap();
+        let error = apk_looks_installable(text.to_str().unwrap()).unwrap_err();
+        assert_eq!(error.code(), error::code::INVALID_INPUT);
+        assert!(error.to_string().contains("not an APK/ZIP"));
+
+        let manifestless = dir.join("manifestless.apk");
+        std::fs::write(&manifestless, b"PK\x03\x04notes.txt").unwrap();
+        let error = apk_looks_installable(manifestless.to_str().unwrap()).unwrap_err();
+        assert_eq!(error.code(), error::code::INVALID_INPUT);
+        assert!(error.to_string().contains("without AndroidManifest.xml"));
+
+        let apk = dir.join("ok.apk");
+        std::fs::write(&apk, b"PK\x03\x04AndroidManifest.xml").unwrap();
+        apk_looks_installable(apk.to_str().unwrap()).unwrap();
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_extension_decides_single_or_bundle() {
+        assert_eq!(kind("/x/Game.APK").unwrap(), Kind::Apk);
+        for bundle in ["a.apks", "b.XAPK", "c.apkm"] {
+            assert_eq!(kind(bundle).unwrap(), Kind::Bundle, "{bundle}");
+        }
+        assert_eq!(
+            kind("notes.txt").unwrap_err().code(),
+            error::code::INVALID_INPUT
+        );
+    }
+
+    #[test]
+    fn splits_are_unpacked_by_file_name_only() {
+        let dir = scratch("splits-ok");
+        let archive = dir.join("game.xapk");
+        bundle(
+            &archive,
+            &[
+                ("manifest.json", b"{}"),
+                ("com.game.apk", SPLIT),
+                ("config.arm64_v8a.apk", SPLIT),
+                ("../../escape/config.xxhdpi.apk", SPLIT),
+                ("icon.png", b"png"),
+            ],
+        );
+        let out = dir.join("out");
+        std::fs::create_dir(&out).unwrap();
+        let splits = extract_splits(&archive, &out).unwrap();
+        let names: Vec<_> = splits
+            .iter()
+            .map(|p| p.file_name().unwrap().to_str().unwrap().to_string())
+            .collect();
+        assert_eq!(
+            names,
+            ["com.game.apk", "config.arm64_v8a.apk", "config.xxhdpi.apk"]
+        );
+        assert!(splits.iter().all(|p| p.parent() == Some(out.as_path())));
+        assert!(!dir.join("escape").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn bundles_that_cannot_install_completely_are_refused() {
+        let dir = scratch("splits-bad");
+        type Entries<'a> = &'a [(&'a str, &'a [u8])];
+        let cases: &[(&str, Entries, &str)] = &[
+            ("empty.apks", &[("readme.txt", b"x")], "contains no APK"),
+            (
+                "dup.apks",
+                &[("a/base.apk", SPLIT), ("b/base.apk", SPLIT)],
+                "twice",
+            ),
+            (
+                "obb.xapk",
+                &[
+                    ("base.apk", SPLIT),
+                    ("Android/obb/com.g/main.1.com.g.obb", b"x"),
+                ],
+                "OBB",
+            ),
+            (
+                "hidden.apks",
+                &[(".base.apk", SPLIT)],
+                "Invalid bundle entry",
+            ),
+        ];
+        for (file, entries, message) in cases {
+            let archive = dir.join(file);
+            bundle(&archive, entries);
+            let out = dir.join(format!("out-{file}"));
+            std::fs::create_dir(&out).unwrap();
+            let error = extract_splits(&archive, &out).unwrap_err();
+            assert_eq!(error.code(), error::code::INVALID_INPUT, "{file}");
+            assert!(error.to_string().contains(message), "{file}: {error}");
+        }
+        let text = dir.join("text.apks");
+        std::fs::write(&text, "not a zip").unwrap();
+        let error = extract_splits(&text, &dir).unwrap_err();
+        assert!(
+            error.to_string().contains("not a split APK bundle"),
+            "{error}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_private_directory_is_owner_only_and_removed() {
+        use std::os::unix::fs::PermissionsExt;
+        let path = {
+            let dir = PrivateDir::create().unwrap();
+            let mode = std::fs::metadata(dir.path()).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o700);
+            std::fs::write(dir.path().join("x.apk"), "x").unwrap();
+            dir.path().to_path_buf()
+        };
+        assert!(!path.exists());
+    }
+
+    /// Live: `ARCHDROID_BUNDLE=/path/app.apks cargo test live_bundle_install -- --ignored`
+    /// with a running Waydroid session and adb. Installs the bundle for real.
+    #[test]
+    #[ignore]
+    fn live_bundle_install() {
+        let bundle = std::env::var("ARCHDROID_BUNDLE").expect("ARCHDROID_BUNDLE");
+        install_blocking(bundle, None).expect("bundle installs");
+    }
+}

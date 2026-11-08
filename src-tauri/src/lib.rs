@@ -1,7 +1,7 @@
 use base64::{engine::general_purpose, Engine as _};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::io::{BufReader, IsTerminal, Read, Seek, SeekFrom};
+use std::io::{BufReader, IsTerminal, Read};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 use tauri::AppHandle;
 
 mod adb;
+mod apk;
 mod bundle;
 mod capabilities;
 #[cfg(feature = "dev-commands")]
@@ -401,63 +402,6 @@ fn parse_desktop_entry(path: &Path, package: &str) -> AppInfo {
     }
 }
 
-/// How much of each end of an APK to scan for the manifest entry. The local
-/// header for `AndroidManifest.xml` is normally in the first block; the central
-/// directory is at the end. This rejects text files and zips that are not APKs
-/// before the slow install call, without adding a zip dependency.
-const APK_SCAN_BYTES: u64 = 8 * 1024 * 1024;
-
-fn contains_marker(bytes: &[u8], marker: &[u8]) -> bool {
-    bytes.windows(marker.len()).any(|window| window == marker)
-}
-
-fn apk_looks_installable(path: &str) -> error::Result<()> {
-    let mut file = std::fs::File::open(path)?;
-    let len = file.metadata()?.len();
-    let mut magic = [0u8; 4];
-    if file.read_exact(&mut magic).is_err() || (magic != *b"PK\x03\x04" && magic != *b"PK\x05\x06")
-    {
-        return Err(AppError::invalid_input(format!(
-            "{path} is not an APK/ZIP archive."
-        )));
-    }
-
-    let marker = b"AndroidManifest.xml";
-    let mut scan = Vec::with_capacity(APK_SCAN_BYTES.min(len) as usize);
-    file.seek(SeekFrom::Start(0))?;
-    (&mut file).take(APK_SCAN_BYTES).read_to_end(&mut scan)?;
-    if contains_marker(&scan, marker) {
-        return Ok(());
-    }
-
-    if len > APK_SCAN_BYTES {
-        scan.clear();
-        file.seek(SeekFrom::End(-(APK_SCAN_BYTES as i64)))?;
-        (&mut file).take(APK_SCAN_BYTES).read_to_end(&mut scan)?;
-        if contains_marker(&scan, marker) {
-            return Ok(());
-        }
-    }
-
-    Err(AppError::invalid_input(format!(
-        "{path} is a ZIP file without AndroidManifest.xml; it is not a valid APK."
-    )))
-}
-
-/// Adb is authoritative when it is installed: `adb install` waits for the
-/// Android package manager and `adb uninstall` reports the real result. Without
-/// adb, `waydroid app install/remove` is used, and the obvious non-APK case is
-/// rejected before the CLI can report a false success.
-fn install_apk_blocking(path: String, cancel: Option<&AtomicBool>) -> error::Result<()> {
-    apk_looks_installable(&path)?;
-    if adb::available() {
-        adb::install_apk(&path, cancel)?;
-    } else {
-        waydroid::Waydroid::detect()?.app_install(&path, cancel)?;
-    }
-    Ok(())
-}
-
 fn uninstall_app_blocking(package: String, cancel: Option<&AtomicBool>) -> error::Result<()> {
     let waydroid = waydroid::Waydroid::detect()?;
     if adb::available() {
@@ -507,7 +451,7 @@ async fn waydroid_install_apk(app: AppHandle, path: String) -> CommandResult {
     emit_started(&app, task.id());
     off_main_thread(move || {
         let cancel = task.cancel_flag();
-        match install_apk_blocking(path, Some(&cancel)) {
+        match apk::install_blocking(path, Some(&cancel)) {
             Ok(()) => CommandResult::success(),
             Err(error) => error.into(),
         }
@@ -1780,31 +1724,6 @@ mod tests {
                 "init --system_channel https://ota.waydro.id/system --vendor_channel https://ota.waydro.id/vendor"
             );
         }
-    }
-
-    #[test]
-    fn apk_check_rejects_text_and_manifestless_zips() {
-        let dir = std::env::temp_dir().join(format!("archdroid-apk-test-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-
-        let text = dir.join("text.apk");
-        std::fs::write(&text, "this is not an APK\n").unwrap();
-        let error = apk_looks_installable(text.to_str().unwrap()).unwrap_err();
-        assert_eq!(error.code(), error::code::INVALID_INPUT);
-        assert!(error.to_string().contains("not an APK/ZIP"));
-
-        let manifestless = dir.join("manifestless.apk");
-        std::fs::write(&manifestless, b"PK\x03\x04notes.txt").unwrap();
-        let error = apk_looks_installable(manifestless.to_str().unwrap()).unwrap_err();
-        assert_eq!(error.code(), error::code::INVALID_INPUT);
-        assert!(error.to_string().contains("without AndroidManifest.xml"));
-
-        let apk = dir.join("ok.apk");
-        std::fs::write(&apk, b"PK\x03\x04AndroidManifest.xml").unwrap();
-        apk_looks_installable(apk.to_str().unwrap()).unwrap();
-
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[cfg(feature = "dev-commands")]

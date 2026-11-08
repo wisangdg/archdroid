@@ -3,6 +3,13 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 
+/** Single APKs and split-APK bundles; the backend installs bundles with adb. */
+export const APK_EXTENSIONS = ["apk", "apks", "xapk", "apkm"];
+
+export const isInstallable = (path) =>
+  typeof path === "string" &&
+  APK_EXTENSIONS.some((ext) => path.toLowerCase().endsWith(`.${ext}`));
+
 /**
  * APK installation from the file picker and from drag & drop. Dropped files
  * come from the native webview event (real paths); the DOM handlers only keep
@@ -71,7 +78,7 @@ export function useApkInstall({ addToast, operationInFlight, loadApps }) {
         filters: [
           {
             name: "Android Package",
-            extensions: ["apk"],
+            extensions: APK_EXTENSIONS,
           },
         ],
       });
@@ -91,14 +98,13 @@ export function useApkInstall({ addToast, operationInFlight, loadApps }) {
   const handleDroppedFiles = useCallback(
     async (paths) => {
       if (!paths || paths.length === 0) return;
-      const apkFiles = paths.filter(
-        (p) => typeof p === "string" && p.toLowerCase().endsWith(".apk")
-      );
+      const apkFiles = paths.filter(isInstallable);
       if (apkFiles.length === 0) {
         addToast({
           type: "warning",
           title: "Unsupported File",
-          message: "Only .apk packages can be installed via drag & drop.",
+          message:
+            "Only .apk files and split APK bundles (.apks, .xapk, .apkm) can be installed via drag & drop.",
           duration: 4000,
         });
         return;

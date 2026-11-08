@@ -187,7 +187,7 @@ describe("App state & workflow integration", () => {
     await waitFor(() => {
       expect(screen.getByText("Unsupported File")).toBeTruthy();
       expect(
-        screen.getByText("Only .apk packages can be installed via drag & drop.")
+        screen.getByText(/Only \.apk files and split APK bundles/)
       ).toBeTruthy();
     });
   });

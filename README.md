@@ -15,7 +15,7 @@ ArchDroid is a desktop app for [Waydroid](https://waydroid.net/). Set up Android
 ## Highlights
 
 - 🎮 **App library and launcher.** A Control Center: your installed Android apps in a list with icons, instant search (`Ctrl+F`) and All/User/System filters, next to the selected app with Launch, Force stop, Keymapping, Copy package ID, and Uninstall. Double-click a row to launch; right-click for the menu. The engine state and Start/Stop stay in the top bar on every page.
-- 📦 **Drag-and-drop APK install.** Drop an `.apk` from your file manager onto the window, or use the file picker.
+- 📦 **Drag-and-drop APK install.** Drop an `.apk`, or a split APK bundle (`.apks`, `.xapk`, `.apkm`; needs adb), from your file manager onto the window, or use the file picker.
 - 🧩 **Google Play and ARM translation.** Add Google Play Services (MindTheGapps / OpenGApps) and Intel libhoudini so ARM-only games run on x86_64 CPUs.
 - ⌨️ **Keyboard and mouse controls.** Build and launch the [Phantom](https://github.com/oliviermugishak/phantom) keymapper from the app: WASD, custom binds, and mouse look for shooters.
 - 👆 **Touch mode (Hyprland).** A left click or drag over an Android window acts like a finger, as in other Android emulators. Some games and in-app web pages ignore Waydroid's mouse input entirely; Plants vs Zombies 2's birth-date picker is one.

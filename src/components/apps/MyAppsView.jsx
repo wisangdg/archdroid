@@ -166,8 +166,8 @@ export default function MyAppsView({
           <div className="empty-library-banner">
             <h3>No Android apps installed yet</h3>
             <p>
-              Click <strong>Install APK</strong> or drop an <code>.apk</code> on
-              the window. To get Google Play, open{" "}
+              Click <strong>Install APK</strong> or drop an <code>.apk</code> or
+              split APK bundle on the window. To get Google Play, open{" "}
               <strong>Install Tools</strong>.
             </p>
           </div>

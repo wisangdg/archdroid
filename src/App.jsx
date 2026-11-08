@@ -580,8 +580,9 @@ export default function App() {
             </div>
             <h3 className="dropzone-title">Drop APK to Install</h3>
             <p className="dropzone-desc">
-              Release your <code>.apk</code> file anywhere to automatically
-              install it into Waydroid.
+              Release your <code>.apk</code> (or <code>.apks</code>,{" "}
+              <code>.xapk</code>, <code>.apkm</code> bundle) anywhere to
+              automatically install it into Waydroid.
             </p>
             <div className="dropzone-pills">
               <span className="dropzone-pill">Instant Android Sideload</span>

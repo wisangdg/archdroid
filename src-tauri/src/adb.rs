@@ -83,6 +83,21 @@ pub fn install_apk(path: &str, cancel: Option<&AtomicBool>) -> Result<String> {
     })
 }
 
+/// Install a split APK set (base + configuration splits) as one package with
+/// `adb install-multiple`, verified like a single install.
+pub fn install_apks(paths: &[String], cancel: Option<&AtomicBool>) -> Result<String> {
+    if paths.len() == 1 {
+        return install_apk(&paths[0], cancel);
+    }
+    with_device(true, |adb, serial| {
+        let before = launcher_entries();
+        let argv = adb_install_multiple_args(serial, paths);
+        let output = waydroid::run_program(adb, &argv, TIMEOUT_LONG, cancel)?;
+        wait_for_launcher_change(&before, cancel);
+        Ok(output)
+    })
+}
+
 /// Uninstall a package through adb. `waydroid app remove` can exit 0 while the
 /// platform service fails (`Failed with code: -3`), so adb is the authoritative
 /// path when it is available.
@@ -163,6 +178,17 @@ fn adb_install_args(serial: &str, path: &str) -> Vec<String> {
         "-r".to_string(),
         path.to_string(),
     ]
+}
+
+fn adb_install_multiple_args(serial: &str, paths: &[String]) -> Vec<String> {
+    let mut argv = vec![
+        "-s".to_string(),
+        serial.to_string(),
+        "install-multiple".to_string(),
+        "-r".to_string(),
+    ];
+    argv.extend(paths.iter().cloned());
+    argv
 }
 
 fn adb_uninstall_args(serial: &str, package: &str) -> Vec<String> {
@@ -664,6 +690,25 @@ fn append_key(path: &Path, key: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn split_installs_target_the_container_with_every_split_as_its_own_word() {
+        let paths = vec![
+            "/tmp/x/base.apk".to_string(),
+            "/tmp/x/config; rm -rf ~.apk".to_string(),
+        ];
+        assert_eq!(
+            adb_install_multiple_args("192.168.240.112:5555", &paths),
+            [
+                "-s",
+                "192.168.240.112:5555",
+                "install-multiple",
+                "-r",
+                "/tmp/x/base.apk",
+                "/tmp/x/config; rm -rf ~.apk"
+            ]
+        );
+    }
 
     #[test]
     fn the_override_density_wins_over_the_physical_one() {
