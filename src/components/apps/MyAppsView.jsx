@@ -28,6 +28,7 @@ const FILTERS = [
 export default function MyAppsView({
   apps,
   engineOnline = false,
+  booting = false,
   onLaunchApp,
   onForceStopApp,
   onOpenKeymap,
@@ -225,6 +226,7 @@ export default function MyAppsView({
         app={selectedApp}
         system={selectedApp ? isSystemApp(selectedApp.package) : false}
         engineOnline={engineOnline}
+        booting={booting}
         busy={busy}
         onLaunch={onLaunchApp}
         onForceStop={onForceStopApp}

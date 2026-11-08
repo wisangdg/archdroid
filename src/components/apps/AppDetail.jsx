@@ -17,6 +17,7 @@ export default function AppDetail({
   app,
   system,
   engineOnline,
+  booting = false,
   busy = false,
   onLaunch,
   onForceStop,
@@ -56,7 +57,8 @@ export default function AppDetail({
           type="button"
           className="btn btn-primary"
           onClick={() => onLaunch(app.package)}
-          disabled={busy}
+          disabled={busy || booting}
+          title={booting ? "Android is still booting" : undefined}
         >
           <Play size={16} fill="currentColor" aria-hidden="true" />
           <span>Launch</span>
@@ -113,7 +115,7 @@ export default function AppDetail({
         </div>
         <div className="app-fact">
           <dt>Engine</dt>
-          <dd>{engineOnline ? "Running" : "Stopped"}</dd>
+          <dd>{booting ? "Booting" : engineOnline ? "Running" : "Stopped"}</dd>
         </div>
       </dl>
 

@@ -2,6 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { sessionRunning } from "../lib/waydroidStatus";
 
+const BOOT_POLL_MS = 2000;
+const BOOT_POLL_ATTEMPTS = 45; // ~90 s
+
 /**
  * Waydroid session state: polling, and the Start/Stop/Restart handlers that
  * wait for the session to actually reach the target state. `onOnline` runs when
@@ -13,6 +16,9 @@ export function useEngineStatus({ addToast, onOnline }) {
   // (empty) app library before the setup screen.
   const [isInitialized, setIsInitialized] = useState(null);
   const [isOperating, setIsOperating] = useState(false);
+  // The session runs but Android has not finished booting yet.
+  const [booting, setBooting] = useState(false);
+  const bootWatchRef = useRef(0);
   const prevStatusRef = useRef("offline");
   const statusCheckInFlight = useRef(false);
   const onOnlineRef = useRef(onOnline);
@@ -36,6 +42,27 @@ export function useEngineStatus({ addToast, onOnline }) {
     });
   }, []);
 
+  // After the session comes online, poll sys.boot_completed until Android is
+  // up. Without adb (an error reply) the answer is unknowable, and the cap
+  // keeps a stuck probe from showing "booting" forever.
+  const watchBoot = useCallback(async () => {
+    const watch = ++bootWatchRef.current;
+    setBooting(true);
+    for (let attempt = 0; attempt < BOOT_POLL_ATTEMPTS; attempt++) {
+      let res;
+      try {
+        res = await invoke("waydroid_boot_state");
+      } catch {
+        break;
+      }
+      if (watch !== bootWatchRef.current) return;
+      if (!(res?.status === "success" && res.data === "booting")) break;
+      await new Promise((resolve) => setTimeout(resolve, BOOT_POLL_MS));
+      if (watch !== bootWatchRef.current) return;
+    }
+    if (watch === bootWatchRef.current) setBooting(false);
+  }, []);
+
   const checkStatus = useCallback(async () => {
     if (statusCheckInFlight.current) return;
     statusCheckInFlight.current = true;
@@ -47,9 +74,12 @@ export function useEngineStatus({ addToast, onOnline }) {
         lastStatusErrorRef.current = null;
         if (prevStatusRef.current !== "online") {
           onOnlineRef.current?.();
+          watchBoot();
         }
       } else {
         setStatus("offline");
+        bootWatchRef.current++;
+        setBooting(false);
         const missing =
           res.code === "not_found" || res.code === "not_initialized";
         setIsInitialized(!missing);
@@ -68,7 +98,7 @@ export function useEngineStatus({ addToast, onOnline }) {
     } finally {
       statusCheckInFlight.current = false;
     }
-  }, [reportStatusError]);
+  }, [reportStatusError, watchBoot]);
 
   const pollStatusUntil = useCallback(
     async (targetStatus, maxAttempts = 15, intervalMs = 400) => {
@@ -235,6 +265,7 @@ export function useEngineStatus({ addToast, onOnline }) {
     status,
     isInitialized,
     isOperating,
+    booting,
     checkStatus,
     handleStart,
     handleStop,

@@ -1458,6 +1458,17 @@ async fn waydroid_reboot(app: AppHandle) -> CommandResult {
     .into_command_result()
 }
 
+/// `"booted"` or `"booting"` while the session runs; polled by the UI after
+/// Start until Android reports `sys.boot_completed`.
+#[tauri::command]
+async fn waydroid_boot_state() -> CommandResult {
+    off_main_thread(|| match adb::boot_state() {
+        Ok(state) => CommandResult::with_data(state.to_string()),
+        Err(error) => error.into(),
+    })
+    .await
+}
+
 /// Force-stop one Android app (the app detail's "Force stop"). Needs adb,
 /// because Waydroid only allows `shell` as root.
 #[tauri::command]
@@ -1777,6 +1788,7 @@ pub fn run() {
             #[cfg(feature = "dev-commands")]
             waydroid_reboot,
             waydroid_kill_app,
+            waydroid_boot_state,
             #[cfg(feature = "dev-commands")]
             waydroid_getprop_all,
             #[cfg(feature = "dev-commands")]

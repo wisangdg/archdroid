@@ -124,4 +124,37 @@ describe("useEngineStatus", () => {
     expect(invoke).not.toHaveBeenCalledWith("waydroid_start");
     expect(result.current.isOperating).toBe(false);
   });
+  it("shows booting until Android reports sys.boot_completed", async () => {
+    let boot = { status: "success", data: "booting" };
+    invoke.mockImplementation(async (cmd) => {
+      if (cmd === "waydroid_status") return RUNNING;
+      if (cmd === "waydroid_boot_state") return boot;
+      return { status: "success" };
+    });
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const { result } = renderHook(() =>
+        useEngineStatus({ addToast: vi.fn(), onOnline: vi.fn() })
+      );
+      await waitFor(() => expect(result.current.status).toBe("online"));
+      await waitFor(() => expect(result.current.booting).toBe(true));
+
+      boot = { status: "success", data: "booted" };
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2500);
+      });
+      await waitFor(() => expect(result.current.booting).toBe(false));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not wait for a boot it cannot observe (no adb)", async () => {
+    const { result } = setup([RUNNING], {
+      waydroid_boot_state: { status: "error", code: "not_found" },
+    });
+    await waitFor(() => expect(result.current.status).toBe("online"));
+    await waitFor(() => expect(result.current.booting).toBe(false));
+    expect(invoke).toHaveBeenCalledWith("waydroid_boot_state");
+  });
 });

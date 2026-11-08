@@ -34,6 +34,7 @@ export default function App() {
     status,
     isInitialized,
     isOperating,
+    booting,
     handleStart,
     handleStop,
     handleRestart,
@@ -452,6 +453,7 @@ export default function App() {
         status={status}
         isInitialized={isInitialized}
         isOperating={isOperating}
+        booting={booting}
         busy={installing}
         onStart={handleStart}
         onStop={handleStop}
@@ -481,6 +483,7 @@ export default function App() {
                 <MyAppsView
                   apps={apps}
                   engineOnline={status === "online"}
+                  booting={booting}
                   onLaunchApp={handleLaunchApp}
                   onForceStopApp={handleForceStopApp}
                   onOpenKeymap={() => setActiveTab("keymap")}

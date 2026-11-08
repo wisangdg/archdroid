@@ -252,6 +252,29 @@ pub fn booted() -> bool {
     shell(&["getprop", "sys.boot_completed"]).is_ok_and(|output| output.trim() == "1")
 }
 
+/// Whether Android finished booting, for the top bar after Start: `"booted"`
+/// or `"booting"`. Passive, so it never resumes a frozen container.
+pub fn boot_state() -> Result<&'static str> {
+    boot_state_from(shell(&["getprop", "sys.boot_completed"]))
+}
+
+/// [`boot_state`] without the device, so every outcome is testable.
+///
+/// - Android only suspends (freezes) a container it finished booting.
+/// - Without adb the answer is unknowable, which the caller must not show as
+///   "booting" forever, so that error is passed on.
+/// - Anything else (no container IP yet, adbd not up, connect refused) is what
+///   an early boot looks like.
+fn boot_state_from(probe: Result<String>) -> Result<&'static str> {
+    match probe {
+        Ok(output) if output.trim() == "1" => Ok("booted"),
+        Ok(_) => Ok("booting"),
+        Err(error) if error.code() == crate::error::code::SESSION_FROZEN => Ok("booted"),
+        Err(error) if error.code() == crate::error::code::NOT_FOUND => Err(error),
+        Err(_) => Ok("booting"),
+    }
+}
+
 /// Android package names are letters, digits, `.` and `_`. Everything else is
 /// rejected before it can reach `am force-stop` or `adb uninstall` as an argv
 /// word, because adb joins the words into one device shell line.
@@ -584,6 +607,21 @@ fn append_key(path: &Path, key: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn boot_state_follows_sys_boot_completed() {
+        assert_eq!(boot_state_from(Ok("1\n".into())).unwrap(), "booted");
+        assert_eq!(boot_state_from(Ok("\n".into())).unwrap(), "booting");
+        let frozen = AppError::session_frozen("open the window");
+        assert_eq!(boot_state_from(Err(frozen)).unwrap(), "booted");
+        let early = AppError::session_not_running("no container IP address yet");
+        assert_eq!(boot_state_from(Err(early)).unwrap(), "booting");
+        let no_adb = AppError::not_found("adb", HINT);
+        assert_eq!(
+            boot_state_from(Err(no_adb)).unwrap_err().code(),
+            crate::error::code::NOT_FOUND
+        );
+    }
 
     fn key_file(name: &str) -> PathBuf {
         let dir =
