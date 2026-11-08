@@ -39,7 +39,7 @@ commit.
 | D5 | ✅ `HostFacts::probe()` + `report()` murni; 4 test tabel; laporan host identik sebelum/sesudah |
 | F5 | ✅ Sebagian: hardware ini diukur (jendela 212–402 ms; PSS ±290 MB, budget baru PSS < 350 MB). GNOME/KDE/AMD tetap butuh mesin lain |
 | E1 | ⏳ Tindakan maintainer: kirim issue/PR ke upstream |
-| E3 | ⏳ Butuh uji live dengan pengguna hadir (menyuntik sentuhan ke desktop); mesin ini punya 2 monitor, cocok untuk itu |
+| E3 | ⏳ Dicoba 9 Nov dengan harness aman (jendela fullscreen milik harness menutup kedua monitor sebelum satu sentuhan pun dikirim): Hyprland 0.56 mengenali touchscreen virtual (`archdroid-touch-probe`, juga `ArchDroid Touch` dari kode touch mode), tetapi jendela GTK3 maupun GTK4 harness tidak menerima event sentuh apa pun, jadi pemetaan monitor belum bisa diamati. Langkah berikut: harness dengan klien Wayland yang terbukti menerima `wl_touch` (mis. `wev`), atau uji langsung dengan Waydroid di DP-2 bersama pengguna. Kode belum diubah |
 | E4 | ✅ `.apks`/`.xapk`/`.apkm` lewat `adb install-multiple` (`src-tauri/src/apk.rs`, crate `zip` 4.6.1 deflate-only). Diuji live: ARCore (4 split) terpasang ulang dari `.apks` dan `.xapk` bersarang; bundle tanpa base ditolak dengan alasan Android. OBB ditolak dengan petunjuk (belum didukung) |
 | E5 | ⏳ Spike selesai, keputusan maintainer: [`docs/BACKUP-DESIGN.md`](docs/BACKUP-DESIGN.md). Diuji live: APK bisa dicadangkan tanpa root, data app tidak (`adb root` tidak tersedia; data di host milik uid app, mode 700). Opsi 1 (backup APK tanpa root, "Save APK") **sudah dikerjakan** dan diuji live (simpan ARCore → pasang ulang). Opsi 2/3 (data) menunggu keputusan |
 | F1, F2, F3, F4 | ✅ Selesai |
