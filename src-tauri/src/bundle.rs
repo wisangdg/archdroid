@@ -4,7 +4,9 @@
 //! before sharing it, and passed through the same redaction as the app log.
 //! ArchDroid never uploads it; the user decides where it goes.
 
-use crate::{app_log_file, collect_diagnostics, marker_file, redact_with_home, waydroid};
+use crate::{
+    app_log_file, collect_diagnostics, marker_file, redact_with_home, waydroid, WAYDROID_LOG,
+};
 use crate::{AppError, DiagnosticsReport};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -12,7 +14,6 @@ use tauri::AppHandle;
 
 /// Per-log budget: enough for the last few tasks, small enough to paste.
 const LOG_TAIL_BYTES: u64 = 32 * 1024;
-const WAYDROID_LOG: &str = "/var/lib/waydroid/waydroid.log";
 const MARKERS: [&str; 3] = [
     "gapps_installed",
     "houdini_installed",

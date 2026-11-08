@@ -566,20 +566,43 @@ async fn waydroid_prop_get(key: String) -> CommandResult {
     .await
 }
 
-#[tauri::command]
-async fn waydroid_log(app: AppHandle) -> CommandResult {
-    let script = r#"
-if [ -f /var/lib/waydroid/waydroid.log ]; then
-    tail -n 1000 /var/lib/waydroid/waydroid.log
+const WAYDROID_LOG: &str = "/var/lib/waydroid/waydroid.log";
+
+/// Root is only needed when the log exists and the user may not read it.
+/// Waydroid creates it `0644` on usual hosts, and a missing file needs no root
+/// to report either.
+fn waydroid_log_needs_root(path: &Path) -> bool {
+    matches!(
+        std::fs::File::open(path),
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied
+    )
+}
+
+fn waydroid_log_script(path: &str) -> String {
+    let path = sh_quote(path);
+    format!(
+        r#"
+if [ -f {path} ]; then
+    tail -n 1000 {path}
 else
-    echo "No logs found at /var/lib/waydroid/waydroid.log"
+    echo "No logs found at "{path}
 fi
 "#
-    .to_string();
+    )
+}
 
-    stream_privileged_script(app, script, Completion::None, waydroid::TIMEOUT_NORMAL)
-        .await
-        .into_command_result()
+#[tauri::command]
+async fn waydroid_log(app: AppHandle) -> CommandResult {
+    let script = waydroid_log_script(WAYDROID_LOG);
+    if waydroid_log_needs_root(Path::new(WAYDROID_LOG)) {
+        stream_privileged_script(app, script, Completion::None, waydroid::TIMEOUT_NORMAL)
+            .await
+            .into_command_result()
+    } else {
+        stream_user_script(app, script, waydroid::TIMEOUT_NORMAL)
+            .await
+            .into_command_result()
+    }
 }
 
 /// Mask what must not reach a log or a support paste: the home directory and
@@ -1793,6 +1816,42 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_waydroid_log_needs_root_only_when_it_is_unreadable() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("archdroid-log-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let log = dir.join("waydroid.log");
+        assert!(!super::waydroid_log_needs_root(&log), "missing file");
+        std::fs::write(&log, "line\n").unwrap();
+        std::fs::set_permissions(&log, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(!super::waydroid_log_needs_root(&log), "0644 file");
+        std::fs::set_permissions(&log, std::fs::Permissions::from_mode(0o000)).unwrap();
+        // Root reads any file, so the unreadable case only holds for a user.
+        let is_root = std::fs::read_to_string("/proc/self/status")
+            .map(|s| {
+                s.lines()
+                    .any(|l| l.starts_with("Uid:") && l.split_whitespace().nth(1) == Some("0"))
+            })
+            .unwrap_or(false);
+        assert_eq!(super::waydroid_log_needs_root(&log), !is_root);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_waydroid_log_script_tails_the_quoted_path() {
+        let script = super::waydroid_log_script("/var/lib/way droid/waydroid.log");
+        assert!(
+            script.contains("tail -n 1000 '/var/lib/way droid/waydroid.log'"),
+            "{script}"
+        );
+        let check = std::process::Command::new("bash")
+            .args(["-n", "-c", &script])
+            .status()
+            .expect("bash");
+        assert!(check.success(), "{script}");
+    }
+
     #[test]
     fn repeated_command_errors_are_logged_once_in_a_row() {
         let mut last = None;

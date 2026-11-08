@@ -16,6 +16,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - **Force stop** for the selected app (`adb shell am force-stop`; needs adb and a running engine). `waydroid_kill_app` is now part of the release build, with its UI and tests.
 
 ### Fixed
+- **View Logs** (Settings) reads the Waydroid log without a root prompt when the file is readable (Waydroid creates it with mode `0644`); root is only requested when the user may not read it.
 - Retry after a failed **Enable access** (touch mode) now asks for consent again; it did nothing.
 - The Install Tools multitouch card is read on start (also with the engine stopped) and after every finished task, instead of only when the session came online.
 - Settings reads the Multi-Window, Invert Colors, and display properties again when the session comes online. Before, they were read once at start, usually while the engine was stopped, and showed defaults. The two toggles are disabled while the engine is stopped, because Waydroid cannot change properties then.
