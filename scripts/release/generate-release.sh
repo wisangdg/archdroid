@@ -19,6 +19,27 @@ rm -rf "$OUT_DIR"/*
 
 echo "==> Staging Tier 1 (official verified) $VERSION artifacts in $OUT_DIR"
 
+# Tier 2 packages do not bundle libraries, but the archdroid binary in them is
+# built on the maintainer's host. Unpack it and hold it to the same glibc floor
+# as the AppImage (Ubuntu 22.04, 2.35), so a newer build host cannot silently
+# break Debian 12 or Ubuntu 22.04.
+GLIBC_FLOOR="2.35"
+check_package_glibc() {
+    local pkg="$1" dir
+    dir="$(mktemp -d)"
+    case "$pkg" in
+        *.deb) bsdtar -xOf "$pkg" 'data.tar.*' | bsdtar -xf - -C "$dir" ;;
+        *.rpm) bsdtar -xf "$pkg" -C "$dir" ;;
+    esac
+    if ! "$REPO_ROOT/scripts/release/check-glibc.sh" "$dir" "$GLIBC_FLOOR"; then
+        rm -rf "$dir"
+        echo "Error: $(basename "$pkg") needs a newer glibc than $GLIBC_FLOOR" >&2
+        exit 1
+    fi
+    rm -rf "$dir"
+}
+command -v bsdtar >/dev/null || { echo "Error: bsdtar (libarchive) is needed to check the .deb/.rpm" >&2; exit 1; }
+
 # 1. Arch Linux package (Tier 1)
 ARCH_PKG="$(ls -1t "$REPO_ROOT/packaging/arch"/archdroid-bin-"$VERSION"-[0-9]*-x86_64.pkg.tar.zst 2>/dev/null | head -n1 || true)"
 if [[ -f "$ARCH_PKG" ]]; then
@@ -47,6 +68,7 @@ fi
 # 3. Debian package (Tier 2, live-tested on Ubuntu 24.04; signed with the rest)
 DEB_PKG="$REPO_ROOT/src-tauri/target/release/bundle/deb/ArchDroid_${VERSION}_amd64.deb"
 if [[ -f "$DEB_PKG" ]]; then
+    check_package_glibc "$DEB_PKG"
     cp -v "$DEB_PKG" "$OUT_DIR/"
 else
     echo "Error: .deb for $VERSION not found, run npm run build:bundles" >&2
@@ -56,6 +78,7 @@ fi
 # 4. RPM package (Tier 2, live-tested on Fedora 44; signed since 0.1.5)
 RPM_PKG="$REPO_ROOT/src-tauri/target/release/bundle/rpm/ArchDroid-${VERSION}-1.x86_64.rpm"
 if [[ -f "$RPM_PKG" ]]; then
+    check_package_glibc "$RPM_PKG"
     cp -v "$RPM_PKG" "$OUT_DIR/"
 else
     echo "Error: .rpm for $VERSION not found, run npm run build:bundles -- --bundles deb,rpm" >&2
