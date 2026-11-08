@@ -19,6 +19,12 @@ src-tauri/gen/schemas/
 packaging/arch/pkg/
 packaging/arch/src/
 packaging/arch/*.pkg.tar.*
+packaging/aur/pkg/
+packaging/aur/src/
+packaging/aur/*.pkg.tar.*
+packaging/aur/*.deb
+packaging/aur/SHA256SUMS-*
+packaging/aur/LICENSE-*
 dist-release/
 
 
