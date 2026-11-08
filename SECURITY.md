@@ -1,56 +1,56 @@
-# Kebijakan Keamanan (Security Policy)
+# Security Policy
 
-ArchDroid mengutamakan keamanan berlapis (*defense-in-depth*) dan batasan hak akses minimum (*least-privilege*) pada sistem operasi Linux.
-
----
-
-## 1. Model Hak Akses & Privilege Boundary
-
-### Proses Desktop & Webview (Unprivileged)
-- **Non-Root Execution**: Aplikasi desktop ArchDroid berjalan sepenuhnya di level user biasa (*unprivileged desktop user*). ArchDroid **tidak boleh** dan **tidak pernah** dijalankan sebagai `root` langsung (`sudo archdroid`).
-- **Tauri IPC & Capability Scoping**: Webview Tauri v2 diisolasi secara ketat. Tidak ada plugin shell bebas, plugin filesystem arbitrary, atau plugin HTTP yang diekspos ke frontend. Hanya perintah IPC terdaftar dan divalidasi yang dapat dipanggil oleh antarmuka.
-- **Content Security Policy (CSP)**: Menggunakan CSP produksi yang memblokir eksekusi script remote, iframe eksternal, dan inline string injection (`default-src 'self'`). Font dan aset grafis dimuat 100% lokal dari bundle aplikasi (tanpa Google Fonts atau CDN pihak ketiga).
-
-### Operasi Privileged (Root Elevation)
-Operasi administratif sistem (seperti instalasi paket distro, inisialisasi `/var/lib/waydroid`, dan injeksi GApps/Houdini) menggunakan batasan keamanan ketat:
-1. **Explicit Consent & Package Approval**:
-   Sebelum otentikasi Polkit (`pkexec`) atau `sudo` dipicu, modal antarmuka menampilkan rincian perintah persis dan daftar paket yang akan dipasang. Backend memvalidasi ulang daftar persetujuan tersebut dan menolak eksekusi jika ada paket tambahan yang tidak disetujui.
-2. **Isolasi Direktori Sementara**:
-   Skrip root dieksekusi di dalam direktori temporer privat bertaraf `mode 0700` (`mktemp -d`).
-3. **Sanitasi Environment**:
-   Variabel sensitif seperti `SUDO_USER` dan env kustom dibersihkan. Cache root diarahkan ke direktori kerja privat (`$ARCHDROID_WORK/cache`) agar tidak mencemari kepemilikan file di direktori home user (`~/.cache`).
-4. **Verifikasi Hash Dependensi Pihak Ketiga**:
-   Skrip otomasi pendukung (seperti `waydroid_script`) mengunci seluruh paket dependensi Python menggunakan hash SHA-256 (`--require-hashes --only-binary=:all:`).
-
-### Touch mode (akses perangkat input)
-- **Apa yang diberikan**: aturan udev `70-archdroid-touch.rules` memberi user yang sedang login (tag `uaccess`, pola yang sama dengan `60-steam-input.rules` milik Steam) akses ke `/dev/uinput` dan ke node `event*` milik **mouse**. Perangkat yang ditandai keyboard (`ID_INPUT_KEYBOARD=1`) sengaja dikecualikan, jadi touch mode tidak pernah bisa membaca ketikan.
-- **Konsekuensi**: proses apa pun milik user yang login dapat membuat perangkat input virtual dan membaca gerakan mouse. Itu setara dengan yang diberikan Steam Input. Hapus file aturan dan jalankan `udevadm control --reload-rules` untuk mencabutnya.
-- **Saat aktif**: ArchDroid meng-*grab* mouse fisik dan meneruskannya lewat mouse virtual. Jika ArchDroid berhenti atau crash, file descriptor tertutup dan kernel melepas grab, sehingga mouse kembali normal.
-- **Tanpa root saat berjalan**: touch mode tidak memakai root. Root hanya dipakai sekali oleh tombol "Enable access" pada instalasi yang tidak membawa aturan tersebut.
+ArchDroid relies on defense in depth and least privilege on the Linux host.
 
 ---
 
-## 2. Versi yang Didukung
+## 1. Privilege model and boundaries
 
-Pembaruan keamanan hanya disediakan untuk versi aktif pada branch `main` repositori resmi:
+### Desktop process and WebView (unprivileged)
+- **Never runs as root.** The ArchDroid desktop app runs entirely as the normal desktop user. It must not and does not run as `root` (`sudo archdroid`).
+- **Tauri IPC and capability scoping.** The Tauri v2 WebView is tightly isolated. No free shell plugin, arbitrary filesystem plugin, or HTTP plugin is exposed to the frontend. Only registered, validated IPC commands can be called by the interface.
+- **Content Security Policy (CSP).** The production CSP blocks remote scripts, external iframes, and inline string injection (`default-src 'self'`). Fonts and graphics load entirely from the app bundle (no Google Fonts or third-party CDN).
 
-| Versi | Didukung |
+### Privileged operations (root elevation)
+Administrative operations (installing distro packages, initializing `/var/lib/waydroid`, injecting GApps/libhoudini) run under these boundaries:
+1. **Explicit consent and package approval.**
+   Before Polkit (`pkexec`) or `sudo` authentication starts, a dialog shows the exact command and the list of packages to be installed. The backend re-validates the approved list and refuses to run if any package outside it is requested.
+2. **Private temporary directory.**
+   Root scripts run inside a private temporary directory with mode `0700` (`mktemp -d`).
+3. **Environment sanitizing.**
+   Sensitive variables such as `SUDO_USER` and custom environment are cleared. The root cache is redirected to the private work directory (`$ARCHDROID_WORK/cache`) so it never changes the ownership of files in the user's home (`~/.cache`).
+4. **Hash-verified third-party dependencies.**
+   Supporting automation scripts (such as `waydroid_script`) lock every Python dependency by SHA-256 (`--require-hashes --only-binary=:all:`). The GApps and libhoudini archives are used only if their SHA-256 matches the pin in the code.
+
+### Touch mode (input device access)
+- **What is granted:** the udev rule `70-archdroid-touch.rules` gives the logged-in user (tag `uaccess`, the same pattern as Steam's `60-steam-input.rules`) access to `/dev/uinput` and to the `event*` nodes of **mice**. Devices tagged as keyboards (`ID_INPUT_KEYBOARD=1`) are deliberately excluded, so touch mode can never read keystrokes.
+- **Consequence:** any process of the logged-in user can create virtual input devices (keyboards included) and read mouse movement. That is the same access Steam Input grants. Delete the rule file and run `udevadm control --reload-rules` to revoke it.
+- **While active:** ArchDroid grabs the physical mice and forwards them through a virtual mouse. If ArchDroid stops or crashes, its file descriptors close and the kernel releases the grab, so the mouse works normally again.
+- **No root at run time:** touch mode does not use root. Root is used once, by the "Enable access" button, on installs that did not ship the rule.
+
+---
+
+## 2. Supported versions
+
+Security fixes are provided only for the active version on the `main` branch of the official repository:
+
+| Version | Supported |
 |---|---|
-| `0.1.x` (Latest) | :white_check_mark: |
+| `0.1.x` (latest) | :white_check_mark: |
 | `< 0.1.0` | :x: |
 
 ---
 
-## 3. Pelaporan Kerentanan (Reporting a Vulnerability)
+## 3. Reporting a vulnerability
 
-Jika Anda menemukan celah atau kerentanan keamanan pada ArchDroid:
-1. **Jangan buat isu publik di GitHub Issues.**
-2. Laporkan secara privat melalui fitur [GitHub Security Advisories](https://github.com/wisangdg/archdroid/security/advisories/new) di repositori resmi, atau kirim email langsung ke:
+If you find a vulnerability in ArchDroid:
+1. **Do not open a public GitHub issue.**
+2. Report it privately through [GitHub Security Advisories](https://github.com/wisangdg/archdroid/security/advisories/new) in the official repository, or by email:
    - **Email:** `gwisang45@gmail.com`
-   - **Subjek:** `[SECURITY] Laporan Kerentanan ArchDroid`
-3. Mohon sertakan:
-   - Deskripsi langkah reproduksi (reproduction steps) atau proof of concept (PoC).
-   - Versi ArchDroid dan distribusi Linux yang terpengaruh.
-   - Analisis dampak keamanan.
+   - **Subject:** `[SECURITY] ArchDroid vulnerability report`
+3. Please include:
+   - Reproduction steps or a proof of concept.
+   - The affected ArchDroid version and Linux distribution.
+   - Your analysis of the security impact.
 
-Laporan yang diterima akan diverifikasi dalam waktu maksimal 3 hari kerja sebelum perbaikan dirilis secara terkoordinasi.
+Reports are acknowledged and verified within 3 working days, before a fix is released in a coordinated way.
