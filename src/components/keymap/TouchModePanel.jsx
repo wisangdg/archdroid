@@ -27,7 +27,8 @@ function StateHint({ state, status }) {
           Your user cannot{" "}
           {status.uinput_access ? "read a mouse" : "create virtual devices"}{" "}
           yet. &quot;Enable access&quot; installs a udev rule that gives the
-          logged-in user /dev/uinput and mice (never keyboards).
+          logged-in user read access to mice (never keyboards) and /dev/uinput,
+          which any program you run can use to create virtual input devices.
         </p>
       );
     case "stopped":

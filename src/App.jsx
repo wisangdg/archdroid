@@ -500,7 +500,7 @@ export default function App() {
       title: "Enable Touch Mode Access (Root Required)",
       description:
         "This installs a udev rule at /etc/udev/rules.d/70-archdroid-touch.rules.\n\n" +
-        "• Grants: the logged-in desktop user may create virtual input devices (/dev/uinput) and read mice. Keyboards are never included.\n" +
+        "• Grants: the logged-in desktop user may read mice (never keyboards) and use /dev/uinput, which lets any program the user runs create virtual input devices, keyboards included (the same access Steam Input gets).\n" +
         "• Why: touch mode turns your mouse clicks over Android windows into finger touches.\n" +
         "• Privilege: Requires Administrator (Root) access via Polkit or sudo\n" +
         '• Undo: delete that file and run "udevadm control --reload-rules".\n\n' +

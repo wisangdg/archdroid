@@ -153,7 +153,7 @@ ArchDroid follows the **least-privilege** principle.
 1. Installing missing system packages (`waydroid`, `squashfs-tools`, `lzip`, `git`) with your package manager.
 2. First-time initialization (`waydroid init`).
 3. Add-on injection (GApps, libhoudini, multitouch), which modifies the Waydroid system image.
-4. Touch mode access, only if your install did not ship it: a udev rule that lets the logged-in user use `/dev/uinput` and read mice (never keyboards). The Arch, `.deb` and `.rpm` packages install it as `/usr/lib/udev/rules.d/70-archdroid-touch.rules`.
+4. Touch mode access, only if your install did not ship it: a udev rule that lets the logged-in user read mice (never keyboards) and use `/dev/uinput`. `/dev/uinput` lets any program you run create virtual input devices, keyboards included; Steam Input's udev rule grants the same. The Arch, `.deb` and `.rpm` packages install it as `/usr/lib/udev/rules.d/70-archdroid-touch.rules`; delete the rule and run `sudo udevadm control --reload-rules` to revoke it.
 
 **Everything else runs as your normal user:** opening the app, starting the Waydroid session, launching apps, installing APKs, changing resolution and DPI, running Phantom, and diagnostics.
 
