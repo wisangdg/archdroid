@@ -61,7 +61,7 @@ export function useApkInstall({ addToast, operationInFlight, loadApps }) {
         });
       }
     },
-    [addToast, loadApps]
+    [addToast, loadApps, operationInFlight]
   );
 
   const handleInstallApk = async () => {

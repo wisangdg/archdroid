@@ -114,6 +114,9 @@ export default function App() {
     checkHoudiniStatus();
     // Answers from the overlay file and marker even while the engine is off.
     checkMultitouchStatus();
+    // Mount only. loadApps is declared further down, so it cannot be listed
+    // here, and the status checks are plain functions recreated each render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const checkGappsStatus = async () => {
