@@ -56,12 +56,13 @@ export const TASK_STEP_CONFIGS = {
       label: "Preflight & Packages",
       description: "System dependencies",
     },
+    // `waydroid init` downloads the image and configures the container in
+    // one command, so the script can only announce one stage for both.
     {
       id: "download",
-      label: "Download Image",
-      description: "Android system image",
+      label: "Download & Initialize",
+      description: "Android image and container",
     },
-    { id: "init", label: "Initialize", description: "Configuring container" },
     { id: "done", label: "Ready", description: "Ready to launch" },
   ],
   phantom: [
@@ -168,126 +169,14 @@ export function detectStepProgress(taskType, logs = [], taskResult = null) {
   if (isCompleted) {
     activeIndex = steps.length - 1;
     currentMessage = "Task finished successfully!";
-  } else if (lastStepMarker(logs, steps)) {
-    // Scripts announce each phase with "[STEP] <id>"; trust that over guessing.
-    const marker = lastStepMarker(logs, steps);
-    activeIndex = marker.index;
-    currentMessage = marker.message;
   } else {
-    // Scan logs backwards to find the current active step based on taskType
-    for (let i = logs.length - 1; i >= 0; i--) {
-      const line = logs[i];
-      if (!line) continue;
-
-      if (taskType === "gapps" || taskType === "houdini") {
-        if (
-          line.includes("Injecting GApps") ||
-          line.includes("Installing ARM Translation") ||
-          line.includes("libhoudini")
-        ) {
-          activeIndex = 4;
-          currentMessage = line;
-          break;
-        }
-        if (
-          line.includes("Setting up isolated Python venv") ||
-          line.includes("Installing Python requirements") ||
-          line.includes("pip install")
-        ) {
-          activeIndex = 3;
-          currentMessage = line;
-          break;
-        }
-        if (
-          line.includes("Cloning pinned") ||
-          line.includes("waydroid_script")
-        ) {
-          activeIndex = 2;
-          currentMessage = line;
-          break;
-        }
-        if (
-          line.includes("Installing dependencies") ||
-          line.includes("pacman") ||
-          line.includes("apt") ||
-          line.includes("dnf") ||
-          line.includes("zypper")
-        ) {
-          activeIndex = 1;
-          currentMessage = line;
-          break;
-        }
-        if (
-          line.includes("Requesting root access") ||
-          line.includes("Elevated shell started")
-        ) {
-          activeIndex = 0;
-          currentMessage = line;
-          break;
-        }
-      } else if (taskType === "phantom") {
-        if (
-          line.includes("Running Phantom installer") ||
-          line.includes("Compiling") ||
-          line.includes("cargo") ||
-          line.includes("Building")
-        ) {
-          activeIndex = 1;
-          currentMessage = line;
-          break;
-        }
-        if (line.includes("Cloning pinned") || line.includes("git")) {
-          activeIndex = 0;
-          currentMessage = line;
-          break;
-        }
-      } else if (taskType === "wipe") {
-        if (line.includes("Wiping Waydroid")) {
-          activeIndex = 2;
-          currentMessage = line;
-          break;
-        }
-        if (line.includes("Stopping Waydroid")) {
-          activeIndex = 1;
-          currentMessage = line;
-          break;
-        }
-        if (
-          line.includes("Requesting root access") ||
-          line.includes("Elevated shell started")
-        ) {
-          activeIndex = 0;
-          currentMessage = line;
-          break;
-        }
-      } else if (taskType === "init") {
-        if (
-          line.includes("Initializing Waydroid") ||
-          line.includes("waydroid init")
-        ) {
-          activeIndex = 3;
-          currentMessage = line;
-          break;
-        }
-        if (line.includes("Downloading") || line.includes("system.img")) {
-          activeIndex = 2;
-          currentMessage = line;
-          break;
-        }
-        if (line.includes("Preflight") || line.includes("package")) {
-          activeIndex = 1;
-          currentMessage = line;
-          break;
-        }
-        if (
-          line.includes("Requesting root access") ||
-          line.includes("Elevated shell started")
-        ) {
-          activeIndex = 0;
-          currentMessage = line;
-          break;
-        }
-      }
+    // Every script announces its phases with "[STEP] <id>" (scripts.rs and
+    // waydroid_init in lib.rs). Before the first marker the task is still
+    // elevating, which is the first stage.
+    const marker = lastStepMarker(logs, steps);
+    if (marker) {
+      activeIndex = marker.index;
+      currentMessage = marker.message;
     }
   }
 

@@ -89,8 +89,10 @@ test("detectStepProgress does not falsely fail on words like failed in third-par
 });
 
 test("detectStepProgress accurately tracks phantom compilation step", () => {
+  // What phantom_install_script prints (src-tauri/src/scripts.rs).
   const logs = [
-    "[SYSTEM] Cloning pinned Phantom source...",
+    "[STEP] repo",
+    "[STEP] build",
     "[SYSTEM] Running Phantom installer as the desktop user...",
   ];
   const result = detectStepProgress("phantom", logs, null);
@@ -112,4 +114,10 @@ test("detectStepProgress follows [STEP] markers emitted by the scripts", () => {
     result.currentMessage,
     "[SYSTEM] Setting up Python environment..."
   );
+});
+
+test("before the first [STEP] marker the stepper stays on the first stage", () => {
+  const logs = ["[SYSTEM] Requesting root access...", "pacman -S lzip"];
+  const result = detectStepProgress("gapps", logs, null);
+  assert.equal(result.activeStepIndex, 0);
 });
