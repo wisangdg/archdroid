@@ -193,9 +193,13 @@ Catatan:
   menulisnya ke `waydroid_base.prop` setiap container start. Karena itu
   identitas butuh restart, sedangkan `waydroid prop set` hanya runtime dan
   tidak dipakai untuk apply.
-- **Tidak ada `persist.waydroid.width/height` di 1.6.3** (dicek dari sumber);
-  karena itu resolusi/DPI lewat `wm`, bukan prop. Efeknya skala UI Android,
-  bukan ukuran window Wayland.
+- `persist.waydroid.width/height` tidak dibaca oleh tools Python Waydroid
+  1.6.3, tetapi **dibaca oleh image Android**. Diuji live 9 Nov 2026 (Waydroid
+  1.6.3, LineageOS 20, Hyprland, scale 1.25): kosong → display Android mengikuti
+  window (`wm size` 625x681 untuk window 500x545); 1280x720 + restart sesi →
+  `wm size` 1600x900 (= 1280x720 × scale). Preset resolusi di Settings bekerja.
+  DPI berbeda: `ro.sf.lcd_density` sudah di-set saat boot dan `prop set` ditolak,
+  jadi DPI lewat `wm density` (override bertahan setelah restart).
 - Tulis cfg hanya jika nilai `[properties]` benar-benar berubah, jadi apply
   kedua tanpa perubahan tidak memunculkan prompt root. Payload ditulis
   sebagai base64 ke `waydroid.cfg.tmp` lalu `mv` (atomik, aman dari quoting).
