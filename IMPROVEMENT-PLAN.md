@@ -2,7 +2,7 @@
 
 > **Dibuat:** 9 Nov 2026, dari pembacaan kode di branch `feat/touch-mode`
 > (`d66aa50`, 2 commit di depan `main`).
-> **Hubungan dengan dokumen lain:** [`todo.md`](todo.md) adalah gate rilis 0.1.x
+> **Hubungan dengan dokumen lain:** [`docs/archive/RELEASE-GATE-0.1.md`](docs/archive/RELEASE-GATE-0.1.md) (dulu `RELEASE-GATE-0.1.md`) adalah gate rilis 0.1.x
 > (semua P0/P1 selesai). [`docs/BACKEND-TODO.md`](docs/BACKEND-TODO.md) adalah
 > backlog fitur backend. Rencana ini tidak mengulang isi keduanya; item yang
 > sudah tercatat di sana hanya dirujuk.
@@ -10,6 +10,34 @@
 > dengan BACKEND-TODO).
 > **Prioritas:** `P1` sebelum/bersama rilis berikutnya · `P2` beberapa minggu ke
 > depan · `P3` saat menyentuh area itu atau bila ada permintaan.
+
+
+## Status pengerjaan
+
+Branch `improve/plan-0.1.6` (dari `feat/touch-mode`), 9 Nov 2026. Setiap item
+satu commit atau lebih; semua test, lint, clippy, dan E2E hijau setelah tiap
+commit.
+
+| Item | Status |
+|---|---|
+| A1, A2, A3 | ✅ Selesai, dengan test yang gagal sebelum perbaikan |
+| A4 | ✅ Selesai: root hanya saat `PermissionDenied` |
+| A5 | ⏳ Butuh verifikasi dengan sesi Waydroid berjalan (mengubah DPI Android, jadi tidak dijalankan otomatis) |
+| A6 | ✅ Selesai: tahap init digabung; status awal `null` |
+| B1 | ⏳ Tindakan maintainer: merge, smoke rilis, tanda tangan, publikasi |
+| B2 | ✅ Langkah (1): `.deb`/`.rpm` dicek glibc 2.35 (0.1.5 butuh 2.34). Langkah (2) belum |
+| B3 | ✅ Selesai (termasuk `Cargo.lock`) |
+| C1 | ✅ Selesai; `npm audit` penuh kini 0, risiko dev-only ditutup |
+| C2, C3 | ✅ Selesai (belum terbukti di GitHub Actions sampai di-push) |
+| D1 | ✅ Selesai: `src/lib/tasks.js`; `App.jsx` 826 → ±590 baris |
+| D2 | ✅ Versi ringan: parser baris di frontend (`src/lib/waydroidStatus.js`) alih-alih mengubah format wire, supaya mock test dan E2E tidak berubah |
+| D3 | ✅ Selesai |
+| E2 | ✅ Selesai: command `waydroid_boot_state`, "Android Booting…" |
+| F1, F2, F3, F4 | ✅ Selesai |
+| Lainnya | Belum dikerjakan |
+
+Item baru dari arsip gate (P2 yang belum tercakup): optimasi daftar app
+besar dan virtualisasi log terminal; kerjakan hanya bila ada laporan lambat.
 
 ---
 
@@ -63,7 +91,7 @@ ditemukan di kode.
 | F1 | Terjemahkan `SECURITY.md` ke bahasa Inggris | P1 | S |
 | F2 | Kalimat akses `/dev/uinput` di README dibuat tepat | P1 | S |
 | F3 | Issue template dan `CONTRIBUTING.md` | P2 | S |
-| F4 | Arsipkan `todo.md`; satu backlog yang hidup | P3 | S |
+| F4 | Arsipkan `RELEASE-GATE-0.1.md`; satu backlog yang hidup | P3 | S |
 | F5 | Matriks hardware (GNOME, KDE, AMD) dan ukur startup/RSS | P2 | M |
 
 ---
@@ -201,7 +229,7 @@ Kerjakan duluan. Setiap perbaikan dimulai dengan test yang gagal.
 ### B4 — Paket AUR `archdroid-bin` (P2, S–M)
 - **Bukti:** tidak ada auto-updater (keputusan yang benar, lihat
   `docs/RELEASE-AND-UPDATES.md`), jadi pengguna Arch hanya tahu ada versi baru
-  bila membuka halaman Releases. AUR/Flathub tercatat sebagai P2 di `todo.md` §4.
+  bila membuka halaman Releases. AUR/Flathub tercatat sebagai P2 di `RELEASE-GATE-0.1.md` §4.
 - **Kerjakan:** PKGBUILD AUR yang mengunduh artefak rilis bertanda tangan dan
   memverifikasinya (`validpgpkeys` dengan fingerprint rilis). Update AUR menjadi
   satu langkah di checklist rilis.
@@ -393,14 +421,14 @@ Kerjakan duluan. Setiap perbaikan dimulai dengan test yang gagal.
 ### F3 — Issue template dan `CONTRIBUTING.md` (P2, S)
 - **Bukti:** `.github/` hanya berisi workflow; tidak ada issue template atau
   `CONTRIBUTING.md`. Tanpa telemetry, dukungan bergantung pada Diagnostic Bundle
-  yang dilampirkan pengguna (`todo.md` §5).
+  yang dilampirkan pengguna (`RELEASE-GATE-0.1.md` §5).
 - **Kerjakan:** `bug_report.yml` (versi, distro, compositor, GPU, Diagnostic
   Bundle), `config.yml` yang mengarahkan laporan keamanan ke Security Advisories,
   dan `CONTRIBUTING.md` berbahasa Inggris: build/test, aturan kerja backend
   (BACKEND-TODO), Conventional Commits, dan fitur `dev-commands`.
 
-### F4 — Arsipkan `todo.md` (P3, S)
-- **Bukti:** `todo.md` (80 KB) adalah gate rilis 0.1.x yang sudah tercapai; item
+### F4 — Arsipkan `RELEASE-GATE-0.1.md` (P3, S)
+- **Bukti:** `RELEASE-GATE-0.1.md` (80 KB) adalah gate rilis 0.1.x yang sudah tercapai; item
   P2 yang tersisa tumpang tindih dengan BACKEND-TODO dan rencana ini. Tidak ada
   dokumen lain yang menautkannya.
 - **Kerjakan:** pindahkan ke `docs/archive/RELEASE-GATE-0.1.md`; item P2 yang
@@ -408,7 +436,7 @@ Kerjakan duluan. Setiap perbaikan dimulai dengan test yang gagal.
 
 ### F5 — Matriks hardware dan budget performa (P2, M)
 - **Bukti:** README (Known Limitations #5): GNOME, KDE, dan GPU AMD belum diuji.
-  Budget startup (< 1,5 s) dan RSS (< 200 MB) dari `todo.md` P1-9 belum pernah
+  Budget startup (< 1,5 s) dan RSS (< 200 MB) dari `RELEASE-GATE-0.1.md` P1-9 belum pernah
   diukur.
 - **Kerjakan:** satu sesi uji per desktop (GNOME, KDE) dan satu mesin AMD; ukur
   waktu sampai jendela tampil dan RSS dengan biner rilis; catat di
@@ -445,7 +473,7 @@ Kerjakan duluan. Setiap perbaikan dimulai dengan test yang gagal.
 
 ## 11. Aturan untuk setiap item
 
-- Perbaikan bug dimulai dengan test yang gagal, seperti pola P0-4.3 di `todo.md`.
+- Perbaikan bug dimulai dengan test yang gagal, seperti pola P0-4.3 di `RELEASE-GATE-0.1.md`.
 - Satu item, satu commit atau lebih dengan Conventional Commits, seperti riwayat
   repo ini.
 - Perubahan yang terlihat pengguna masuk `CHANGELOG.md` di `[Unreleased]`; klaim
@@ -453,4 +481,4 @@ Kerjakan duluan. Setiap perbaikan dimulai dengan test yang gagal.
 - Command IPC baru masuk build produksi hanya bersama UI dan test-nya; selain itu
   tetap di balik `dev-commands`.
 - Setelah item selesai, centang di sini dengan tanggal dan bukti singkat, seperti
-  di `todo.md`.
+  di `RELEASE-GATE-0.1.md`.
