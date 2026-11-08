@@ -462,9 +462,15 @@ export default function App() {
       <main
         className={`main-content ${isInitialized && activeTab === "home" ? "main-content-split" : ""}`}
       >
-        <PageHeading activeTab={isInitialized ? activeTab : "setup"} />
+        <PageHeading
+          activeTab={isInitialized === false ? "setup" : activeTab}
+        />
         <div className="content-scrollable">
-          {!isInitialized ? (
+          {isInitialized === null ? (
+            <p className="status-pending" role="status">
+              Reading Waydroid status…
+            </p>
+          ) : !isInitialized ? (
             <SetupWizard
               onInitWaydroid={handleInitWaydroid}
               installing={installing}

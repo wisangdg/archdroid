@@ -16,6 +16,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - **Force stop** for the selected app (`adb shell am force-stop`; needs adb and a running engine). `waydroid_kill_app` is now part of the release build, with its UI and tests.
 
 ### Fixed
+- On a first run the window no longer shows the empty app library for a moment before the setup screen; it says it is reading the Waydroid status until the first reply.
+- The Initialize stepper no longer has an "Initialize" stage that never lit up: `waydroid init` downloads and configures in one step, now shown as "Download & Initialize".
 - **View Logs** (Settings) reads the Waydroid log without a root prompt when the file is readable (Waydroid creates it with mode `0644`); root is only requested when the user may not read it.
 - Retry after a failed **Enable access** (touch mode) now asks for consent again; it did nothing.
 - The Install Tools multitouch card is read on start (also with the engine stopped) and after every finished task, instead of only when the session came online.

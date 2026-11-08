@@ -9,7 +9,9 @@ import { sessionRunning } from "../lib/waydroidStatus";
  */
 export function useEngineStatus({ addToast, onOnline }) {
   const [status, setStatus] = useState("offline");
-  const [isInitialized, setIsInitialized] = useState(true);
+  // `null` until the first status reply, so a first run does not flash the
+  // (empty) app library before the setup screen.
+  const [isInitialized, setIsInitialized] = useState(null);
   const [isOperating, setIsOperating] = useState(false);
   const prevStatusRef = useRef("offline");
   const statusCheckInFlight = useRef(false);
@@ -60,6 +62,8 @@ export function useEngineStatus({ addToast, onOnline }) {
     } catch (e) {
       console.error("Status check failed:", e);
       setStatus("offline");
+      // The status is unreadable, not missing: show the app, not the setup.
+      setIsInitialized((known) => known ?? true);
       reportStatusError(String(e));
     } finally {
       statusCheckInFlight.current = false;

@@ -733,4 +733,26 @@ describe("App state & workflow integration", () => {
       { timeout: 4000 }
     );
   });
+  it("shows neither the library nor the setup before the first status reply", async () => {
+    let reply;
+    invoke.mockImplementation((cmd) => {
+      if (cmd === "waydroid_status")
+        return new Promise((resolve) => (reply = resolve));
+      if (cmd === "check_host_diagnostics")
+        return Promise.resolve({ items: [], package_manager: "pacman" });
+      if (cmd === "get_waydroid_apps") return Promise.resolve([]);
+      return Promise.resolve({ status: "not_installed" });
+    });
+
+    render(<App />);
+    expect(screen.getByText("Reading Waydroid status…")).toBeTruthy();
+    expect(screen.queryByText("Initialize Android Emulator")).toBeNull();
+
+    await act(async () =>
+      reply({ status: "error", code: "not_initialized", message: "no" })
+    );
+    await waitFor(() =>
+      expect(screen.getByText("Initialize Android Emulator")).toBeTruthy()
+    );
+  });
 });
