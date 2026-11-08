@@ -5,6 +5,7 @@ import {
   Gamepad2,
   Copy,
   Trash2,
+  Download,
   MousePointerClick,
 } from "lucide-react";
 import AppIcon from "./AppIcon";
@@ -23,6 +24,7 @@ export default function AppDetail({
   onForceStop,
   onOpenKeymap,
   onCopyPackage,
+  onBackupApk,
   onUninstall,
 }) {
   if (!app) {
@@ -93,6 +95,22 @@ export default function AppDetail({
           <Copy size={15} aria-hidden="true" />
           <span>Copy package ID</span>
         </button>
+        {onBackupApk && (
+          <button
+            type="button"
+            className="btn btn-outline"
+            onClick={() => onBackupApk(app.package, app.name)}
+            disabled={busy || !engineOnline || booting}
+            title={
+              engineOnline
+                ? "Save the app's APKs to Downloads (app data is not included)"
+                : "Start the engine to save the app's APKs"
+            }
+          >
+            <Download size={15} aria-hidden="true" />
+            <span>Save APK</span>
+          </button>
+        )}
         <button
           type="button"
           className="btn btn-outline-danger"

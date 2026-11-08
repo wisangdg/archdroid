@@ -128,6 +128,62 @@ fn install_bundle(path: &str, cancel: Option<&AtomicBool>) -> Result<()> {
     Ok(())
 }
 
+/// Save an installed app's APKs (base and splits) as one `.apks` bundle in
+/// Downloads, mode `0600`, and return its path. No root, so app data is not
+/// included (docs/BACKUP-DESIGN.md); the bundle reinstalls with
+/// [`install_blocking`].
+pub(crate) fn backup_apks(package: &str) -> Result<PathBuf> {
+    if !adb::available() {
+        return Err(AppError::not_found(
+            "adb",
+            "Saving an app's APKs needs adb (android-tools).",
+        ));
+    }
+    let work = PrivateDir::create()?;
+    let apks = adb::pull_apks(package, work.path())?;
+    let stamp: String = crate::bundle::format_utc(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0),
+    )
+    .chars()
+    .filter(char::is_ascii_digit)
+    .collect();
+    let target = crate::bundle::downloads_dir()?.join(bundle_file_name(package, &stamp));
+    write_bundle(&target, &apks)?;
+    Ok(target)
+}
+
+fn bundle_file_name(package: &str, stamp: &str) -> String {
+    format!("{package}-{stamp}.apks")
+}
+
+/// Store `apks` (already compressed) in a new ZIP at `target`, owner-only.
+fn write_bundle(target: &Path, apks: &[PathBuf]) -> Result<()> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(target)?;
+    let mut zip = zip::ZipWriter::new(file);
+    let options = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Stored)
+        .large_file(true);
+    let fail = |e: zip::result::ZipError| AppError::Io(std::io::Error::other(e.to_string()));
+    for apk in apks {
+        let name = apk
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| AppError::invalid_input("APK file name is not UTF-8"))?;
+        zip.start_file(name, options).map_err(fail)?;
+        std::io::copy(&mut std::fs::File::open(apk)?, &mut zip)?;
+    }
+    zip.finish().map_err(fail)?;
+    Ok(())
+}
+
 /// A `0700` directory under the temp dir, removed on drop.
 struct PrivateDir(PathBuf);
 
@@ -368,6 +424,33 @@ mod tests {
     }
 
     #[test]
+    fn a_saved_bundle_is_private_and_unpacks_to_the_same_splits() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = scratch("backup");
+        let pulled = [dir.join("base.apk"), dir.join("split_config.en.apk")];
+        for apk in &pulled {
+            std::fs::write(apk, SPLIT).unwrap();
+        }
+        let target = dir.join(bundle_file_name("com.game", "20261109035300"));
+        assert!(target.ends_with("com.game-20261109035300.apks"));
+        write_bundle(&target, &pulled).unwrap();
+        let mode = std::fs::metadata(&target).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+        // Never overwrite an earlier backup.
+        assert!(write_bundle(&target, &pulled).is_err());
+
+        let out = dir.join("out");
+        std::fs::create_dir(&out).unwrap();
+        let splits = extract_splits(&target, &out).unwrap();
+        assert_eq!(
+            splits,
+            [out.join("base.apk"), out.join("split_config.en.apk")]
+        );
+        assert_eq!(std::fs::read(&splits[0]).unwrap(), SPLIT);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn the_private_directory_is_owner_only_and_removed() {
         use std::os::unix::fs::PermissionsExt;
         let path = {
@@ -387,5 +470,15 @@ mod tests {
     fn live_bundle_install() {
         let bundle = std::env::var("ARCHDROID_BUNDLE").expect("ARCHDROID_BUNDLE");
         install_blocking(bundle, None).expect("bundle installs");
+    }
+
+    /// Live: `ARCHDROID_BACKUP_PKG=<package> cargo test live_backup_apks -- --ignored`
+    /// writes `<package>-<time>.apks` to Downloads and prints its path.
+    #[test]
+    #[ignore]
+    fn live_backup_apks() {
+        let package = std::env::var("ARCHDROID_BACKUP_PKG").expect("ARCHDROID_BACKUP_PKG");
+        let path = backup_apks(&package).expect("backup");
+        eprintln!("BACKUP {}", path.display());
     }
 }

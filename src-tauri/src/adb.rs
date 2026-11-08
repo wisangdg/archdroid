@@ -98,6 +98,54 @@ pub fn install_apks(paths: &[String], cancel: Option<&AtomicBool>) -> Result<Str
     })
 }
 
+/// `pm path` lines (`package:/data/app/.../base.apk`) as device paths.
+pub fn parse_package_paths(output: &str) -> Vec<String> {
+    output
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("package:"))
+        .filter(|path| path.starts_with('/') && path.ends_with(".apk"))
+        .map(str::to_string)
+        .collect()
+}
+
+/// Copy every APK of an installed package (base and splits) into `into`.
+/// No root: `pm path` and `adb pull` work as the shell user.
+pub fn pull_apks(package: &str, into: &Path) -> Result<Vec<std::path::PathBuf>> {
+    if !is_valid_package(package) {
+        return Err(AppError::invalid_input(format!(
+            "Invalid Android package name: {package:?}"
+        )));
+    }
+    with_device(true, |adb, serial| {
+        let shell = |args: &[&str]| {
+            let mut argv = vec!["-s".to_string(), serial.to_string(), "shell".to_string()];
+            argv.extend(args.iter().map(|a| a.to_string()));
+            waydroid::run_program(adb, &argv, TIMEOUT_QUICK, None)
+        };
+        let remote = parse_package_paths(&shell(&["pm", "path", package])?);
+        if remote.is_empty() {
+            return Err(AppError::command_failed(format!(
+                "Android reports no APK for {package}; is it installed?"
+            )));
+        }
+        let mut local = Vec::new();
+        for path in remote {
+            let name = path.rsplit('/').next().unwrap_or("base.apk").to_string();
+            let target = into.join(&name);
+            let argv = vec![
+                "-s".to_string(),
+                serial.to_string(),
+                "pull".to_string(),
+                path,
+                target.to_string_lossy().into_owned(),
+            ];
+            waydroid::run_program(adb, &argv, TIMEOUT_LONG, None)?;
+            local.push(target);
+        }
+        Ok(local)
+    })
+}
+
 /// Uninstall a package through adb. `waydroid app remove` can exit 0 while the
 /// platform service fails (`Failed with code: -3`), so adb is the authoritative
 /// path when it is available.
@@ -690,6 +738,19 @@ fn append_key(path: &Path, key: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pm_path_lists_every_split_and_nothing_else() {
+        let output = "package:/data/app/~~a==/com.g-b==/base.apk\r\npackage:/data/app/~~a==/com.g-b==/split_config.en.apk\r\n\nWARNING: linker\n";
+        assert_eq!(
+            parse_package_paths(output),
+            [
+                "/data/app/~~a==/com.g-b==/base.apk",
+                "/data/app/~~a==/com.g-b==/split_config.en.apk"
+            ]
+        );
+        assert!(parse_package_paths("package:relative.apk\npackage:/x/lib.so").is_empty());
+    }
 
     #[test]
     fn split_installs_target_the_container_with_every_split_as_its_own_word() {

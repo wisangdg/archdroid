@@ -1254,6 +1254,17 @@ async fn waydroid_reboot(app: AppHandle) -> CommandResult {
     .into_command_result()
 }
 
+/// "Save APK" in the app detail: the installed app's APKs as one `.apks`
+/// bundle in Downloads. Returns the path with home shown as `~`.
+#[tauri::command]
+async fn waydroid_backup_apk(package: String) -> CommandResult {
+    run_exclusive("APK backup", move |_| match apk::backup_apks(&package) {
+        Ok(path) => CommandResult::with_data(redact_text(&path.to_string_lossy())),
+        Err(error) => error.into(),
+    })
+    .await
+}
+
 /// The display density for Settings' Display presets.
 #[tauri::command]
 async fn waydroid_density_get() -> CommandResult {
@@ -1604,6 +1615,7 @@ pub fn run() {
             waydroid_reboot,
             waydroid_kill_app,
             waydroid_boot_state,
+            waydroid_backup_apk,
             waydroid_density_get,
             waydroid_density_set,
             #[cfg(feature = "dev-commands")]

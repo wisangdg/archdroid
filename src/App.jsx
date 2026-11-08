@@ -233,6 +233,34 @@ export default function App() {
     }
   };
 
+  const handleBackupApk = async (pkg, name = pkg) => {
+    addToast({
+      type: "info",
+      title: "Saving APK",
+      message: `Copying ${name}'s APKs from Android...`,
+      duration: 2500,
+    });
+    try {
+      const res = await invoke("waydroid_backup_apk", { package: pkg });
+      if (res?.status === "success") {
+        addToast({
+          type: "success",
+          title: "APK Saved",
+          message: `Saved to ${res.data}. App data is not included; install the file again to restore the app.`,
+        });
+      } else {
+        addToast({
+          type: "error",
+          title: "Save APK Failed",
+          message: res?.message || `Could not save ${name}.`,
+        });
+      }
+    } catch (e) {
+      console.error("Backup APK error:", e);
+      addToast({ type: "error", title: "Save APK Failed", message: String(e) });
+    }
+  };
+
   const handleCopyPackage = async (pkg) => {
     try {
       await navigator.clipboard.writeText(pkg);
@@ -490,6 +518,7 @@ export default function App() {
                   onInstallApk={handleInstallApk}
                   onUninstallApp={handleUninstallApp}
                   onCopyPackage={handleCopyPackage}
+                  onBackupApk={handleBackupApk}
                   busy={installing}
                 />
               )}

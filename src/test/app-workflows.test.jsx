@@ -755,4 +755,42 @@ describe("App state & workflow integration", () => {
       expect(screen.getByText("Initialize Android Emulator")).toBeTruthy()
     );
   });
+
+  it("Save APK stores the selected app's bundle and says where", async () => {
+    let reply = {
+      status: "success",
+      data: "~/Downloads/org.fdroid.fdroid-1.apks",
+    };
+    invoke.mockImplementation((cmd) => {
+      if (cmd === "waydroid_status")
+        return Promise.resolve({
+          status: "success",
+          data: "Session: RUNNING\nContainer: RUNNING\n",
+        });
+      if (cmd === "get_waydroid_apps")
+        return Promise.resolve([
+          { name: "F-Droid", package: "org.fdroid.fdroid", icon: null },
+        ]);
+      if (cmd === "waydroid_backup_apk") return Promise.resolve(reply);
+      if (cmd === "waydroid_prop_get")
+        return Promise.resolve({ status: "success", data: "false" });
+      return Promise.resolve({ status: "not_installed" });
+    });
+
+    render(<App />);
+    const save = await screen.findByRole("button", { name: "Save APK" });
+    await waitFor(() => expect(save.disabled).toBe(false));
+    fireEvent.click(save);
+    await waitFor(() => expect(screen.getByText("APK Saved")).toBeTruthy());
+    expect(invoke).toHaveBeenCalledWith("waydroid_backup_apk", {
+      package: "org.fdroid.fdroid",
+    });
+    expect(screen.getByText(/org\.fdroid\.fdroid-1\.apks/)).toBeTruthy();
+
+    reply = { status: "error", message: "adb is not installed" };
+    fireEvent.click(save);
+    await waitFor(() =>
+      expect(screen.getByText("Save APK Failed")).toBeTruthy()
+    );
+  });
 });

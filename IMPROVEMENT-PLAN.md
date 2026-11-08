@@ -41,7 +41,7 @@ commit.
 | E1 | ⏳ Tindakan maintainer: kirim issue/PR ke upstream |
 | E3 | ⏳ Butuh uji live dengan pengguna hadir (menyuntik sentuhan ke desktop); mesin ini punya 2 monitor, cocok untuk itu |
 | E4 | ✅ `.apks`/`.xapk`/`.apkm` lewat `adb install-multiple` (`src-tauri/src/apk.rs`, crate `zip` 4.6.1 deflate-only). Diuji live: ARCore (4 split) terpasang ulang dari `.apks` dan `.xapk` bersarang; bundle tanpa base ditolak dengan alasan Android. OBB ditolak dengan petunjuk (belum didukung) |
-| E5 | ⏳ Spike selesai, keputusan maintainer: [`docs/BACKUP-DESIGN.md`](docs/BACKUP-DESIGN.md). Diuji live: APK bisa dicadangkan tanpa root, data app tidak (`adb root` tidak tersedia; data di host milik uid app, mode 700). Rekomendasi: mulai dari backup APK tanpa root |
+| E5 | ⏳ Spike selesai, keputusan maintainer: [`docs/BACKUP-DESIGN.md`](docs/BACKUP-DESIGN.md). Diuji live: APK bisa dicadangkan tanpa root, data app tidak (`adb root` tidak tersedia; data di host milik uid app, mode 700). Opsi 1 (backup APK tanpa root, "Save APK") **sudah dikerjakan** dan diuji live (simpan ARCore → pasang ulang). Opsi 2/3 (data) menunggu keputusan |
 | F1, F2, F3, F4 | ✅ Selesai |
 
 Item baru dari arsip gate (P2 yang belum tercakup): optimasi daftar app
