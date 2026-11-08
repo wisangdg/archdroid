@@ -1,4 +1,5 @@
 import { test } from "node:test";
+import { TASKS } from "./tasks.js";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -42,6 +43,8 @@ function uiCommands() {
       commands.add(match[1]);
     }
   }
+  // Streaming tasks are started from the table in src/lib/tasks.js.
+  for (const task of Object.values(TASKS)) commands.add(task.command);
   return [...commands].sort();
 }
 
@@ -97,37 +100,33 @@ test("the arbitrary Android shell command is not in the default build", () => {
 });
 
 test("root-altering operations require explicit confirmation before execution", () => {
-  const appSource = read("src/App.jsx");
-
-  const rootOperations = [
-    { handler: "handleInstallGApps", command: "install_gapps" },
-    { handler: "handleInstallHoudini", command: "install_houdini" },
-    { handler: "handleInstallMultitouch", command: "install_multitouch" },
-    { handler: "handleInitWaydroid", command: "waydroid_init" },
-    { handler: "handleWipeData", command: "waydroid_wipe" },
+  const rootCommands = [
+    "install_gapps",
+    "install_houdini",
+    "install_multitouch",
+    "install_touch_mode_access",
+    "waydroid_init",
+    "waydroid_wipe",
   ];
-
-  for (const { handler } of rootOperations) {
-    const handlerIndex = appSource.indexOf(`const ${handler} =`);
-    assert.ok(handlerIndex > 0, `${handler} not found in App.jsx`);
-
-    // Verify the handler opens a confirmation modal before running the streaming task
-    const nextFunctionIndex = appSource.indexOf(
-      "const handle",
-      handlerIndex + 1
-    );
-    const handlerBody = appSource.slice(
-      handlerIndex,
-      nextFunctionIndex > 0 ? nextFunctionIndex : handlerIndex + 1500
-    );
-
+  for (const command of rootCommands) {
+    const task = Object.values(TASKS).find((t) => t.command === command);
+    assert.ok(task, `${command} is not a task`);
+    const { title = "", description = "" } = task.confirm ?? {};
     assert.ok(
-      handlerBody.includes("setConfirmModal"),
-      `${handler} must open a confirmation dialog`
-    );
-    assert.ok(
-      handlerBody.includes("Root Required") || handlerBody.includes("WARNING:"),
-      `${handler} confirmation must explicitly warn the user`
+      title.includes("Root Required") ||
+        title.includes("Factory Reset") ||
+        description.includes("WARNING:"),
+      `${command} confirmation must explicitly warn the user`
     );
   }
+
+  // startTask opens the dialog for a task with `confirm`, and only its
+  // onConfirm runs the command.
+  const app = read("src/App.jsx");
+  const start = app.indexOf("const startTask =");
+  assert.ok(start > 0, "startTask not found in App.jsx");
+  const body = app.slice(start, app.indexOf("const handle", start));
+  assert.match(body, /if \(!task\.confirm\)/);
+  assert.match(body, /setConfirmModal\(/);
+  assert.match(body, /onConfirm: async \(\) => \{[\s\S]*runTask\(/);
 });

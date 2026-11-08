@@ -18,6 +18,7 @@ import { useTouchMode } from "./hooks/useTouchMode";
 import { useEngineStatus } from "./hooks/useEngineStatus";
 import { useDeviceConfig } from "./hooks/useDeviceConfig";
 import { useApkInstall } from "./hooks/useApkInstall";
+import { TASKS } from "./lib/tasks";
 
 const APP_LIST_POLL_MS = 10000;
 export default function App() {
@@ -304,148 +305,6 @@ export default function App() {
     });
   };
 
-  const executeInstallGApps = async (approvedPackages = []) => {
-    try {
-      await runStreamingTask("install_gapps", {
-        taskType: "gapps",
-        title: "Installing Google Play Services (GApps)",
-        args: { approvedPackages },
-      });
-    } catch (e) {
-      console.error("GApps install error:", e);
-      addToast({
-        type: "error",
-        title: "GApps Error",
-        message: String(e),
-      });
-    }
-  };
-
-  const handleInstallGApps = async () => {
-    const preview = await previewPackageInstall("gapps");
-    if (!preview) return;
-
-    setConfirmModal({
-      isOpen: true,
-      title: "Install Google Play Services (Root Required)",
-      description:
-        "This installer modifies the Waydroid Android system image (/var/lib/waydroid/overlay/system) to inject Google Play Store and Services framework.\n\n" +
-        "• Source: waydroid_script (pinned commit 48dbfaf) • MindTheGapps / OpenGApps\n" +
-        "• Privilege: Requires Administrator (Root) access via Polkit or sudo\n" +
-        "• Consequence: Adds Google proprietary services to Android rootfs. Waydroid must be restarted after completion.\n\n" +
-        "Do you want to proceed with root installation?",
-      confirmText: "Proceed & Authorize Root",
-      confirmVariant: "primary",
-      iconType: "shield",
-      packagePreview: preview,
-      onConfirm: async () => {
-        setConfirmModal((prev) => ({ ...prev, isOpen: false }));
-        await executeInstallGApps(preview.packages);
-      },
-    });
-  };
-
-  const executeInstallHoudini = async (approvedPackages = []) => {
-    try {
-      await runStreamingTask("install_houdini", {
-        taskType: "houdini",
-        title: "Installing ARM Translation (libhoudini)",
-        args: { approvedPackages },
-      });
-    } catch (e) {
-      console.error("Houdini install error:", e);
-      addToast({
-        type: "error",
-        title: "ARM Translation Error",
-        message: String(e),
-      });
-    }
-  };
-
-  const handleInstallHoudini = async () => {
-    const preview = await previewPackageInstall("houdini");
-    if (!preview) return;
-
-    setConfirmModal({
-      isOpen: true,
-      title: "Install ARM Translation Layer (Root Required)",
-      description:
-        "This installer modifies the Waydroid Android system image (/var/lib/waydroid/overlay/system) and waydroid.cfg to inject Intel libhoudini ARM translation libraries.\n\n" +
-        "• Source: waydroid_script (pinned commit 48dbfaf) • Intel proprietary prebuilts\n" +
-        "• Privilege: Requires Administrator (Root) access via Polkit or sudo\n" +
-        "• Consequence: Injects binary translation bridge (binfmt_misc) to execute ARM/ARM64 games on x86_64 CPUs.\n\n" +
-        "Do you want to proceed with root installation?",
-      confirmText: "Proceed & Authorize Root",
-      confirmVariant: "primary",
-      iconType: "shield",
-      packagePreview: preview,
-      onConfirm: async () => {
-        setConfirmModal((prev) => ({ ...prev, isOpen: false }));
-        await executeInstallHoudini(preview.packages);
-      },
-    });
-  };
-
-  const executeInstallMultitouch = async () => {
-    try {
-      const result = await runStreamingTask("install_multitouch", {
-        taskType: "multitouch",
-        title: "Declaring Touch Features for Google Play",
-      });
-      if (result?.status === "success") {
-        addToast({
-          type: "info",
-          title: "Restart Required",
-          message:
-            "Android reads declared features at boot. Restart Waydroid, then check Google Play again.",
-        });
-      }
-    } catch (e) {
-      console.error("Touch feature install error:", e);
-      addToast({
-        type: "error",
-        title: "Touch Feature Error",
-        message: String(e),
-      });
-    }
-  };
-
-  const handleInstallMultitouch = () => {
-    setConfirmModal({
-      isOpen: true,
-      title: "Declare Touch Features (Root Required)",
-      description:
-        "This operation writes Android touchscreen hardware capability declarations to the Waydroid vendor overlay (/var/lib/waydroid/overlay).\n\n" +
-        "• Source: ArchDroid internal hardware profile\n" +
-        "• Privilege: Requires Administrator (Root) access via Polkit or sudo\n" +
-        "• Consequence: Declares multitouch hardware features so Google Play Store permits downloading touch-dependent games. Requires restarting Waydroid.\n\n" +
-        "Do you want to proceed with root installation?",
-      confirmText: "Proceed & Authorize Root",
-      confirmVariant: "primary",
-      iconType: "shield",
-      onConfirm: async () => {
-        setConfirmModal((prev) => ({ ...prev, isOpen: false }));
-        await executeInstallMultitouch();
-      },
-    });
-  };
-
-  const handleViewLogs = async () => {
-    try {
-      await runStreamingTask("waydroid_log", {
-        taskType: "logs",
-        title: "Waydroid Diagnostic Logs",
-      });
-    } catch (e) {
-      console.error("View logs error:", e);
-      addToast({
-        type: "error",
-        title: "Log Read Error",
-        message: String(e),
-      });
-    }
-  };
-
   const handleOpenSharedFolder = async () => {
     try {
       const res = await invoke("open_shared_folder");
@@ -475,62 +334,6 @@ export default function App() {
 
   const touchMode = useTouchMode({ addToast });
 
-  const executeEnableTouchAccess = async () => {
-    try {
-      const result = await runStreamingTask("install_touch_mode_access", {
-        taskType: "touch-access",
-        title: "Granting Touch Mode Access",
-      });
-      if (result?.status === "success") {
-        await touchMode.refresh();
-      }
-    } catch (e) {
-      console.error("Touch mode access error:", e);
-      addToast({
-        type: "error",
-        title: "Touch Mode Error",
-        message: String(e),
-      });
-    }
-  };
-
-  const handleEnableTouchAccess = () => {
-    setConfirmModal({
-      isOpen: true,
-      title: "Enable Touch Mode Access (Root Required)",
-      description:
-        "This installs a udev rule at /etc/udev/rules.d/70-archdroid-touch.rules.\n\n" +
-        "• Grants: the logged-in desktop user may read mice (never keyboards) and use /dev/uinput, which lets any program the user runs create virtual input devices, keyboards included (the same access Steam Input gets).\n" +
-        "• Why: touch mode turns your mouse clicks over Android windows into finger touches.\n" +
-        "• Privilege: Requires Administrator (Root) access via Polkit or sudo\n" +
-        '• Undo: delete that file and run "udevadm control --reload-rules".\n\n' +
-        "Do you want to proceed?",
-      confirmText: "Proceed & Authorize Root",
-      confirmVariant: "primary",
-      iconType: "shield",
-      onConfirm: async () => {
-        setConfirmModal((prev) => ({ ...prev, isOpen: false }));
-        await executeEnableTouchAccess();
-      },
-    });
-  };
-
-  const handleInstallPhantom = async () => {
-    try {
-      await runStreamingTask("install_phantom", {
-        taskType: "phantom",
-        title: "Installing / Updating Phantom Keymapper",
-      });
-    } catch (e) {
-      console.error("Install Phantom error:", e);
-      addToast({
-        type: "error",
-        title: "Phantom Error",
-        message: String(e),
-      });
-    }
-  };
-
   const handleRunPhantom = async () => {
     try {
       const res = await invoke("run_phantom");
@@ -557,120 +360,82 @@ export default function App() {
     }
   };
 
-  const executeInitWaydroid = async (approvedPackages = []) => {
+  // Side effects after a task finished successfully, beyond the refresh that
+  // `onTaskSuccess` does for every task.
+  const afterTaskSuccess = {
+    multitouch: () =>
+      addToast({
+        type: "info",
+        title: "Restart Required",
+        message:
+          "Android reads declared features at boot. Restart Waydroid, then check Google Play again.",
+      }),
+    "touch-access": () => touchMode.refresh(),
+  };
+
+  const runTask = async (taskType, args) => {
+    const task = TASKS[taskType];
     try {
-      await runStreamingTask("waydroid_init", {
-        taskType: "init",
-        title: "Initializing Waydroid System Image",
-        args: { approvedPackages },
+      const result = await runStreamingTask(task.command, {
+        taskType,
+        title: task.title,
+        args,
       });
+      if (result?.status === "success") {
+        await afterTaskSuccess[taskType]?.();
+      }
     } catch (e) {
-      console.error("Init Waydroid error:", e);
+      console.error(`${task.command} error:`, e);
       addToast({
         type: "error",
-        title: "Init Error",
+        title: task.errorTitle,
         message: String(e),
       });
     }
   };
 
-  const handleInitWaydroid = async () => {
-    const preview = await previewPackageInstall("init");
-    if (!preview) return;
-
+  /** Start a task, behind its consent dialog and package preview if it has one. */
+  const startTask = async (taskType) => {
+    const task = TASKS[taskType];
+    if (!task.confirm) {
+      await runTask(taskType);
+      return;
+    }
+    let preview;
+    if (task.preview) {
+      preview = await previewPackageInstall(task.preview);
+      if (!preview) return;
+    }
     setConfirmModal({
       isOpen: true,
-      title: "Initialize Waydroid Container (Root Required)",
-      description:
-        "Initializing Waydroid will download the official LineageOS container images (~1.2 GB) and configure the LXC Android container under /var/lib/waydroid.\n\n" +
-        "• Source: Official Waydroid / LineageOS system images\n" +
-        "• Privilege: Requires Administrator (Root) access via Polkit or sudo\n" +
-        "• Consequence: Sets up root container files and system partitions on disk.\n\n" +
-        "Do you want to proceed?",
-      confirmText: "Initialize & Authorize Root",
-      confirmVariant: "primary",
-      iconType: "shield",
+      ...task.confirm,
       packagePreview: preview,
       onConfirm: async () => {
         setConfirmModal((prev) => ({ ...prev, isOpen: false }));
-        await executeInitWaydroid(preview.packages);
+        await runTask(
+          taskType,
+          preview ? { approvedPackages: preview.packages } : undefined
+        );
       },
     });
   };
 
-  const handleWipeData = () => {
-    setConfirmModal({
-      isOpen: true,
-      title: "Factory Reset Waydroid?",
-      description:
-        "WARNING: This will completely destroy all Waydroid container data, installed games, GApps modules, and configurations. Back up anything you need first (use Settings → Android Shared Storage to copy files out). You will need to re-initialize the emulator from scratch. This cannot be undone!",
-      confirmText: "Wipe Everything",
-      confirmVariant: "danger",
-      iconType: "danger",
-      onConfirm: async () => {
-        setConfirmModal((prev) => ({ ...prev, isOpen: false }));
-        try {
-          await runStreamingTask("waydroid_wipe", {
-            taskType: "wipe",
-            title: "Factory Reset (Wiping Waydroid Data)",
-          });
-        } catch (e) {
-          console.error("Wipe data error:", e);
-          addToast({
-            type: "error",
-            title: "Wipe Failed",
-            message: String(e),
-          });
-        }
-      },
-    });
-  };
+  const handleInstallGApps = () => startTask("gapps");
+  const handleInstallHoudini = () => startTask("houdini");
+  const handleInstallMultitouch = () => startTask("multitouch");
+  const handleEnableTouchAccess = () => startTask("touch-access");
+  const handleInitWaydroid = () => startTask("init");
+  const handleWipeData = () => startTask("wipe");
+  const handleInstallPhantom = () => startTask("phantom");
+  const handleViewLogs = () => startTask("logs");
 
   const handleRetryTask = () => {
-    // Retrying must go back through the confirmation flow. The package plan or
+    // A task with a consent dialog is retried through it: the package plan or
     // the root scope may have changed since the first attempt, so a retry must
     // never call an installer command directly.
-    if (
-      [
-        "gapps",
-        "houdini",
-        "multitouch",
-        "touch-access",
-        "init",
-        "wipe",
-      ].includes(terminalTaskType)
-    ) {
-      setTerminalOpen(false);
-    }
-
-    switch (terminalTaskType) {
-      case "gapps":
-        handleInstallGApps();
-        break;
-      case "houdini":
-        handleInstallHoudini();
-        break;
-      case "multitouch":
-        handleInstallMultitouch();
-        break;
-      case "touch-access":
-        handleEnableTouchAccess();
-        break;
-      case "init":
-        handleInitWaydroid();
-        break;
-      case "phantom":
-        handleInstallPhantom();
-        break;
-      case "logs":
-        handleViewLogs();
-        break;
-      case "wipe":
-        handleWipeData();
-        break;
-      default:
-        break;
-    }
+    if (!TASKS[terminalTaskType]) return;
+    if (TASKS[terminalTaskType].confirm) setTerminalOpen(false);
+    startTask(terminalTaskType);
   };
 
   return (
