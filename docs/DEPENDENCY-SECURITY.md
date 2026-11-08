@@ -4,6 +4,8 @@
 - `npm audit --omit=dev` (production dependencies must be clean).
 - `cargo audit` (pinned `cargo-audit` 0.22.2) on `src-tauri/Cargo.lock`.
 - All third-party GitHub Actions are pinned to commit SHAs; the workflow token is `contents: read`.
+- Dependabot (`.github/dependabot.yml`) opens weekly, grouped update PRs for npm,
+  cargo, and the SHA-pinned actions; each goes through the same CI.
 
 ## Accepted risk
 None open. The 6 moderate dev-only `minimatch` findings (GHSA-g3hv-75wg-m249,
