@@ -26,8 +26,10 @@ The app window itself cannot reach the network: its Content Security Policy only
 |---|---|---|
 | **Add-on markers and installer cache** | `~/.cache/archdroid/` | Whether GApps, libhoudini, and multitouch were installed (`pending` until confirmed in a running container, then `verified`). |
 | **Device profile** | `~/.config/io.github.archdroid/profile.json` | Saved display/device profile. Current release builds do not write this file; resolution and DPI are stored by Waydroid itself (`/var/lib/waydroid/waydroid.cfg`). |
+| **Touch mode setting** | `~/.config/io.github.archdroid/touch-mode.json` | Only whether touch mode is on, so it comes back on at the next launch. Touch mode never records clicks or cursor positions. |
 | **Application log** | `~/.local/share/io.github.wisangdg.archdroid/logs/` (the exact path is shown in Settings → Application Log) | Commands the app ran, their result and duration, and the progress/error lines of installers. Never uploaded. |
 | **Diagnostic Bundle** | `~/Downloads/archdroid-diagnostics-*.txt` (or `~`), mode `0600` | Created **only** when you press Settings → Diagnostic Bundle → Create Bundle. Contains OS/kernel/Waydroid versions, host diagnostics, add-on status, and about the last 32 KiB of the application log and the Waydroid log. The application log records each command's arguments, so the bundle can contain **Android package names and APK file names** you installed, launched, or removed. Home paths and token/password values are masked; package and file names are not. Created without root and never uploaded; you decide whether to share it. |
+| **Saved APK** | `~/Downloads/<package>-<time>.apks` (or `~`), mode `0600` | Created **only** when you press **Save APK** for an app. Contains that app's APK files (base and splits) as installed in Android; no app data, settings, or logins. Never uploaded. |
 | **Waydroid system data** | `/var/lib/waydroid/` | Android system and vendor images and the container configuration (owned by root, managed by Waydroid). |
 | **Android user data** | `~/.local/share/waydroid/` | Android internal storage, installed apps, and their data. |
 

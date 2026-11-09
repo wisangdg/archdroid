@@ -187,7 +187,7 @@ describe("App state & workflow integration", () => {
     await waitFor(() => {
       expect(screen.getByText("Unsupported File")).toBeTruthy();
       expect(
-        screen.getByText("Only .apk packages can be installed via drag & drop.")
+        screen.getByText(/Only \.apk files and split APK bundles/)
       ).toBeTruthy();
     });
   });
@@ -606,5 +606,287 @@ describe("App state & workflow integration", () => {
       expect(screen.getByText("Force Stop Failed")).toBeTruthy()
     );
     expect(screen.getByText("adb is not installed")).toBeTruthy();
+  });
+  const RUNNING = {
+    status: "success",
+    data: "Session: RUNNING\nContainer: RUNNING\n",
+  };
+
+  it("Retry after a failed Enable access asks for consent again", async () => {
+    invoke.mockImplementation((cmd) => {
+      if (cmd === "waydroid_status") return Promise.resolve(RUNNING);
+      if (cmd === "get_waydroid_apps") return Promise.resolve([]);
+      if (cmd === "touch_mode_status")
+        return Promise.resolve({
+          enabled: false,
+          running: false,
+          supported: true,
+          uinput_access: false,
+          mice: [],
+          rule_installed: false,
+        });
+      if (cmd === "install_touch_mode_access") {
+        setTimeout(() => {
+          eventListeners["cmd-started"]?.({ payload: { task_id: "task-7" } });
+          eventListeners["cmd-finished"]?.({
+            payload: {
+              task_id: "task-7",
+              success: false,
+              code: "elevation_denied",
+              message: "Authentication was cancelled.",
+            },
+          });
+        }, 10);
+        return new Promise((resolve) =>
+          setTimeout(() => resolve({ status: "error" }), 30)
+        );
+      }
+      if (cmd === "waydroid_prop_get")
+        return Promise.resolve({ status: "success", data: "false" });
+      return Promise.resolve({ status: "not_installed" });
+    });
+
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Keymapping" }));
+    fireEvent.click(await screen.findByText("Enable access"));
+    fireEvent.click(await screen.findByText("Proceed & Authorize Root"));
+
+    const retry = await screen.findByRole("button", { name: /Retry/ });
+    fireEvent.click(retry);
+    await waitFor(() =>
+      expect(
+        screen.getByText("Enable Touch Mode Access (Root Required)")
+      ).toBeTruthy()
+    );
+  });
+
+  it("re-reads the multitouch status after a task succeeds", async () => {
+    invoke.mockImplementation((cmd) => {
+      if (cmd === "waydroid_status") return Promise.resolve(RUNNING);
+      if (cmd === "get_waydroid_apps") return Promise.resolve([]);
+      if (cmd === "install_multitouch") {
+        setTimeout(() => {
+          eventListeners["cmd-started"]?.({ payload: { task_id: "task-8" } });
+          eventListeners["cmd-finished"]?.({
+            payload: { task_id: "task-8", success: true, code: null },
+          });
+        }, 10);
+        return new Promise((resolve) =>
+          setTimeout(() => resolve({ status: "success" }), 30)
+        );
+      }
+      if (cmd === "waydroid_prop_get")
+        return Promise.resolve({ status: "success", data: "false" });
+      return Promise.resolve({ status: "not_installed" });
+    });
+
+    render(<App />);
+    await waitFor(() =>
+      expect(screen.getByText("Engine Running")).toBeTruthy()
+    );
+    const calls = () =>
+      invoke.mock.calls.filter(([cmd]) => cmd === "check_multitouch_status")
+        .length;
+    // Once on mount (works while offline), once when the session is online.
+    await waitFor(() => expect(calls()).toBe(2));
+
+    fireEvent.click(screen.getByRole("button", { name: "Install Tools" }));
+    fireEvent.click(await screen.findByText(/Declare Touch Features/));
+    fireEvent.click(await screen.findByText("Proceed & Authorize Root"));
+    await waitFor(() => expect(calls()).toBe(3));
+  });
+
+  it("reads Settings properties again once the session is online", async () => {
+    let status = { status: "success", data: "Session:\tSTOPPED\n" };
+    invoke.mockImplementation((cmd, args) => {
+      if (cmd === "waydroid_status") return Promise.resolve(status);
+      if (cmd === "get_waydroid_apps") return Promise.resolve([]);
+      if (cmd === "waydroid_prop_get") {
+        if (status === RUNNING && args.key === "persist.waydroid.multi_windows")
+          return Promise.resolve({ status: "success", data: "true" });
+        return status === RUNNING
+          ? Promise.resolve({ status: "success", data: "false" })
+          : Promise.resolve({ status: "error", message: "session stopped" });
+      }
+      return Promise.resolve({ status: "not_installed" });
+    });
+
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    const toggle = await screen.findByRole("button", {
+      name: "Toggle Multi-Window Mode",
+    });
+    expect(toggle.disabled).toBe(true);
+    expect(
+      screen.getByText(/wait for Android to boot to read and change/)
+    ).toBeTruthy();
+
+    status = RUNNING;
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Start/ }));
+    });
+    await waitFor(
+      () => {
+        expect(toggle.disabled).toBe(false);
+        expect(toggle.className).toContain("active");
+      },
+      { timeout: 4000 }
+    );
+  });
+  // Mock for a running session whose Android boot finishes when `booted()`
+  // returns true; the app list holds one app.
+  const bootingSession = (booted) =>
+    invoke.mockImplementation((cmd) => {
+      if (cmd === "waydroid_status") return Promise.resolve(RUNNING);
+      if (cmd === "get_waydroid_apps")
+        return Promise.resolve([
+          { name: "F-Droid", package: "org.fdroid.fdroid", icon: null },
+        ]);
+      if (cmd === "waydroid_boot_state")
+        return Promise.resolve({
+          status: "success",
+          data: booted() ? "booted" : "booting",
+        });
+      if (cmd === "waydroid_density_get")
+        return Promise.resolve({ status: "success", data: "225" });
+      if (cmd === "waydroid_prop_get")
+        return Promise.resolve({ status: "success", data: "" });
+      return Promise.resolve({ status: "not_installed" });
+    });
+  const callsOf = (name) =>
+    invoke.mock.calls.filter(([cmd]) => cmd === name).length;
+
+  it("reads Settings again only after Android has booted", async () => {
+    let booted = false;
+    bootingSession(() => booted);
+    render(<App />);
+    await screen.findByText("Android Booting…");
+    // At "RUNNING" adb and the platform service do not answer yet.
+    const beforeBoot = callsOf("waydroid_density_get");
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(callsOf("waydroid_density_get")).toBe(beforeBoot);
+
+    booted = true;
+    await waitFor(
+      () => expect(callsOf("waydroid_density_get")).toBe(beforeBoot + 1),
+      { timeout: 4000 }
+    );
+    await screen.findByText("Engine Running");
+  }, 10000);
+
+  it("does not launch from the list or the menu while Android boots", async () => {
+    bootingSession(() => false);
+    render(<App />);
+    await screen.findByText("Android Booting…");
+    const row = (await screen.findAllByText("F-Droid"))[0];
+
+    fireEvent.doubleClick(row);
+    await screen.findByText("Android Is Booting");
+    fireEvent.contextMenu(row);
+    fireEvent.click(await screen.findByText("Launch App"));
+    expect(callsOf("waydroid_launch_app")).toBe(0);
+  });
+
+  it("keeps the display profile from being applied while the engine is off", async () => {
+    invoke.mockImplementation((cmd) => {
+      if (cmd === "waydroid_status")
+        return Promise.resolve({
+          status: "success",
+          data: "Session:\tSTOPPED\n",
+        });
+      if (cmd === "get_waydroid_apps") return Promise.resolve([]);
+      return Promise.resolve({ status: "error", message: "session stopped" });
+    });
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+    const apply = await screen.findByRole("button", {
+      name: /^Apply \d+ × \d+/,
+    });
+    expect(apply.disabled).toBe(true);
+    expect(screen.getByText(/to apply a display/)).toBeTruthy();
+  });
+
+  it("shows neither the library nor the setup before the first status reply", async () => {
+    let reply;
+    invoke.mockImplementation((cmd) => {
+      if (cmd === "waydroid_status")
+        return new Promise((resolve) => (reply = resolve));
+      if (cmd === "check_host_diagnostics")
+        return Promise.resolve({ items: [], package_manager: "pacman" });
+      if (cmd === "get_waydroid_apps") return Promise.resolve([]);
+      return Promise.resolve({ status: "not_installed" });
+    });
+
+    render(<App />);
+    expect(screen.getByText("Reading Waydroid status…")).toBeTruthy();
+    expect(screen.queryByText("Initialize Android Emulator")).toBeNull();
+
+    await act(async () =>
+      reply({ status: "error", code: "not_initialized", message: "no" })
+    );
+    await waitFor(() =>
+      expect(screen.getByText("Initialize Android Emulator")).toBeTruthy()
+    );
+  });
+
+  it("Save APK stores the selected app's bundle and says where", async () => {
+    let reply = {
+      status: "success",
+      data: "~/Downloads/org.fdroid.fdroid-1.apks",
+    };
+    invoke.mockImplementation((cmd) => {
+      if (cmd === "waydroid_status")
+        return Promise.resolve({
+          status: "success",
+          data: "Session: RUNNING\nContainer: RUNNING\n",
+        });
+      if (cmd === "get_waydroid_apps")
+        return Promise.resolve([
+          { name: "F-Droid", package: "org.fdroid.fdroid", icon: null },
+        ]);
+      if (cmd === "waydroid_backup_apk") return Promise.resolve(reply);
+      if (cmd === "waydroid_prop_get")
+        return Promise.resolve({ status: "success", data: "false" });
+      return Promise.resolve({ status: "not_installed" });
+    });
+
+    render(<App />);
+    const save = await screen.findByRole("button", { name: "Save APK" });
+    await waitFor(() => expect(save.disabled).toBe(false));
+    fireEvent.click(save);
+    await waitFor(() => expect(screen.getByText("APK Saved")).toBeTruthy());
+    expect(invoke).toHaveBeenCalledWith("waydroid_backup_apk", {
+      package: "org.fdroid.fdroid",
+    });
+    expect(screen.getByText(/org\.fdroid\.fdroid-1\.apks/)).toBeTruthy();
+
+    reply = { status: "error", message: "adb is not installed" };
+    fireEvent.click(save);
+    await waitFor(() =>
+      expect(screen.getByText("Save APK Failed")).toBeTruthy()
+    );
+  });
+
+  it("keeps Save APK busy until the copy has finished", async () => {
+    let finish;
+    bootingSession(() => true);
+    const base = invoke.getMockImplementation();
+    invoke.mockImplementation((cmd, args) =>
+      cmd === "waydroid_backup_apk"
+        ? new Promise((resolve) => (finish = resolve))
+        : base(cmd, args)
+    );
+    render(<App />);
+    const save = await screen.findByRole("button", { name: "Save APK" });
+    await waitFor(() => expect(save.disabled).toBe(false));
+
+    fireEvent.click(save);
+    await waitFor(() => expect(save.disabled).toBe(true));
+    expect(save.textContent).toContain("Saving APK");
+    fireEvent.click(save);
+    expect(callsOf("waydroid_backup_apk")).toBe(1);
+
+    await act(async () => finish({ status: "success", data: "~/x.apks" }));
+    await waitFor(() => expect(save.disabled).toBe(false));
   });
 });

@@ -7,14 +7,28 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-11-09
+
 ### Changed
 - **New "Control Center" layout.** A top bar replaces the sidebar: the four sections, the shared folder, and the engine state with Start/Restart/Stop, visible on every page. My Apps is now a list (icon, name, package, User/System tag) next to a detail panel for the selected app with Launch, Force stop, Keymapping, Copy package ID, and Uninstall, so no action hides behind a right-click any more. Double-click a row to launch, use Up/Down to move through the list, and the menu key or Shift+F10 for the context menu. Apps without an icon show their initials instead of an emoji.
 - Text on green (primary) buttons is now dark, for contrast; white on the accent green was below 4.5:1.
 
 ### Added
+- **Save APK** in the app detail: the selected app's APKs (base and splits) are saved as one `.apks` bundle in `~/Downloads` (mode `0600`), which installs again by drag-and-drop. The file only appears once it is complete (a failed copy leaves nothing behind), and the button shows "Saving APK…" while the copy runs. No root, so app data is not included; see `docs/BACKUP-DESIGN.md` for why and the options for data backup.
+- **Split APK bundles** (`.apks`, `.xapk`, `.apkm`) install from the file picker and by drag-and-drop. The base APK and its configuration splits are unpacked into a private `0700` directory under `~/.cache/archdroid` (on disk, since `/tmp` is often RAM; entry names reduced to file names, at most 64 splits and 4 GiB), each is checked like a single APK, and they are installed together with `adb install-multiple` (adb required). Archives from `bundletool build-apks` work too: their `standalones/` and `instant/` APKs are skipped, since a second full APK makes Android refuse the install ("Split null was defined multiple times"). Bundles with OBB game data are refused with instructions instead of installing a game that cannot start.
+- **"Android Booting…"** in the top bar after Start, until Android reports `sys.boot_completed` (through adb, at most ~90 s). Launch (button, double-click, or menu) waits for it. Without adb, or when the container is frozen (Android only suspends a booted system), the state is not shown.
+- **Touch mode** (Keymapping page, Hyprland). A left click or drag over an Android window becomes a finger touch through a virtual touchscreen, so games and in-app web pages that ignore Waydroid's mouse input work, such as the birth-date picker in Plants vs Zombies 2. Waydroid's own `persist.waydroid.fake_touch` cannot do this: it changes only the event source, and Android WebView treats any event whose tool type is "mouse" and whose button state is set as a mouse event. A fixed upstream patch is drafted in `docs/upstream/`. Clicks outside Android windows stay normal, and the setting is remembered across launches. Packages install `/usr/lib/udev/rules.d/70-archdroid-touch.rules`, giving the logged-in user read access to mice (not keyboards) and `/dev/uinput`, with which any of the user's programs can create virtual input devices; other installs get an **Enable access** button.
 - **Force stop** for the selected app (`adb shell am force-stop`; needs adb and a running engine). `waydroid_kill_app` is now part of the release build, with its UI and tests.
 
 ### Fixed
+- On a first run the window no longer shows the empty app library for a moment before the setup screen; it says it is reading the Waydroid status until the first reply.
+- The Initialize stepper no longer has an "Initialize" stage that never lit up: `waydroid init` downloads and configures in one step, now shown as "Download & Initialize".
+- **Display presets could never set the DPI.** They wrote `ro.sf.lcd_density` with `waydroid prop set`, but Android sets that property at boot and Waydroid rejects a runtime write (seen: "Sending reply failed", value unchanged), so every preset with a DPI ended in "Display Config Failed". The DPI is now set with `adb shell wm density`, which applies at once and survives a session restart (checked on Waydroid 1.6.3 / LineageOS 20), and is read back before success is shown. Needs adb (android-tools).
+- **View Logs** (Settings) reads the Waydroid log without a root prompt when the file is readable (Waydroid creates it with mode `0644`); root is only requested when the user may not read it.
+- Retry after a failed **Enable access** (touch mode) now asks for consent again; it did nothing.
+- The Install Tools multitouch card is read on start (also with the engine stopped) and after every finished task, instead of only when the session came online.
+- Settings reads the Multi-Window, Invert Colors, and display properties again once Android has finished booting. Before, they were read once at start, usually while the engine was stopped, and showed defaults; reading them as soon as the session runs is too early, since adb only answers seconds later. The two toggles and the display profile's Apply are disabled until then, because Waydroid cannot change properties without a booted Android.
+- The `.deb` recommends `adb` and the `.rpm` and Arch package suggest `android-tools`, which the DPI presets, split APKs, Save APK, the boot status, and Force stop need.
 - When `waydroid status` itself fails (for example the 0.1.4 AppImage's `ImportError`, or a timeout), the app now says "Waydroid Not Responding" with Waydroid's error, once per distinct error, instead of only showing "Engine Stopped". A missing or uninitialized Waydroid keeps its own setup screen.
 
 ## [0.1.5] - 2026-11-03

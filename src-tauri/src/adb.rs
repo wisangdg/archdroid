@@ -83,6 +83,69 @@ pub fn install_apk(path: &str, cancel: Option<&AtomicBool>) -> Result<String> {
     })
 }
 
+/// Install a split APK set (base + configuration splits) as one package with
+/// `adb install-multiple`, verified like a single install.
+pub fn install_apks(paths: &[String], cancel: Option<&AtomicBool>) -> Result<String> {
+    if paths.len() == 1 {
+        return install_apk(&paths[0], cancel);
+    }
+    with_device(true, |adb, serial| {
+        let before = launcher_entries();
+        let argv = adb_install_multiple_args(serial, paths);
+        let output = waydroid::run_program(adb, &argv, TIMEOUT_LONG, cancel)?;
+        wait_for_launcher_change(&before, cancel);
+        Ok(output)
+    })
+}
+
+/// `pm path` lines (`package:/data/app/.../base.apk`) as device paths.
+pub fn parse_package_paths(output: &str) -> Vec<String> {
+    output
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("package:"))
+        .filter(|path| path.starts_with('/') && path.ends_with(".apk"))
+        .map(str::to_string)
+        .collect()
+}
+
+/// Copy every APK of an installed package (base and splits) into `into`.
+/// No root: `pm path` and `adb pull` work as the shell user.
+pub fn pull_apks(package: &str, into: &Path) -> Result<Vec<std::path::PathBuf>> {
+    if !is_valid_package(package) {
+        return Err(AppError::invalid_input(format!(
+            "Invalid Android package name: {package:?}"
+        )));
+    }
+    with_device(true, |adb, serial| {
+        let shell = |args: &[&str]| {
+            let mut argv = vec!["-s".to_string(), serial.to_string(), "shell".to_string()];
+            argv.extend(args.iter().map(|a| a.to_string()));
+            waydroid::run_program(adb, &argv, TIMEOUT_QUICK, None)
+        };
+        let remote = parse_package_paths(&shell(&["pm", "path", package])?);
+        if remote.is_empty() {
+            return Err(AppError::command_failed(format!(
+                "Android reports no APK for {package}; is it installed?"
+            )));
+        }
+        let mut local = Vec::new();
+        for path in remote {
+            let name = path.rsplit('/').next().unwrap_or("base.apk").to_string();
+            let target = into.join(&name);
+            let argv = vec![
+                "-s".to_string(),
+                serial.to_string(),
+                "pull".to_string(),
+                path,
+                target.to_string_lossy().into_owned(),
+            ];
+            waydroid::run_program(adb, &argv, TIMEOUT_LONG, None)?;
+            local.push(target);
+        }
+        Ok(local)
+    })
+}
+
 /// Uninstall a package through adb. `waydroid app remove` can exit 0 while the
 /// platform service fails (`Failed with code: -3`), so adb is the authoritative
 /// path when it is available.
@@ -163,6 +226,17 @@ fn adb_install_args(serial: &str, path: &str) -> Vec<String> {
         "-r".to_string(),
         path.to_string(),
     ]
+}
+
+fn adb_install_multiple_args(serial: &str, paths: &[String]) -> Vec<String> {
+    let mut argv = vec![
+        "-s".to_string(),
+        serial.to_string(),
+        "install-multiple".to_string(),
+        "-r".to_string(),
+    ];
+    argv.extend(paths.iter().cloned());
+    argv
 }
 
 fn adb_uninstall_args(serial: &str, package: &str) -> Vec<String> {
@@ -250,6 +324,86 @@ fn with_device<T>(allow_unfreeze: bool, run: impl FnOnce(&Path, &str) -> Result<
 #[cfg(feature = "dev-commands")]
 pub fn booted() -> bool {
     shell(&["getprop", "sys.boot_completed"]).is_ok_and(|output| output.trim() == "1")
+}
+
+/// Lowest and highest density the Display presets may set. Android's own
+/// buckets run from ldpi (120) to xxxhdpi (640).
+pub const DENSITY_RANGE: std::ops::RangeInclusive<u32> = 120..=640;
+
+/// The density Android uses: `wm density` prints the physical density and,
+/// once set, an override, which wins.
+pub fn parse_wm_density(output: &str) -> Option<u32> {
+    let mut physical = None;
+    let mut override_density = None;
+    for line in output.lines() {
+        let Some((label, value)) = line.split_once(':') else {
+            continue;
+        };
+        let Ok(value) = value.trim().parse::<u32>() else {
+            continue;
+        };
+        match label.trim().to_ascii_lowercase().as_str() {
+            "physical density" => physical = Some(value),
+            "override density" => override_density = Some(value),
+            _ => {}
+        }
+    }
+    override_density.or(physical)
+}
+
+/// Current display density (override or physical). Passive: a frozen
+/// container answers "not now" instead of being resumed.
+pub fn density() -> Result<u32> {
+    let output = shell(&["wm", "density"])?;
+    parse_wm_density(&output).ok_or_else(|| {
+        AppError::command_failed(format!("Could not read the display density from: {output}"))
+    })
+}
+
+/// Set the display density with `wm density`, which applies at once and
+/// survives a session restart (checked on Waydroid 1.6.3 / LineageOS 20).
+/// `ro.sf.lcd_density` cannot be used for this: it is set at boot and
+/// Waydroid rejects a runtime write.
+pub fn set_density(dpi: u32) -> Result<()> {
+    if !DENSITY_RANGE.contains(&dpi) {
+        return Err(AppError::invalid_input(format!(
+            "DPI must be between {} and {}.",
+            DENSITY_RANGE.start(),
+            DENSITY_RANGE.end()
+        )));
+    }
+    let output = shell_active(&["wm", "density", &dpi.to_string()])?;
+    let applied = shell_active(&["wm", "density"])?;
+    match parse_wm_density(&applied) {
+        Some(actual) if actual == dpi => Ok(()),
+        actual => Err(AppError::command_failed(format!(
+            "Android did not apply density {dpi} (now {actual:?}). {}",
+            output.trim()
+        ))),
+    }
+}
+
+/// Whether Android finished booting, for the top bar after Start: `"booted"`
+/// or `"booting"`. Passive, so it never resumes a frozen container.
+pub fn boot_state() -> Result<&'static str> {
+    boot_state_from(shell(&["getprop", "sys.boot_completed"]))
+}
+
+/// [`boot_state`] without the device, so every outcome is testable.
+///
+/// - Android only suspends (freezes) a container it finished booting.
+/// - Without adb the answer is unknowable, which the caller must not show as
+///   "booting" forever, so that error is passed on.
+/// - Anything else (no container IP yet, adbd not up, connect refused) is what
+///   an early boot looks like.
+fn boot_state_from(probe: Result<String>) -> Result<&'static str> {
+    match probe {
+        Ok(output) if output.trim() == "1" => Ok("booted"),
+        Ok(_) => Ok("booting"),
+        Err(error) if error.code() == crate::error::code::SESSION_FROZEN => Ok("booted"),
+        Err(error) if error.code() == crate::error::code::NOT_FOUND => Err(error),
+        Err(_) => Ok("booting"),
+    }
 }
 
 /// Android package names are letters, digits, `.` and `_`. Everything else is
@@ -584,6 +738,72 @@ fn append_key(path: &Path, key: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pm_path_lists_every_split_and_nothing_else() {
+        let output = "package:/data/app/~~a==/com.g-b==/base.apk\r\npackage:/data/app/~~a==/com.g-b==/split_config.en.apk\r\n\nWARNING: linker\n";
+        assert_eq!(
+            parse_package_paths(output),
+            [
+                "/data/app/~~a==/com.g-b==/base.apk",
+                "/data/app/~~a==/com.g-b==/split_config.en.apk"
+            ]
+        );
+        assert!(parse_package_paths("package:relative.apk\npackage:/x/lib.so").is_empty());
+    }
+
+    #[test]
+    fn split_installs_target_the_container_with_every_split_as_its_own_word() {
+        let paths = vec![
+            "/tmp/x/base.apk".to_string(),
+            "/tmp/x/config; rm -rf ~.apk".to_string(),
+        ];
+        assert_eq!(
+            adb_install_multiple_args("192.168.240.112:5555", &paths),
+            [
+                "-s",
+                "192.168.240.112:5555",
+                "install-multiple",
+                "-r",
+                "/tmp/x/base.apk",
+                "/tmp/x/config; rm -rf ~.apk"
+            ]
+        );
+    }
+
+    #[test]
+    fn the_override_density_wins_over_the_physical_one() {
+        let both = "Physical density: 225\r\nOverride density: 200\r\n";
+        assert_eq!(parse_wm_density(both), Some(200));
+        assert_eq!(parse_wm_density("Physical density: 225\n"), Some(225));
+        assert_eq!(parse_wm_density("error: no display"), None);
+    }
+
+    #[test]
+    fn a_density_outside_android_buckets_is_refused_before_adb() {
+        for dpi in [0, 119, 641, 10_000] {
+            assert_eq!(
+                set_density(dpi).unwrap_err().code(),
+                crate::error::code::INVALID_INPUT,
+                "{dpi}"
+            );
+        }
+    }
+
+    #[test]
+    fn boot_state_follows_sys_boot_completed() {
+        assert_eq!(boot_state_from(Ok("1\n".into())).unwrap(), "booted");
+        assert_eq!(boot_state_from(Ok("\n".into())).unwrap(), "booting");
+        let frozen = AppError::session_frozen("open the window");
+        assert_eq!(boot_state_from(Err(frozen)).unwrap(), "booted");
+        let early = AppError::session_not_running("no container IP address yet");
+        assert_eq!(boot_state_from(Err(early)).unwrap(), "booting");
+        let no_adb = AppError::not_found("adb", HINT);
+        assert_eq!(
+            boot_state_from(Err(no_adb)).unwrap_err().code(),
+            crate::error::code::NOT_FOUND
+        );
+    }
 
     fn key_file(name: &str) -> PathBuf {
         let dir =

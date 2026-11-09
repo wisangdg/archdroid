@@ -1,15 +1,16 @@
 use base64::{engine::general_purpose, Engine as _};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::io::{BufReader, IsTerminal, Read, Seek, SeekFrom};
+use std::io::{BufReader, IsTerminal, Read};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 mod adb;
+mod apk;
 mod bundle;
 mod capabilities;
 #[cfg(feature = "dev-commands")]
@@ -18,16 +19,19 @@ mod diagnostics;
 mod elevate;
 mod error;
 mod hostenv;
+mod logs;
 mod markers;
 mod platform;
 mod preflight;
 mod scripts;
 mod stream;
+mod touchmode;
 mod waydroid;
 
 use diagnostics::*;
 use elevate::*;
 use error::AppError;
+pub(crate) use logs::{app_log_file, redact_text, redact_with_home, WAYDROID_LOG};
 use markers::*;
 use preflight::*;
 use scripts::*;
@@ -398,63 +402,6 @@ fn parse_desktop_entry(path: &Path, package: &str) -> AppInfo {
     }
 }
 
-/// How much of each end of an APK to scan for the manifest entry. The local
-/// header for `AndroidManifest.xml` is normally in the first block; the central
-/// directory is at the end. This rejects text files and zips that are not APKs
-/// before the slow install call, without adding a zip dependency.
-const APK_SCAN_BYTES: u64 = 8 * 1024 * 1024;
-
-fn contains_marker(bytes: &[u8], marker: &[u8]) -> bool {
-    bytes.windows(marker.len()).any(|window| window == marker)
-}
-
-fn apk_looks_installable(path: &str) -> error::Result<()> {
-    let mut file = std::fs::File::open(path)?;
-    let len = file.metadata()?.len();
-    let mut magic = [0u8; 4];
-    if file.read_exact(&mut magic).is_err() || (magic != *b"PK\x03\x04" && magic != *b"PK\x05\x06")
-    {
-        return Err(AppError::invalid_input(format!(
-            "{path} is not an APK/ZIP archive."
-        )));
-    }
-
-    let marker = b"AndroidManifest.xml";
-    let mut scan = Vec::with_capacity(APK_SCAN_BYTES.min(len) as usize);
-    file.seek(SeekFrom::Start(0))?;
-    (&mut file).take(APK_SCAN_BYTES).read_to_end(&mut scan)?;
-    if contains_marker(&scan, marker) {
-        return Ok(());
-    }
-
-    if len > APK_SCAN_BYTES {
-        scan.clear();
-        file.seek(SeekFrom::End(-(APK_SCAN_BYTES as i64)))?;
-        (&mut file).take(APK_SCAN_BYTES).read_to_end(&mut scan)?;
-        if contains_marker(&scan, marker) {
-            return Ok(());
-        }
-    }
-
-    Err(AppError::invalid_input(format!(
-        "{path} is a ZIP file without AndroidManifest.xml; it is not a valid APK."
-    )))
-}
-
-/// Adb is authoritative when it is installed: `adb install` waits for the
-/// Android package manager and `adb uninstall` reports the real result. Without
-/// adb, `waydroid app install/remove` is used, and the obvious non-APK case is
-/// rejected before the CLI can report a false success.
-fn install_apk_blocking(path: String, cancel: Option<&AtomicBool>) -> error::Result<()> {
-    apk_looks_installable(&path)?;
-    if adb::available() {
-        adb::install_apk(&path, cancel)?;
-    } else {
-        waydroid::Waydroid::detect()?.app_install(&path, cancel)?;
-    }
-    Ok(())
-}
-
 fn uninstall_app_blocking(package: String, cancel: Option<&AtomicBool>) -> error::Result<()> {
     let waydroid = waydroid::Waydroid::detect()?;
     if adb::available() {
@@ -504,7 +451,7 @@ async fn waydroid_install_apk(app: AppHandle, path: String) -> CommandResult {
     emit_started(&app, task.id());
     off_main_thread(move || {
         let cancel = task.cancel_flag();
-        match install_apk_blocking(path, Some(&cancel)) {
+        match apk::install_blocking(path, Some(&cancel)) {
             Ok(()) => CommandResult::success(),
             Err(error) => error.into(),
         }
@@ -561,133 +508,6 @@ async fn waydroid_prop_get(key: String) -> CommandResult {
             Ok(value) => CommandResult::with_data(value),
             Err(error) => error.into(),
         }
-    })
-    .await
-}
-
-#[tauri::command]
-async fn waydroid_log(app: AppHandle) -> CommandResult {
-    let script = r#"
-if [ -f /var/lib/waydroid/waydroid.log ]; then
-    tail -n 1000 /var/lib/waydroid/waydroid.log
-else
-    echo "No logs found at /var/lib/waydroid/waydroid.log"
-fi
-"#
-    .to_string();
-
-    stream_privileged_script(app, script, Completion::None, waydroid::TIMEOUT_NORMAL)
-        .await
-        .into_command_result()
-}
-
-/// Mask what must not reach a log or a support paste: the home directory and
-/// the value of `token=`/`password=`-style assignments or `Bearer` headers.
-fn redact_text(text: &str) -> String {
-    let home = std::env::var_os("HOME").and_then(|h| h.into_string().ok());
-    redact_with_home(text, home.as_deref())
-}
-
-/// [`redact_text`] with the home directory passed in, so tests never have to
-/// mutate the process environment (which other threads read concurrently).
-fn redact_with_home(text: &str, home: Option<&str>) -> String {
-    const SENSITIVE: [&str; 6] = ["token", "password", "passwd", "secret", "apikey", "api_key"];
-    let mut text = text.to_string();
-    if let Some(home) = home.filter(|home| home.len() > 1) {
-        text = text.replace(home, "~");
-    }
-    text.lines()
-        .map(|line| {
-            let mut words: Vec<String> = line.split(' ').map(str::to_string).collect();
-            for i in 0..words.len() {
-                let lower = words[i].to_ascii_lowercase();
-                if lower == "bearer" && i + 1 < words.len() {
-                    words[i + 1] = "[redacted]".to_string();
-                } else if let Some(eq) = lower.find(['=', ':']) {
-                    let key =
-                        lower[..eq].trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '_');
-                    if SENSITIVE.iter().any(|k| key.ends_with(k)) {
-                        if eq + 1 < words[i].len() {
-                            words[i] = format!("{}[redacted]", &words[i][..=eq]);
-                        } else if i + 1 < words.len() {
-                            words[i + 1] = "[redacted]".to_string();
-                        }
-                    }
-                }
-            }
-            words.join(" ")
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-/// Newest `*.log` file in the app log directory.
-fn app_log_file(app: &AppHandle) -> Option<PathBuf> {
-    let dir = app.path().app_log_dir().ok()?;
-    std::fs::read_dir(dir)
-        .ok()?
-        .flatten()
-        .filter(|e| e.path().extension().is_some_and(|x| x == "log"))
-        .max_by_key(|e| e.metadata().and_then(|m| m.modified()).ok())
-        .map(|e| e.path())
-}
-
-/// Most of the log the UI will ever show.
-const MAX_LOG_VIEW_BYTES: u64 = 64 * 1024;
-
-#[tauri::command]
-async fn app_log_read(app: AppHandle) -> CommandResult {
-    off_main_thread(move || {
-        let Some(path) = app_log_file(&app) else {
-            return CommandResult::with_data(String::new());
-        };
-        match bundle::read_tail(&path, MAX_LOG_VIEW_BYTES) {
-            Ok(text) => CommandResult::with_data(redact_text(&text)),
-            Err(e) => AppError::Io(e).into(),
-        }
-    })
-    .await
-}
-
-/// What the Settings page shows after writing a diagnostic bundle.
-#[derive(Serialize)]
-struct DiagnosticBundle {
-    /// Where the file was written, with the home directory shown as `~`.
-    path: String,
-    content: String,
-}
-
-#[tauri::command]
-async fn diagnostic_bundle_create(
-    app: AppHandle,
-) -> std::result::Result<DiagnosticBundle, CommandResult> {
-    tauri::async_runtime::spawn_blocking(move || bundle::create(&app))
-        .await
-        .map_err(|e| CommandResult::from(AppError::Io(std::io::Error::other(e.to_string()))))?
-        .map(|(path, content)| DiagnosticBundle {
-            path: redact_text(&path.to_string_lossy()),
-            content,
-        })
-        .map_err(CommandResult::from)
-}
-
-/// Where the log lives, so Settings can tell the user.
-#[tauri::command]
-fn app_log_location(app: AppHandle) -> CommandResult {
-    match app.path().app_log_dir() {
-        Ok(dir) => CommandResult::with_data(redact_text(&dir.to_string_lossy())),
-        Err(e) => AppError::Io(std::io::Error::other(e.to_string())).into(),
-    }
-}
-
-#[tauri::command]
-async fn app_log_clear(app: AppHandle) -> CommandResult {
-    off_main_thread(move || match app_log_file(&app) {
-        Some(path) => match std::fs::write(&path, b"") {
-            Ok(()) => CommandResult::success(),
-            Err(e) => AppError::Io(e).into(),
-        },
-        None => CommandResult::success(),
     })
     .await
 }
@@ -1050,6 +870,47 @@ async fn install_multitouch(app: AppHandle) -> CommandResult {
     )
 }
 
+/// Touch mode: left clicks over Waydroid windows become finger touches. The
+/// status is cheap (no root, no container), so the UI can poll it.
+#[tauri::command]
+async fn touch_mode_status() -> touchmode::TouchModeStatus {
+    tauri::async_runtime::spawn_blocking(touchmode::status)
+        .await
+        .unwrap_or_else(|_| touchmode::status())
+}
+
+#[tauri::command]
+async fn touch_mode_set(enabled: bool) -> CommandResult {
+    // The UI re-reads `touch_mode_status` afterwards, so success says nothing.
+    off_main_thread(move || match touchmode::set_enabled(enabled) {
+        Ok(_) => CommandResult::success(),
+        Err(message) => AppError::command_failed(message).into(),
+    })
+    .await
+}
+
+/// Installs the udev rule for installs that did not ship it (AppImage,
+/// source builds). Packages install it under `/usr/lib/udev/rules.d`.
+#[tauri::command]
+async fn install_touch_mode_access(app: AppHandle) -> CommandResult {
+    if has_elevation_tool().is_none() {
+        return AppError::elevation_denied(
+            "No root elevation tool (pkexec or sudo) found on host. Cannot perform administrative operations.",
+        )
+        .into();
+    }
+    stream_privileged_script(
+        app,
+        touchmode::install_rule_script(),
+        Completion::None,
+        waydroid::TIMEOUT_NORMAL,
+    )
+    .await
+    .into_command_result_with_message(
+        "Touch mode access granted. If touch mode still cannot start, log out and back in once.",
+    )
+}
+
 /// One dashboard object, assembled from `waydroid status` plus the cheapest
 /// probes. Values that need a running container degrade instead of failing:
 /// this is a read-only overview, not an action.
@@ -1393,6 +1254,47 @@ async fn waydroid_reboot(app: AppHandle) -> CommandResult {
     .into_command_result()
 }
 
+/// "Save APK" in the app detail: the installed app's APKs as one `.apks`
+/// bundle in Downloads. Returns the path with home shown as `~`.
+#[tauri::command]
+async fn waydroid_backup_apk(package: String) -> CommandResult {
+    run_exclusive("APK backup", move |_| match apk::backup_apks(&package) {
+        Ok(path) => CommandResult::with_data(redact_text(&path.to_string_lossy())),
+        Err(error) => error.into(),
+    })
+    .await
+}
+
+/// The display density for Settings' Display presets.
+#[tauri::command]
+async fn waydroid_density_get() -> CommandResult {
+    off_main_thread(|| match adb::density() {
+        Ok(dpi) => CommandResult::with_data(dpi.to_string()),
+        Err(error) => error.into(),
+    })
+    .await
+}
+
+#[tauri::command]
+async fn waydroid_density_set(dpi: u32) -> CommandResult {
+    run_exclusive("display density", move |_| match adb::set_density(dpi) {
+        Ok(()) => CommandResult::success(),
+        Err(error) => error.into(),
+    })
+    .await
+}
+
+/// `"booted"` or `"booting"` while the session runs; polled by the UI after
+/// Start until Android reports `sys.boot_completed`.
+#[tauri::command]
+async fn waydroid_boot_state() -> CommandResult {
+    off_main_thread(|| match adb::boot_state() {
+        Ok(state) => CommandResult::with_data(state.to_string()),
+        Err(error) => error.into(),
+    })
+    .await
+}
+
 /// Force-stop one Android app (the app detail's "Force stop"). Needs adb,
 /// because Waydroid only allows `shell` as root.
 #[tauri::command]
@@ -1673,6 +1575,12 @@ fn points_into_bundle(value: &str, appdir: Option<&str>) -> bool {
 pub fn run() {
     sanitize_appimage_env();
     tauri::Builder::default()
+        .setup(|_| {
+            // Off the main thread: restoring grabs input devices and must not
+            // delay the first window.
+            thread::spawn(touchmode::restore);
+            Ok(())
+        })
         .plugin(tauri_plugin_dialog::init())
         // Defaults already log to stdout and `<app log dir>/<app name>.log`
         // (40 KB, keep-one rotation); Info keeps chatty deps out of the trace.
@@ -1687,10 +1595,10 @@ pub fn run() {
         // unconditionally only together with its UI and test.
         .invoke_handler(tauri::generate_handler![
             waydroid_status,
-            app_log_read,
-            app_log_location,
-            app_log_clear,
-            diagnostic_bundle_create,
+            logs::app_log_read,
+            logs::app_log_location,
+            logs::app_log_clear,
+            logs::diagnostic_bundle_create,
             #[cfg(feature = "dev-commands")]
             waydroid_status_json,
             #[cfg(feature = "dev-commands")]
@@ -1706,6 +1614,10 @@ pub fn run() {
             #[cfg(feature = "dev-commands")]
             waydroid_reboot,
             waydroid_kill_app,
+            waydroid_boot_state,
+            waydroid_backup_apk,
+            waydroid_density_get,
+            waydroid_density_set,
             #[cfg(feature = "dev-commands")]
             waydroid_getprop_all,
             #[cfg(feature = "dev-commands")]
@@ -1723,7 +1635,7 @@ pub fn run() {
             waydroid_prop_set,
             waydroid_prop_get,
             cancel_task,
-            waydroid_log,
+            logs::waydroid_log,
             open_shared_folder,
             check_gapps_status,
             check_houdini_status,
@@ -1731,6 +1643,9 @@ pub fn run() {
             install_gapps,
             install_houdini,
             install_multitouch,
+            touch_mode_status,
+            touch_mode_set,
+            install_touch_mode_access,
             install_phantom,
             run_phantom,
             check_host_diagnostics,
@@ -1821,31 +1736,6 @@ mod tests {
                 "init --system_channel https://ota.waydro.id/system --vendor_channel https://ota.waydro.id/vendor"
             );
         }
-    }
-
-    #[test]
-    fn apk_check_rejects_text_and_manifestless_zips() {
-        let dir = std::env::temp_dir().join(format!("archdroid-apk-test-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-
-        let text = dir.join("text.apk");
-        std::fs::write(&text, "this is not an APK\n").unwrap();
-        let error = apk_looks_installable(text.to_str().unwrap()).unwrap_err();
-        assert_eq!(error.code(), error::code::INVALID_INPUT);
-        assert!(error.to_string().contains("not an APK/ZIP"));
-
-        let manifestless = dir.join("manifestless.apk");
-        std::fs::write(&manifestless, b"PK\x03\x04notes.txt").unwrap();
-        let error = apk_looks_installable(manifestless.to_str().unwrap()).unwrap_err();
-        assert_eq!(error.code(), error::code::INVALID_INPUT);
-        assert!(error.to_string().contains("without AndroidManifest.xml"));
-
-        let apk = dir.join("ok.apk");
-        std::fs::write(&apk, b"PK\x03\x04AndroidManifest.xml").unwrap();
-        apk_looks_installable(apk.to_str().unwrap()).unwrap();
-
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[cfg(feature = "dev-commands")]
@@ -1950,22 +1840,6 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
         assert!(cold.as_millis() < 250, "cold {cold:?}");
         assert!(warm.as_millis() < 25, "warm {warm:?}");
-    }
-
-    #[test]
-    fn redaction_masks_home_and_secrets() {
-        let out = redact_with_home(
-            "read /home/alice/.cache/x token=abc123 Bearer xyz\nPASSWORD: hunter2",
-            Some("/home/alice"),
-        );
-        assert!(!out.contains("alice"));
-        assert!(!out.contains("abc123") && !out.contains("xyz"));
-        assert!(!out.contains("hunter2"));
-        assert!(out.contains("~/.cache/x"));
-        assert_eq!(
-            redact_with_home("plain line", Some("/home/alice")),
-            "plain line"
-        );
     }
 
     #[test]

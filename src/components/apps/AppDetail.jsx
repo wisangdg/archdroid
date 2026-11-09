@@ -5,6 +5,7 @@ import {
   Gamepad2,
   Copy,
   Trash2,
+  Download,
   MousePointerClick,
 } from "lucide-react";
 import AppIcon from "./AppIcon";
@@ -17,11 +18,14 @@ export default function AppDetail({
   app,
   system,
   engineOnline,
+  booting = false,
   busy = false,
   onLaunch,
   onForceStop,
   onOpenKeymap,
   onCopyPackage,
+  onBackupApk,
+  savingApk = false,
   onUninstall,
 }) {
   if (!app) {
@@ -56,7 +60,8 @@ export default function AppDetail({
           type="button"
           className="btn btn-primary"
           onClick={() => onLaunch(app.package)}
-          disabled={busy}
+          disabled={busy || booting}
+          title={booting ? "Android is still booting" : undefined}
         >
           <Play size={16} fill="currentColor" aria-hidden="true" />
           <span>Launch</span>
@@ -91,6 +96,23 @@ export default function AppDetail({
           <Copy size={15} aria-hidden="true" />
           <span>Copy package ID</span>
         </button>
+        {onBackupApk && (
+          <button
+            type="button"
+            className="btn btn-outline"
+            onClick={() => onBackupApk(app.package, app.name)}
+            disabled={busy || !engineOnline || booting || savingApk}
+            aria-busy={savingApk}
+            title={
+              engineOnline
+                ? "Save the app's APKs to Downloads (app data is not included)"
+                : "Start the engine to save the app's APKs"
+            }
+          >
+            <Download size={15} aria-hidden="true" />
+            <span>{savingApk ? "Saving APK…" : "Save APK"}</span>
+          </button>
+        )}
         <button
           type="button"
           className="btn btn-outline-danger"
@@ -113,7 +135,7 @@ export default function AppDetail({
         </div>
         <div className="app-fact">
           <dt>Engine</dt>
-          <dd>{engineOnline ? "Running" : "Stopped"}</dd>
+          <dd>{booting ? "Booting" : engineOnline ? "Running" : "Stopped"}</dd>
         </div>
       </dl>
 

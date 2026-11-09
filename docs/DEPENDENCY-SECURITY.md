@@ -4,13 +4,14 @@
 - `npm audit --omit=dev` (production dependencies must be clean).
 - `cargo audit` (pinned `cargo-audit` 0.22.2) on `src-tauri/Cargo.lock`.
 - All third-party GitHub Actions are pinned to commit SHAs; the workflow token is `contents: read`.
+- Dependabot (`.github/dependabot.yml`) opens weekly, grouped update PRs for npm,
+  cargo, and the SHA-pinned actions; each goes through the same CI.
 
 ## Accepted risk
-`npm audit` (dev dependencies, after Vite 8 / Vitest 5 upgrade) reports
-**6 moderate** findings, all `minimatch` DoS (GHSA-g3hv-75wg-m249) reached via
-`eslint` and `eslint-plugin-react`. They only run on developer/CI machines on
-repository-controlled globs, never ship in the app, and the only offered "fix"
-is a downgrade to eslint@4. Re-check when ESLint publishes a patched release.
+None open. The 6 moderate dev-only `minimatch` findings (GHSA-g3hv-75wg-m249,
+via `eslint`) that were accepted after the Vite 8 / Vitest 5 upgrade no longer
+appear: a full `npm audit`, dev dependencies included, reported 0
+vulnerabilities on 2026-11-09.
 
 ## Tauri capabilities
 `capabilities/default.json` grants only `core:event:allow-listen`,

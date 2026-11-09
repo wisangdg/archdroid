@@ -2,7 +2,7 @@
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "ArchDroid",
   "mainBinaryName": "archdroid",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "identifier": "io.github.wisangdg.archdroid",
   "build": {
     "frontendDist": "../dist",
@@ -52,19 +52,27 @@
           "waydroid",
           "squashfs-tools",
           "lzip",
-          "git"
+          "git",
+          "adb"
         ],
         "section": "utils",
-        "priority": "optional"
+        "priority": "optional",
+        "files": {
+          "/usr/lib/udev/rules.d/70-archdroid-touch.rules": "../packaging/udev/70-archdroid-touch.rules"
+        }
       },
       "rpm": {
         "recommends": [
           "waydroid",
           "squashfs-tools",
           "lzip",
-          "git"
+          "git",
+          "android-tools"
         ],
-        "release": "1"
+        "release": "1",
+        "files": {
+          "/usr/lib/udev/rules.d/70-archdroid-touch.rules": "../packaging/udev/70-archdroid-touch.rules"
+        }
       }
     },
     "android": {

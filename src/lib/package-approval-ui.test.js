@@ -1,53 +1,45 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { TASKS } from "./tasks.js";
 
 const projectRoot = new URL("../../", import.meta.url);
 const read = (path) => readFileSync(new URL(path, projectRoot), "utf8");
 
 test("package-installing actions preview the distro packages before confirming", () => {
-  const app = read("src/App.jsx");
-
-  for (const [handler, action] of [
-    ["handleInstallGApps", "gapps"],
-    ["handleInstallHoudini", "houdini"],
-    ["handleInitWaydroid", "init"],
-  ]) {
-    const start = app.indexOf(`const ${handler} =`);
-    assert.ok(start > 0, `${handler} not found`);
-    const body = app.slice(start, app.indexOf("const handle", start + 1));
-
-    assert.match(
-      body,
-      new RegExp(`previewPackageInstall\\(\\s*"${action}"\\s*\\)`),
-      `${handler} does not preview the ${action} package install`
-    );
-    assert.match(
-      body,
-      /packagePreview:\s*preview/,
-      `${handler} drops the preview`
-    );
-    assert.match(
-      body,
-      /executeInstall\w+\(preview\.packages\)|executeInitWaydroid\(preview\.packages\)/,
-      `${handler} does not forward the approved package list`
-    );
+  for (const type of ["gapps", "houdini", "init"]) {
+    assert.equal(TASKS[type].preview, type, `${type} has no package preview`);
+    assert.ok(TASKS[type].confirm, `${type} is not confirmed`);
   }
+
+  const app = read("src/App.jsx");
+  const start = app.indexOf("const startTask =");
+  assert.ok(start > 0, "startTask not found");
+  const body = app.slice(start, app.indexOf("const handle", start));
+  assert.match(body, /previewPackageInstall\(task\.preview\)/);
+  assert.match(
+    body,
+    /packagePreview:\s*preview/,
+    "startTask drops the preview"
+  );
+  // The reviewed list is the approval token the backend re-validates.
+  assert.match(
+    body,
+    /approvedPackages:\s*preview\.packages/,
+    "startTask does not forward the approved package list"
+  );
 });
 
 test("installer commands receive the approved package list", () => {
   const app = read("src/App.jsx");
-
-  for (const command of ["install_gapps", "install_houdini", "waydroid_init"]) {
-    const index = app.indexOf(`runStreamingTask("${command}"`);
-    assert.ok(index > 0, `${command} is never streamed`);
-    const body = app.slice(index, index + 400);
-    assert.match(
-      body,
-      /args:\s*\{\s*approvedPackages\s*\}/,
-      `${command} sends no approval`
-    );
-  }
+  const start = app.indexOf("const runTask =");
+  assert.ok(start > 0, "runTask not found");
+  const body = app.slice(start, app.indexOf("const startTask", start));
+  assert.match(
+    body,
+    /runStreamingTask\(task\.command,\s*\{[\s\S]*?\bargs,?\s*\}/,
+    "runTask does not pass the approval to the command"
+  );
 });
 
 test("the app forwards the reviewed package preview to the modal", () => {

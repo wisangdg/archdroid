@@ -333,6 +333,12 @@ export default function ResolutionPresets({
       {/* Action Bar */}
       <div className="res-apply-bar">
         <div className="res-apply-notice">
+          {!engineRunning && (
+            <p className="config-offline-note" role="note">
+              Start the engine and wait for Android to boot to apply a display
+              profile.
+            </p>
+          )}
           <p>
             ℹ️ Changes to display resolution and DPI require a{" "}
             <strong>restart of the Waydroid session</strong> to take visual
@@ -360,6 +366,7 @@ export default function ResolutionPresets({
             onClick={handleApply}
             disabled={
               disabled ||
+              !engineRunning ||
               isApplying ||
               isUnchanged ||
               !customWidth ||

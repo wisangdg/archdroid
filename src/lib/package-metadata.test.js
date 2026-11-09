@@ -28,6 +28,16 @@ test("tauri.conf.json bundle metadata is complete and accurately declared", () =
   assert.ok(conf.bundle.linux.deb.recommends.includes("waydroid"));
   assert.ok(conf.bundle.linux.deb.recommends.includes("squashfs-tools"));
   assert.ok(conf.bundle.linux.deb.recommends.includes("lzip"));
+  // adb drives the DPI presets, split APKs, Save APK, boot status, Force stop.
+  assert.ok(conf.bundle.linux.deb.recommends.includes("adb"));
+  assert.ok(conf.bundle.linux.rpm.recommends.includes("android-tools"));
+  for (const pkgbuild of [
+    "packaging/arch/PKGBUILD",
+    "packaging/aur/PKGBUILD",
+  ]) {
+    const text = fs.readFileSync(path.join(repoRoot, pkgbuild), "utf8");
+    assert.match(text, /'android-tools: /, `${pkgbuild} suggests adb`);
+  }
   assert.ok(conf.bundle.linux.deb.recommends.includes("git"));
 
   // Same for the .rpm: openSUSE has no official waydroid package, and

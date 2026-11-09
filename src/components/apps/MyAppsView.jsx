@@ -28,12 +28,15 @@ const FILTERS = [
 export default function MyAppsView({
   apps,
   engineOnline = false,
+  booting = false,
   onLaunchApp,
   onForceStopApp,
   onOpenKeymap,
   onInstallApk,
   onUninstallApp,
   onCopyPackage,
+  onBackupApk,
+  savingApk = false,
   busy = false,
 }) {
   const [searchQuery, setSearchQuery] = useState("");
@@ -165,8 +168,8 @@ export default function MyAppsView({
           <div className="empty-library-banner">
             <h3>No Android apps installed yet</h3>
             <p>
-              Click <strong>Install APK</strong> or drop an <code>.apk</code> on
-              the window. To get Google Play, open{" "}
+              Click <strong>Install APK</strong> or drop an <code>.apk</code> or
+              split APK bundle on the window. To get Google Play, open{" "}
               <strong>Install Tools</strong>.
             </p>
           </div>
@@ -225,11 +228,14 @@ export default function MyAppsView({
         app={selectedApp}
         system={selectedApp ? isSystemApp(selectedApp.package) : false}
         engineOnline={engineOnline}
+        booting={booting}
         busy={busy}
         onLaunch={onLaunchApp}
         onForceStop={onForceStopApp}
         onOpenKeymap={onOpenKeymap}
         onCopyPackage={onCopyPackage}
+        onBackupApk={onBackupApk}
+        savingApk={savingApk}
         onUninstall={onUninstallApp}
       />
 

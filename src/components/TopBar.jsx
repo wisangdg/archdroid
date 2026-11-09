@@ -29,6 +29,7 @@ export default function TopBar({
   status,
   isInitialized,
   isOperating,
+  booting = false,
   busy = false,
   onStart,
   onStop,
@@ -90,7 +91,11 @@ export default function TopBar({
           >
             <span className="status-dot" aria-hidden="true"></span>
             <span className="status-text">
-              {online ? "Engine Running" : "Engine Stopped"}
+              {online
+                ? booting
+                  ? "Android Booting…"
+                  : "Engine Running"
+                : "Engine Stopped"}
             </span>
           </div>
 

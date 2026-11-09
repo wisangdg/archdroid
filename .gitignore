@@ -7,6 +7,9 @@ dist/
 src-tauri/target/
 src-tauri/gen/schemas/
 
+# Python (scripts/e2e, scripts/test-vm)
+__pycache__/
+
 # Editors & OS
 .vscode/*
 !.vscode/extensions.json
@@ -19,6 +22,12 @@ src-tauri/gen/schemas/
 packaging/arch/pkg/
 packaging/arch/src/
 packaging/arch/*.pkg.tar.*
+packaging/aur/pkg/
+packaging/aur/src/
+packaging/aur/*.pkg.tar.*
+packaging/aur/*.deb
+packaging/aur/SHA256SUMS-*
+packaging/aur/LICENSE-*
 dist-release/
 
 

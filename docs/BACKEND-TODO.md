@@ -193,9 +193,13 @@ Catatan:
   menulisnya ke `waydroid_base.prop` setiap container start. Karena itu
   identitas butuh restart, sedangkan `waydroid prop set` hanya runtime dan
   tidak dipakai untuk apply.
-- **Tidak ada `persist.waydroid.width/height` di 1.6.3** (dicek dari sumber);
-  karena itu resolusi/DPI lewat `wm`, bukan prop. Efeknya skala UI Android,
-  bukan ukuran window Wayland.
+- `persist.waydroid.width/height` tidak dibaca oleh tools Python Waydroid
+  1.6.3, tetapi **dibaca oleh image Android**. Diuji live 9 Nov 2026 (Waydroid
+  1.6.3, LineageOS 20, Hyprland, scale 1.25): kosong → display Android mengikuti
+  window (`wm size` 625x681 untuk window 500x545); 1280x720 + restart sesi →
+  `wm size` 1600x900 (= 1280x720 × scale). Preset resolusi di Settings bekerja.
+  DPI berbeda: `ro.sf.lcd_density` sudah di-set saat boot dan `prop set` ditolak,
+  jadi DPI lewat `wm density` (override bertahan setelah restart).
 - Tulis cfg hanya jika nilai `[properties]` benar-benar berubah, jadi apply
   kedua tanpa perubahan tidak memunculkan prompt root. Payload ditulis
   sebagai base64 ke `waydroid.cfg.tmp` lalu `mv` (atomik, aman dari quoting).
@@ -236,6 +240,10 @@ Catatan:
 ## 5. Keymapping & input (P1–P2, fitur ikonik)
 
 Catatan penting: CachyDroid tidak memiliki surface render Waydroid, jadi injeksi input harus eksplisit. **Phantom** sudah dipakai lewat `install_phantom`/`run_phantom` — backend tinggal menyediakan model mapping + injeksi dasar.
+
+- [x] **P1 M — Touch mode: klik mouse jadi sentuhan jari** (`src/touchmode.rs`, command `touch_mode_status`/`touch_mode_set`/`install_touch_mode_access`)
+  Waydroid meneruskan mouse sebagai `TOOL_TYPE_MOUSE`; WebView (mis. pemilih tanggal EA di PvZ2) mengabaikannya, dan `persist.waydroid.fake_touch` hanya mengganti *source*, bukan tool type. Touch mode meng-grab mouse fisik, meneruskannya lewat mouse virtual, dan mengubah klik kiri di atas jendela `waydroid.*`/`Waydroid` menjadi sentuhan di touchscreen virtual (jalur `wl_touch` Waydroid → jari asli). Selama jari turun kursor tidak digerakkan, karena event hover dari mouse membuat Android membatalkan gesture sentuh; saat jari diangkat kursor dipindah ke titik akhir. Posisi kursor/jendela dari IPC Hyprland (compositor lain: `supported=false`, pesan jelas). Akses: aturan udev `uaccess` untuk `/dev/uinput` + mouse (bukan keyboard), dibawa paket; tombol "Enable access" untuk instalasi lain.
+  *DoD:* mesin status murni (`Bridge::on_frame`) + parser Hyprland + pemetaan koordinat punya unit test; dua test live `#[ignore]` (`live_bridge`, `live_synthetic_click`) membuka dan menggeser pemilih tanggal PvZ2 lewat jembatan pada Hyprland 0.56. **Belum**: touchpad, multi-monitor dengan pemetaan touchscreen selain monitor fokus, rotasi output.
 
 - [ ] **P1 M — Primitive input**
   `input_tap(x,y)`, `input_swipe(x1,y1,x2,y2,ms)`, `input_text(s)`, `input_key(keycode)` → `waydroid shell input`.

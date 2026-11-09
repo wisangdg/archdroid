@@ -477,24 +477,7 @@ pub fn parse_wm_size(output: &str) -> Option<(u32, u32)> {
     override_size.or(physical)
 }
 
-pub fn parse_wm_density(output: &str) -> Option<u32> {
-    let mut physical = None;
-    let mut override_density = None;
-    for line in output.lines() {
-        let Some((label, value)) = line.split_once(':') else {
-            continue;
-        };
-        let Ok(value) = value.trim().parse::<u32>() else {
-            continue;
-        };
-        match label.trim().to_ascii_lowercase().as_str() {
-            "physical density" => physical = Some(value),
-            "override density" => override_density = Some(value),
-            _ => {}
-        }
-    }
-    override_density.or(physical)
-}
+pub use crate::adb::parse_wm_density;
 
 #[cfg(test)]
 mod tests {

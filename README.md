@@ -15,9 +15,10 @@ ArchDroid is a desktop app for [Waydroid](https://waydroid.net/). Set up Android
 ## Highlights
 
 - 🎮 **App library and launcher.** A Control Center: your installed Android apps in a list with icons, instant search (`Ctrl+F`) and All/User/System filters, next to the selected app with Launch, Force stop, Keymapping, Copy package ID, and Uninstall. Double-click a row to launch; right-click for the menu. The engine state and Start/Stop stay in the top bar on every page.
-- 📦 **Drag-and-drop APK install.** Drop an `.apk` from your file manager onto the window, or use the file picker.
+- 📦 **Drag-and-drop APK install.** Drop an `.apk`, or a split APK bundle (`.apks`, `.xapk`, `.apkm`; needs adb), from your file manager onto the window, or use the file picker.
 - 🧩 **Google Play and ARM translation.** Add Google Play Services (MindTheGapps / OpenGApps) and Intel libhoudini so ARM-only games run on x86_64 CPUs.
 - ⌨️ **Keyboard and mouse controls.** Build and launch the [Phantom](https://github.com/oliviermugishak/phantom) keymapper from the app: WASD, custom binds, and mouse look for shooters.
+- 👆 **Touch mode (Hyprland).** A left click or drag over an Android window acts like a finger, as in other Android emulators. Some games and in-app web pages ignore Waydroid's mouse input entirely; Plants vs Zombies 2's birth-date picker is one.
 - 🖥️ **Display presets.** Tablet Full HD, Standard 720p, Mobile Phone (portrait), Desktop 2K / QHD, or your own resolution and DPI.
 - 🩺 **Host diagnostics.** 17 checks (binder, GPU, Wayland, KVM, polkit, disk, network, and more), each with the command that fixes it.
 - 🔒 **Root only when it's needed, and only after you agree.** Every root action shows you the exact command and packages first.
@@ -152,6 +153,7 @@ ArchDroid follows the **least-privilege** principle.
 1. Installing missing system packages (`waydroid`, `squashfs-tools`, `lzip`, `git`) with your package manager.
 2. First-time initialization (`waydroid init`).
 3. Add-on injection (GApps, libhoudini, multitouch), which modifies the Waydroid system image.
+4. Touch mode access, only if your install did not ship it: a udev rule that lets the logged-in user read mice (never keyboards) and use `/dev/uinput`. `/dev/uinput` lets any program you run create virtual input devices, keyboards included; Steam Input's udev rule grants the same. The Arch, `.deb` and `.rpm` packages install it as `/usr/lib/udev/rules.d/70-archdroid-touch.rules`; delete the rule and run `sudo udevadm control --reload-rules` to revoke it.
 
 **Everything else runs as your normal user:** opening the app, starting the Waydroid session, launching apps, installing APKs, changing resolution and DPI, running Phantom, and diagnostics.
 
@@ -222,6 +224,14 @@ Then log out and back in.
 ### GPU notes
 - **Intel and AMD** work out of the box with Mesa (DRI3/Vulkan).
 - **NVIDIA proprietary:** set `nvidia-drm.modeset=1` in your kernel parameters. If you see rendering glitches, configure Waydroid to use the software renderer (`Mesa llvmpipe`).
+
+### Clicks do nothing in a game, but the button animates
+Waydroid forwards your mouse to Android as a mouse, and some games and in-app web pages only react to fingers. Turn on **Keymapping → Touch Mode**: left clicks and drags over Android windows then become touches.
+
+- Touch mode needs Hyprland for now, because it asks the compositor where the cursor is. On other compositors, Phantom's menu-touch mode (`F8`) does the same job.
+- If the panel says **Needs access**, the udev rule is not active yet. Packaged installs ship it; replug the mouse or log out and back in once. Other installs can use **Enable access**.
+- `persist.waydroid.fake_touch` does not fix this: it only relabels the event source, and Android WebView still sees a mouse.
+- Touchpads are not converted yet; they keep working as a normal pointer.
 
 ### "Start Failed" or "Session Slow to Start"
 The message includes the reason Waydroid reported. For the full log, create a Diagnostic Bundle (below).

@@ -4,7 +4,9 @@
 //! before sharing it, and passed through the same redaction as the app log.
 //! ArchDroid never uploads it; the user decides where it goes.
 
-use crate::{app_log_file, collect_diagnostics, marker_file, redact_with_home, waydroid};
+use crate::{
+    app_log_file, collect_diagnostics, marker_file, redact_with_home, waydroid, WAYDROID_LOG,
+};
 use crate::{AppError, DiagnosticsReport};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -12,7 +14,6 @@ use tauri::AppHandle;
 
 /// Per-log budget: enough for the last few tasks, small enough to paste.
 const LOG_TAIL_BYTES: u64 = 32 * 1024;
-const WAYDROID_LOG: &str = "/var/lib/waydroid/waydroid.log";
 const MARKERS: [&str; 3] = [
     "gapps_installed",
     "houdini_installed",
@@ -198,16 +199,7 @@ pub(crate) fn create(app: &AppHandle) -> Result<(PathBuf, String), AppError> {
     let home = std::env::var("HOME").ok();
     let content = render(&input, home.as_deref());
 
-    // `download_dir` only reads XDG user-dirs config; many minimal setups have
-    // ~/Downloads without it.
-    let dir = dirs::download_dir()
-        .or_else(|| {
-            dirs::home_dir()
-                .map(|home| home.join("Downloads"))
-                .filter(|d| d.is_dir())
-        })
-        .or_else(dirs::home_dir)
-        .ok_or_else(|| AppError::command_failed("Could not find a Downloads or home folder."))?;
+    let dir = downloads_dir()?;
     let stamp: String = input
         .generated_utc
         .chars()
@@ -216,6 +208,20 @@ pub(crate) fn create(app: &AppHandle) -> Result<(PathBuf, String), AppError> {
     let path = dir.join(format!("archdroid-diagnostics-{stamp}.txt"));
     write_private(&path, &content).map_err(AppError::Io)?;
     Ok((path, content))
+}
+
+/// Where files ArchDroid writes for the user go: Downloads, else home.
+pub(crate) fn downloads_dir() -> Result<PathBuf, AppError> {
+    // `download_dir` only reads XDG user-dirs config; many minimal setups have
+    // ~/Downloads without it.
+    dirs::download_dir()
+        .or_else(|| {
+            dirs::home_dir()
+                .map(|home| home.join("Downloads"))
+                .filter(|d| d.is_dir())
+        })
+        .or_else(dirs::home_dir)
+        .ok_or_else(|| AppError::command_failed("Could not find a Downloads or home folder."))
 }
 
 /// Write `content` readable by the owner only: the bundle describes the host.

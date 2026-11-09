@@ -7,14 +7,26 @@ import {
   MousePointer,
   ShieldCheck,
 } from "lucide-react";
+import TouchModePanel from "./TouchModePanel";
 
 export default function KeymapView({
   onRunPhantom,
   onInstallPhantom,
   installing,
+  touchMode,
+  onToggleTouchMode,
+  onEnableTouchAccess,
 }) {
   return (
     <div className="keymap-view-container">
+      <TouchModePanel
+        status={touchMode.status}
+        changing={touchMode.changing}
+        installing={installing}
+        onToggle={onToggleTouchMode}
+        onEnableAccess={onEnableTouchAccess}
+      />
+
       {/* Hero Showcase Card */}
       <div className="glass-panel keymap-hero-card">
         <div className="keymap-hero-visual">

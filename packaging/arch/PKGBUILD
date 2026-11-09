@@ -1,6 +1,6 @@
 # Maintainer: Wisang Drillian Geni <https://github.com/wisangdg/archdroid>
 pkgname=archdroid-bin
-pkgver=0.1.5
+pkgver=0.1.6
 pkgrel=1
 pkgdesc="Modern desktop front-end for Waydroid"
 arch=('x86_64')
@@ -16,6 +16,7 @@ optdepends=(
     'squashfs-tools: for GApps extraction'
     'lzip: for image decompression'
     'git: for libhoudini translation repository'
+    'android-tools: adb, for DPI presets, split APKs, Save APK, boot status and Force stop'
 )
 provides=('archdroid')
 conflicts=('archdroid')
@@ -37,5 +38,8 @@ package() {
         install -Dm644 "${repo_root}/src-tauri/icons/128x128@2x.png" "${pkgdir}/usr/share/icons/hicolor/256x256@2/apps/archdroid.png"
     fi
 
+    # Touch mode: lets the logged-in user use /dev/uinput and mice (not keyboards).
+    # pacman's udev hook reloads the rules; already-plugged mice pick it up on replug or next login.
+    install -Dm644 "${repo_root}/packaging/udev/70-archdroid-touch.rules" "${pkgdir}/usr/lib/udev/rules.d/70-archdroid-touch.rules"
     install -Dm644 "${repo_root}/LICENSE" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
 }

@@ -1,524 +1,489 @@
 //! Host diagnostics report behind the Settings > Diagnostics panel.
+//!
+//! [`HostFacts::probe`] reads the system; [`report`] turns those facts into
+//! the items the user reads. The decisions (status, wording, remediation) are
+//! pure, so every check is tested for each status it can produce.
 
 use std::path::Path;
 use std::process::Stdio;
 
 use crate::*;
 
-pub(crate) fn collect_diagnostics() -> DiagnosticsReport {
-    let pm = platform::PackageManager::detect();
-    let mut items = Vec::new();
+/// Access to `/dev/kvm`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Kvm {
+    Ready,
+    PermissionDenied,
+    Missing,
+}
 
-    // 1. Session Type (Wayland vs X11)
-    let is_wayland = std::env::var("WAYLAND_DISPLAY").is_ok()
-        || std::env::var("XDG_SESSION_TYPE")
-            .map(|s| s.to_lowercase() == "wayland")
-            .unwrap_or(false);
+/// Whether the `waydroid` CLI exists, or can be installed from a repository.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum WaydroidCli {
+    Installed,
+    /// No configured repository offers the package.
+    NotInRepositories,
+    Missing,
+}
 
-    if is_wayland {
-        items.push(DiagnosticItem {
-            key: "session".to_string(),
-            title: "Display Session".to_string(),
-            status: "ok".to_string(),
-            value: "Wayland Native".to_string(),
-            detail: "Wayland compositor detected. Waydroid runs with native direct rendering."
-                .to_string(),
-            remediation: None,
-        });
-    } else {
-        items.push(DiagnosticItem {
-            key: "session".to_string(),
-            title: "Display Session".to_string(),
-            status: "warning".to_string(),
-            value: "X11 Display".to_string(),
-            detail: "Waydroid requires Wayland. Under X11, a nested compositor (Weston/cage) may be required.".to_string(),
-            remediation: Some("Run inside a Wayland compositor, or use cage: cage -- waydroid show-full-ui".to_string()),
-        });
-    }
+/// Everything the report is decided from.
+#[derive(Clone, Debug)]
+pub(crate) struct HostFacts {
+    pub pm: Option<platform::PackageManager>,
+    pub wayland: bool,
+    pub kvm: Kvm,
+    pub binder: bool,
+    pub gpu: bool,
+    pub service_active: bool,
+    pub waydroid: WaydroidCli,
+    pub adb: bool,
+    pub pkexec: bool,
+    pub sudo: bool,
+    pub polkit_agent: bool,
+    /// ArchDroid was started from a terminal, so sudo can ask for a password.
+    pub tty: bool,
+    pub git: bool,
+    pub python: bool,
+    pub venv: bool,
+    pub unsquashfs: bool,
+    pub lzip: bool,
+    pub xdg_open: bool,
+    pub terminal: Option<String>,
+    pub disk_kb: Option<u64>,
+    pub online: bool,
+    pub initialized: bool,
+}
 
-    // 2. KVM Virtualization Acceleration
-    let kvm_path = Path::new("/dev/kvm");
-    if kvm_path.exists() {
-        let is_writable = std::fs::OpenOptions::new()
+impl HostFacts {
+    pub(crate) fn probe() -> Self {
+        let pm = platform::PackageManager::detect();
+        let kvm_path = Path::new("/dev/kvm");
+        let kvm = if !kvm_path.exists() {
+            Kvm::Missing
+        } else if std::fs::OpenOptions::new()
             .read(true)
             .write(true)
             .open(kvm_path)
-            .is_ok();
-
-        if is_writable {
-            items.push(DiagnosticItem {
-                key: "kvm".to_string(),
-                title: "KVM Acceleration".to_string(),
-                status: "ok".to_string(),
-                value: "Hardware KVM Ready".to_string(),
-                detail: "/dev/kvm is available with read/write access.".to_string(),
-                remediation: None,
-            });
+            .is_ok()
+        {
+            Kvm::Ready
         } else {
-            items.push(DiagnosticItem {
-                key: "kvm".to_string(),
-                title: "KVM Acceleration".to_string(),
-                status: "warning".to_string(),
-                value: "Permission Denied".to_string(),
-                detail: "KVM device exists but user lacks write permission.".to_string(),
-                remediation: Some("sudo usermod -aG kvm $USER".to_string()),
-            });
-        }
-    } else {
-        items.push(DiagnosticItem {
-            key: "kvm".to_string(),
-            title: "KVM Acceleration".to_string(),
-            status: "warning".to_string(),
-            value: "Not Detected".to_string(),
-            detail:
-                "/dev/kvm not found. Ensure Intel VT-x or AMD-V is enabled in motherboard BIOS."
-                    .to_string(),
-            remediation: Some(
-                "Enable VT-x/AMD-V in BIOS and load kernel module: sudo modprobe kvm".to_string(),
-            ),
-        });
-    }
-
-    // 3. Android Binder IPC
-    let has_binder = Path::new("/dev/binderfs").exists()
-        || Path::new("/dev/binder").exists()
-        || Path::new("/dev/binderfs/binder").exists();
-
-    if has_binder {
-        items.push(DiagnosticItem {
-            key: "binder".to_string(),
-            title: "Android Binder IPC".to_string(),
-            status: "ok".to_string(),
-            value: "Binder Nodes Active".to_string(),
-            detail: "Android kernel inter-process communication drivers are active.".to_string(),
-            remediation: None,
-        });
-    } else {
-        items.push(DiagnosticItem {
-            key: "binder".to_string(),
-            title: "Android Binder IPC".to_string(),
-            status: "ok".to_string(),
-            value: "Managed by Daemon".to_string(),
-            detail: "Binderfs will be mounted automatically when container daemon starts."
-                .to_string(),
-            remediation: None,
-        });
-    }
-
-    // 4. GPU 3D Passthrough
-    let has_gpu = Path::new("/dev/dri/renderD128").exists() || Path::new("/dev/dri").exists();
-    if has_gpu {
-        items.push(DiagnosticItem {
-            key: "gpu".to_string(),
-            title: "GPU Acceleration".to_string(),
-            status: "ok".to_string(),
-            value: "Direct Rendering (DRI)".to_string(),
-            detail: "Hardware Direct Rendering Manager node is available for 3D graphics."
-                .to_string(),
-            remediation: None,
-        });
-    } else {
-        items.push(DiagnosticItem {
-            key: "gpu".to_string(),
-            title: "GPU Acceleration".to_string(),
-            status: "warning".to_string(),
-            value: "Software Rendering".to_string(),
-            detail: "Hardware DRI node not found. Android graphics will fall back to software rendering.".to_string(),
-            remediation: Some("Install graphics drivers supporting DRI (Direct Rendering Infrastructure).".to_string()),
-        });
-    }
-
-    // 5. Waydroid Container Service
-    let service_active = if let Some(systemctl) =
-        resolve_program("systemctl").or_else(|| trusted_program("systemctl"))
-    {
-        waydroid::run_program(
-            &systemctl,
-            &["is-active".to_string(), "waydroid-container".to_string()],
-            3,
-            None,
-        )
-        .map(|stdout| stdout.trim() == "active")
-        .unwrap_or(false)
-    } else {
-        false
-    };
-
-    if service_active {
-        items.push(DiagnosticItem {
-            key: "service".to_string(),
-            title: "Container Daemon".to_string(),
-            status: "ok".to_string(),
-            value: "Service Active".to_string(),
-            detail: "waydroid-container.service is actively running in background.".to_string(),
-            remediation: None,
-        });
-    } else {
-        items.push(DiagnosticItem {
-            key: "service".to_string(),
-            title: "Container Daemon".to_string(),
-            status: "info".to_string(),
-            value: "Service Inactive".to_string(),
-            detail:
-                "Container daemon is inactive. It will start automatically when session starts."
-                    .to_string(),
-            remediation: None,
-        });
-    }
-
-    // 6. Waydroid CLI binary
-    let has_waydroid =
-        resolve_program("waydroid").is_some() || trusted_program("waydroid").is_some();
-    if has_waydroid {
-        items.push(DiagnosticItem {
-            key: "waydroid".to_string(),
-            title: "Waydroid Package".to_string(),
-            status: "ok".to_string(),
-            value: "Installed".to_string(),
-            detail: "Waydroid command-line tool is available in system PATH.".to_string(),
-            remediation: None,
-        });
-    } else if pm.is_some_and(|pm| waydroid_availability(pm) == platform::Availability::Unavailable)
-    {
-        items.push(DiagnosticItem {
-            key: "waydroid".to_string(),
-            title: "Waydroid Package".to_string(),
-            status: "error".to_string(),
-            value: WAYDROID_NOT_IN_REPOS.to_string(),
-            detail: waydroid_unavailable_detail(pm),
-            remediation: None,
-        });
-    } else {
-        items.push(DiagnosticItem {
-            key: "waydroid".to_string(),
-            title: "Waydroid Package".to_string(),
-            status: "error".to_string(),
-            value: "Not Installed".to_string(),
-            detail: waydroid_missing_detail(pm),
-            remediation: pm.map(|p| p.user_install_command(&["waydroid"])),
-        });
-    }
-
-    // 7. ADB / android-tools
-    let has_adb = resolve_program("adb").is_some() || trusted_program("adb").is_some();
-    if has_adb {
-        items.push(DiagnosticItem {
-            key: "adb".to_string(),
-            title: "Android Debug Bridge".to_string(),
-            status: "ok".to_string(),
-            value: "Installed".to_string(),
-            detail: "adb is available for unprivileged container queries and inspection."
-                .to_string(),
-            remediation: None,
-        });
-    } else {
-        items.push(DiagnosticItem {
-            key: "adb".to_string(),
-            title: "Android Debug Bridge".to_string(),
-            status: "warning".to_string(),
-            value: "Not Installed".to_string(),
-            detail: "adb is missing. App list, install/uninstall, and Android boot detection fall back to slower or unavailable paths.".to_string(),
-            remediation: pm.map(|p| p.user_install_command(&["adb"])),
-        });
-    }
-
-    // 8. Root Elevation Tool (polkit / sudo)
-    let has_pkexec = has_program("pkexec");
-    let has_sudo = has_program("sudo");
-    if has_pkexec && !polkit_agent_running() {
-        items.push(DiagnosticItem {
-            key: "elevation".to_string(),
-            title: "Privilege Elevation".to_string(),
-            status: if has_sudo && std::io::stdin().is_terminal() {
-                "warning"
-            } else {
-                "error"
-            }
-            .to_string(),
-            value: "No Polkit Agent".to_string(),
-            detail: "pkexec is installed but no polkit authentication agent is running, so the password prompt cannot appear. Start an agent in your session, or launch ArchDroid from a terminal so sudo can ask instead.".to_string(),
-            remediation: Some(
-                "Start one, e.g. hyprpolkitagent, polkit-gnome-authentication-agent-1, or lxqt-policykit-agent"
-                    .to_string(),
-            ),
-        });
-    } else if !has_pkexec && has_sudo && !std::io::stdin().is_terminal() {
-        items.push(DiagnosticItem {
-            key: "elevation".to_string(),
-            title: "Privilege Elevation".to_string(),
-            status: "error".to_string(),
-            value: "sudo Needs a TTY".to_string(),
-            detail: "Only sudo is available and ArchDroid has no terminal to ask for the password. Administrative operations will fail.".to_string(),
-            remediation: Some(format!(
-                "{}, or start ArchDroid from a terminal",
-                pm.map(|p| p.user_install_command(&["polkit"]))
-                    .unwrap_or_else(|| "Install polkit and a polkit agent".to_string())
-            )),
-        });
-    } else if let Some(tool) = has_elevation_tool() {
-        items.push(DiagnosticItem {
-            key: "elevation".to_string(),
-            title: "Privilege Elevation".to_string(),
-            status: "ok".to_string(),
-            value: match tool {
-                "pkexec" => "Polkit (pkexec)".to_string(),
-                _ => "sudo (terminal)".to_string(),
-            },
-            detail: format!(
-                "Authentication agent '{tool}' is available for administrative operations."
-            ),
-            remediation: None,
-        });
-    } else {
-        items.push(DiagnosticItem {
-            key: "elevation".to_string(),
-            title: "Privilege Elevation".to_string(),
-            status: "error".to_string(),
-            value: "Missing".to_string(),
-            detail: "Neither pkexec nor sudo was found. Administrative operations will fail."
-                .to_string(),
-            remediation: pm.map(|p| p.user_install_command(&["polkit"])),
-        });
-    }
-
-    // 9. Git
-    let has_git = resolve_program("git").is_some() || trusted_program("git").is_some();
-    if has_git {
-        items.push(DiagnosticItem {
-            key: "git".to_string(),
-            title: "Git Version Control".to_string(),
-            status: "ok".to_string(),
-            value: "Installed".to_string(),
-            detail: "git is available to download pinned third-party helper checkouts.".to_string(),
-            remediation: None,
-        });
-    } else {
-        items.push(DiagnosticItem {
-            key: "git".to_string(),
-            title: "Git Version Control".to_string(),
-            status: "warning".to_string(),
-            value: "Not Installed".to_string(),
-            detail: "git is required by GApps, ARM Translation, and Phantom installers."
-                .to_string(),
-            remediation: pm.map(|p| p.user_install_command(&["git"])),
-        });
-    }
-
-    // 10. Python 3 & venv
-    let (has_py, has_venv) = check_python_venv_available();
-    if has_py && has_venv {
-        items.push(DiagnosticItem {
-            key: "python".to_string(),
-            title: "Python 3 & venv".to_string(),
-            status: "ok".to_string(),
-            value: "Ready".to_string(),
-            detail: "Python 3 and venv module are ready for isolated script execution.".to_string(),
-            remediation: None,
-        });
-    } else if has_py {
-        items.push(DiagnosticItem {
-            key: "python".to_string(),
-            title: "Python 3 & venv".to_string(),
-            status: "error".to_string(),
-            value: "venv Missing".to_string(),
-            detail: "Python 3 is present but python3-venv is missing. Debian/Ubuntu systems require python3-venv.".to_string(),
-            remediation: pm.map(|p| p.user_install_command(&["python3-venv"])),
-        });
-    } else {
-        items.push(DiagnosticItem {
-            key: "python".to_string(),
-            title: "Python 3 & venv".to_string(),
-            status: "error".to_string(),
-            value: "Not Installed".to_string(),
-            detail: "Python 3 is required by GApps and ARM Translation installers.".to_string(),
-            remediation: pm.map(|p| p.user_install_command(&["python3", "python3-venv"])),
-        });
-    }
-
-    // 11. squashfs extraction tool
-    let has_squash =
-        resolve_program("unsquashfs").is_some() || trusted_program("unsquashfs").is_some();
-    if has_squash {
-        items.push(DiagnosticItem {
-            key: "squashfs".to_string(),
-            title: "SquashFS Tools".to_string(),
-            status: "ok".to_string(),
-            value: "unsquashfs Ready".to_string(),
-            detail: "unsquashfs is available to unpack Android filesystem images.".to_string(),
-            remediation: None,
-        });
-    } else {
-        items.push(DiagnosticItem {
-            key: "squashfs".to_string(),
-            title: "SquashFS Tools".to_string(),
-            status: "warning".to_string(),
-            value: "Missing".to_string(),
-            detail:
-                "unsquashfs is required to extract Android images for GApps and ARM Translation."
-                    .to_string(),
-            remediation: pm.map(|p| p.user_install_command(&["squashfs"])),
-        });
-    }
-
-    // 12. lzip
-    let has_lzip = resolve_program("lzip").is_some() || trusted_program("lzip").is_some();
-    if has_lzip {
-        items.push(DiagnosticItem {
-            key: "lzip".to_string(),
-            title: "Lzip Decompressor".to_string(),
-            status: "ok".to_string(),
-            value: "lzip Ready".to_string(),
-            detail: "lzip is available to extract MindTheGapps and libhoudini archives."
-                .to_string(),
-            remediation: None,
-        });
-    } else {
-        items.push(DiagnosticItem {
-            key: "lzip".to_string(),
-            title: "Lzip Decompressor".to_string(),
-            status: "warning".to_string(),
-            value: "Missing".to_string(),
-            detail: "lzip is required to decompress archives for GApps and ARM Translation."
-                .to_string(),
-            remediation: pm.map(|p| p.user_install_command(&["lzip"])),
-        });
-    }
-
-    // 13. xdg-open
-    let has_xdg = resolve_program("xdg-open").is_some() || trusted_program("xdg-open").is_some();
-    if has_xdg {
-        items.push(DiagnosticItem {
-            key: "xdg_open".to_string(),
-            title: "File Manager Launcher".to_string(),
-            status: "ok".to_string(),
-            value: "xdg-open Ready".to_string(),
-            detail: "xdg-open is available to open shared storage in your default file manager."
-                .to_string(),
-            remediation: None,
-        });
-    } else {
-        items.push(DiagnosticItem {
-            key: "xdg_open".to_string(),
-            title: "File Manager Launcher".to_string(),
-            status: "info".to_string(),
-            value: "Missing".to_string(),
-            detail: "xdg-open is needed to open the Android shared media folder in a file manager."
-                .to_string(),
-            remediation: pm.map(|p| p.user_install_command(&["xdg-utils"])),
-        });
-    }
-
-    // 14. Terminal Emulator for Phantom
-    let terminal = find_terminal_emulator();
-    if let Some(ref term) = terminal {
-        items.push(DiagnosticItem {
-            key: "terminal".to_string(),
-            title: "Terminal Emulator".to_string(),
-            status: "ok".to_string(),
-            value: term.clone(),
-            detail: format!(
-                "Terminal emulator '{term}' detected to run Phantom Keymapper interactive shell."
-            ),
-            remediation: None,
-        });
-    } else {
-        items.push(DiagnosticItem {
-            key: "terminal".to_string(),
-            title: "Terminal Emulator".to_string(),
-            status: "info".to_string(),
-            value: "Not Detected".to_string(),
-            detail: "A desktop terminal emulator (alacritty, foot, kitty, konsole, gnome-terminal) is needed to launch Phantom Keymapper.".to_string(),
-            remediation: pm.map(|p| p.user_install_command(&["alacritty"])),
-        });
-    }
-
-    // 15. Disk Space
-    let disk_kb = check_available_disk_space_kb(Path::new("/var/lib/waydroid"));
-    if let Some(kb) = disk_kb {
-        let (status, detail, remediation) = if kb >= 1_500_000 {
-            (
-                "ok",
-                "Sufficient disk space available for system images and container operations.",
+            Kvm::PermissionDenied
+        };
+        let waydroid = if has_program("waydroid") {
+            WaydroidCli::Installed
+        } else if pm
+            .is_some_and(|pm| waydroid_availability(pm) == platform::Availability::Unavailable)
+        {
+            WaydroidCli::NotInRepositories
+        } else {
+            WaydroidCli::Missing
+        };
+        let service_active = if let Some(systemctl) =
+            resolve_program("systemctl").or_else(|| trusted_program("systemctl"))
+        {
+            waydroid::run_program(
+                &systemctl,
+                &["is-active".to_string(), "waydroid-container".to_string()],
+                3,
                 None,
             )
-        } else if kb >= 500_000 {
-            (
-                "warning",
-                "Low disk space (< 1.5 GB). Initializing Waydroid requires ~1.2 GB of free space.",
-                Some("Free up at least 1.5 GB on host root or /var filesystem.".to_string()),
-            )
+            .map(|stdout| stdout.trim() == "active")
+            .unwrap_or(false)
         } else {
-            (
-                "error",
-                "Critically low disk space (< 500 MB). Waydroid container operations may fail.",
-                Some("Free up disk space immediately on host root or /var filesystem.".to_string()),
-            )
+            false
         };
-        items.push(DiagnosticItem {
-            key: "disk".to_string(),
-            title: "Available Storage".to_string(),
-            status: status.to_string(),
-            value: format_disk_space(kb),
-            detail: detail.to_string(),
-            remediation,
-        });
-    } else {
-        items.push(DiagnosticItem {
-            key: "disk".to_string(),
-            title: "Available Storage".to_string(),
-            status: "info".to_string(),
-            value: "Unknown".to_string(),
-            detail: "Unable to query available disk space via df.".to_string(),
-            remediation: None,
-        });
+        let (python, venv) = check_python_venv_available();
+        Self {
+            pm,
+            wayland: std::env::var("WAYLAND_DISPLAY").is_ok()
+                || std::env::var("XDG_SESSION_TYPE")
+                    .map(|s| s.to_lowercase() == "wayland")
+                    .unwrap_or(false),
+            kvm,
+            binder: Path::new("/dev/binderfs").exists()
+                || Path::new("/dev/binder").exists()
+                || Path::new("/dev/binderfs/binder").exists(),
+            gpu: Path::new("/dev/dri/renderD128").exists() || Path::new("/dev/dri").exists(),
+            service_active,
+            waydroid,
+            adb: has_program("adb"),
+            pkexec: has_program("pkexec"),
+            sudo: has_program("sudo"),
+            polkit_agent: polkit_agent_running(),
+            tty: std::io::stdin().is_terminal(),
+            git: has_program("git"),
+            python,
+            venv,
+            unsquashfs: has_program("unsquashfs"),
+            lzip: has_program("lzip"),
+            xdg_open: has_program("xdg-open"),
+            terminal: find_terminal_emulator(),
+            disk_kb: check_available_disk_space_kb(Path::new("/var/lib/waydroid")),
+            online: check_network_connectivity(),
+            initialized: waydroid::is_initialized(),
+        }
     }
+}
+
+pub(crate) fn collect_diagnostics() -> DiagnosticsReport {
+    report(&HostFacts::probe())
+}
+
+fn item(
+    key: &str,
+    title: &str,
+    status: &str,
+    value: impl Into<String>,
+    detail: impl Into<String>,
+    remediation: Option<String>,
+) -> DiagnosticItem {
+    DiagnosticItem {
+        key: key.to_string(),
+        title: title.to_string(),
+        status: status.to_string(),
+        value: value.into(),
+        detail: detail.into(),
+        remediation,
+    }
+}
+
+/// The report for `facts`, in the order the UI shows it.
+pub(crate) fn report(facts: &HostFacts) -> DiagnosticsReport {
+    let pm = facts.pm;
+    let install = |packages: &[&str]| pm.map(|p| p.user_install_command(packages));
+    let mut items = Vec::new();
+
+    // 1. Session Type (Wayland vs X11)
+    items.push(if facts.wayland {
+        item("session", "Display Session", "ok", "Wayland Native",
+            "Wayland compositor detected. Waydroid runs with native direct rendering.", None)
+    } else {
+        item("session", "Display Session", "warning", "X11 Display",
+            "Waydroid requires Wayland. Under X11, a nested compositor (Weston/cage) may be required.",
+            Some("Run inside a Wayland compositor, or use cage: cage -- waydroid show-full-ui".to_string()))
+    });
+
+    // 2. KVM Virtualization Acceleration
+    items.push(match facts.kvm {
+        Kvm::Ready => item(
+            "kvm",
+            "KVM Acceleration",
+            "ok",
+            "Hardware KVM Ready",
+            "/dev/kvm is available with read/write access.",
+            None,
+        ),
+        Kvm::PermissionDenied => item(
+            "kvm",
+            "KVM Acceleration",
+            "warning",
+            "Permission Denied",
+            "KVM device exists but user lacks write permission.",
+            Some("sudo usermod -aG kvm $USER".to_string()),
+        ),
+        Kvm::Missing => item(
+            "kvm",
+            "KVM Acceleration",
+            "warning",
+            "Not Detected",
+            "/dev/kvm not found. Ensure Intel VT-x or AMD-V is enabled in motherboard BIOS.",
+            Some("Enable VT-x/AMD-V in BIOS and load kernel module: sudo modprobe kvm".to_string()),
+        ),
+    });
+
+    // 3. Android Binder IPC
+    items.push(if facts.binder {
+        item(
+            "binder",
+            "Android Binder IPC",
+            "ok",
+            "Binder Nodes Active",
+            "Android kernel inter-process communication drivers are active.",
+            None,
+        )
+    } else {
+        item(
+            "binder",
+            "Android Binder IPC",
+            "ok",
+            "Managed by Daemon",
+            "Binderfs will be mounted automatically when container daemon starts.",
+            None,
+        )
+    });
+
+    // 4. GPU 3D Passthrough
+    items.push(if facts.gpu {
+        item(
+            "gpu",
+            "GPU Acceleration",
+            "ok",
+            "Direct Rendering (DRI)",
+            "Hardware Direct Rendering Manager node is available for 3D graphics.",
+            None,
+        )
+    } else {
+        item(
+            "gpu",
+            "GPU Acceleration",
+            "warning",
+            "Software Rendering",
+            "Hardware DRI node not found. Android graphics will fall back to software rendering.",
+            Some(
+                "Install graphics drivers supporting DRI (Direct Rendering Infrastructure)."
+                    .to_string(),
+            ),
+        )
+    });
+
+    // 5. Waydroid Container Service
+    items.push(if facts.service_active {
+        item(
+            "service",
+            "Container Daemon",
+            "ok",
+            "Service Active",
+            "waydroid-container.service is actively running in background.",
+            None,
+        )
+    } else {
+        item(
+            "service",
+            "Container Daemon",
+            "info",
+            "Service Inactive",
+            "Container daemon is inactive. It will start automatically when session starts.",
+            None,
+        )
+    });
+
+    // 6. Waydroid CLI binary
+    items.push(match facts.waydroid {
+        WaydroidCli::Installed => item(
+            "waydroid",
+            "Waydroid Package",
+            "ok",
+            "Installed",
+            "Waydroid command-line tool is available in system PATH.",
+            None,
+        ),
+        WaydroidCli::NotInRepositories => item(
+            "waydroid",
+            "Waydroid Package",
+            "error",
+            WAYDROID_NOT_IN_REPOS,
+            waydroid_unavailable_detail(pm),
+            None,
+        ),
+        WaydroidCli::Missing => item(
+            "waydroid",
+            "Waydroid Package",
+            "error",
+            "Not Installed",
+            waydroid_missing_detail(pm),
+            install(&["waydroid"]),
+        ),
+    });
+
+    // 7. ADB / android-tools
+    items.push(if facts.adb {
+        item("adb", "Android Debug Bridge", "ok", "Installed",
+            "adb is available for unprivileged container queries and inspection.", None)
+    } else {
+        item("adb", "Android Debug Bridge", "warning", "Not Installed",
+            "adb is missing. App list, install/uninstall, and Android boot detection fall back to slower or unavailable paths.",
+            install(&["adb"]))
+    });
+
+    // 8. Root Elevation Tool (polkit / sudo)
+    items.push(if facts.pkexec && !facts.polkit_agent {
+        item("elevation", "Privilege Elevation",
+            if facts.sudo && facts.tty { "warning" } else { "error" },
+            "No Polkit Agent",
+            "pkexec is installed but no polkit authentication agent is running, so the password prompt cannot appear. Start an agent in your session, or launch ArchDroid from a terminal so sudo can ask instead.",
+            Some("Start one, e.g. hyprpolkitagent, polkit-gnome-authentication-agent-1, or lxqt-policykit-agent".to_string()))
+    } else if !facts.pkexec && facts.sudo && !facts.tty {
+        item("elevation", "Privilege Elevation", "error", "sudo Needs a TTY",
+            "Only sudo is available and ArchDroid has no terminal to ask for the password. Administrative operations will fail.",
+            Some(format!(
+                "{}, or start ArchDroid from a terminal",
+                install(&["polkit"]).unwrap_or_else(|| "Install polkit and a polkit agent".to_string())
+            )))
+    } else if facts.pkexec || facts.sudo {
+        let tool = if facts.pkexec { "pkexec" } else { "sudo" };
+        item("elevation", "Privilege Elevation", "ok",
+            if facts.pkexec { "Polkit (pkexec)" } else { "sudo (terminal)" },
+            format!("Authentication agent '{tool}' is available for administrative operations."),
+            None)
+    } else {
+        item("elevation", "Privilege Elevation", "error", "Missing",
+            "Neither pkexec nor sudo was found. Administrative operations will fail.",
+            install(&["polkit"]))
+    });
+
+    // 9. Git
+    items.push(if facts.git {
+        item(
+            "git",
+            "Git Version Control",
+            "ok",
+            "Installed",
+            "git is available to download pinned third-party helper checkouts.",
+            None,
+        )
+    } else {
+        item(
+            "git",
+            "Git Version Control",
+            "warning",
+            "Not Installed",
+            "git is required by GApps, ARM Translation, and Phantom installers.",
+            install(&["git"]),
+        )
+    });
+
+    // 10. Python 3 & venv
+    items.push(match (facts.python, facts.venv) {
+        (true, true) => item("python", "Python 3 & venv", "ok", "Ready",
+            "Python 3 and venv module are ready for isolated script execution.", None),
+        (true, false) => item("python", "Python 3 & venv", "error", "venv Missing",
+            "Python 3 is present but python3-venv is missing. Debian/Ubuntu systems require python3-venv.",
+            install(&["python3-venv"])),
+        _ => item("python", "Python 3 & venv", "error", "Not Installed",
+            "Python 3 is required by GApps and ARM Translation installers.",
+            install(&["python3", "python3-venv"])),
+    });
+
+    // 11. squashfs extraction tool
+    items.push(if facts.unsquashfs {
+        item(
+            "squashfs",
+            "SquashFS Tools",
+            "ok",
+            "unsquashfs Ready",
+            "unsquashfs is available to unpack Android filesystem images.",
+            None,
+        )
+    } else {
+        item(
+            "squashfs",
+            "SquashFS Tools",
+            "warning",
+            "Missing",
+            "unsquashfs is required to extract Android images for GApps and ARM Translation.",
+            install(&["squashfs"]),
+        )
+    });
+
+    // 12. lzip
+    items.push(if facts.lzip {
+        item(
+            "lzip",
+            "Lzip Decompressor",
+            "ok",
+            "lzip Ready",
+            "lzip is available to extract MindTheGapps and libhoudini archives.",
+            None,
+        )
+    } else {
+        item(
+            "lzip",
+            "Lzip Decompressor",
+            "warning",
+            "Missing",
+            "lzip is required to decompress archives for GApps and ARM Translation.",
+            install(&["lzip"]),
+        )
+    });
+
+    // 13. xdg-open
+    items.push(if facts.xdg_open {
+        item(
+            "xdg_open",
+            "File Manager Launcher",
+            "ok",
+            "xdg-open Ready",
+            "xdg-open is available to open shared storage in your default file manager.",
+            None,
+        )
+    } else {
+        item(
+            "xdg_open",
+            "File Manager Launcher",
+            "info",
+            "Missing",
+            "xdg-open is needed to open the Android shared media folder in a file manager.",
+            install(&["xdg-utils"]),
+        )
+    });
+
+    // 14. Terminal Emulator for Phantom
+    items.push(match &facts.terminal {
+        Some(term) => item("terminal", "Terminal Emulator", "ok", term.clone(),
+            format!("Terminal emulator '{term}' detected to run Phantom Keymapper interactive shell."),
+            None),
+        None => item("terminal", "Terminal Emulator", "info", "Not Detected",
+            "A desktop terminal emulator (alacritty, foot, kitty, konsole, gnome-terminal) is needed to launch Phantom Keymapper.",
+            install(&["alacritty"])),
+    });
+
+    // 15. Disk Space
+    items.push(match facts.disk_kb {
+        Some(kb) if kb >= 1_500_000 => item(
+            "disk",
+            "Available Storage",
+            "ok",
+            format_disk_space(kb),
+            "Sufficient disk space available for system images and container operations.",
+            None,
+        ),
+        Some(kb) if kb >= 500_000 => item(
+            "disk",
+            "Available Storage",
+            "warning",
+            format_disk_space(kb),
+            "Low disk space (< 1.5 GB). Initializing Waydroid requires ~1.2 GB of free space.",
+            Some("Free up at least 1.5 GB on host root or /var filesystem.".to_string()),
+        ),
+        Some(kb) => item(
+            "disk",
+            "Available Storage",
+            "error",
+            format_disk_space(kb),
+            "Critically low disk space (< 500 MB). Waydroid container operations may fail.",
+            Some("Free up disk space immediately on host root or /var filesystem.".to_string()),
+        ),
+        None => item(
+            "disk",
+            "Available Storage",
+            "info",
+            "Unknown",
+            "Unable to query available disk space via df.",
+            None,
+        ),
+    });
 
     // 16. Network Connectivity
-    let online = check_network_connectivity();
-    if online {
-        items.push(DiagnosticItem {
-            key: "network".to_string(),
-            title: "Network Connection".to_string(),
-            status: "ok".to_string(),
-            value: "Connected".to_string(),
-            detail: "Internet connectivity verified. Online downloads (system images, GApps, ARM translation) ready.".to_string(),
-            remediation: None,
-        });
+    items.push(if facts.online {
+        item("network", "Network Connection", "ok", "Connected",
+            "Internet connectivity verified. Online downloads (system images, GApps, ARM translation) ready.",
+            None)
     } else {
-        items.push(DiagnosticItem {
-            key: "network".to_string(),
-            title: "Network Connection".to_string(),
-            status: "warning".to_string(),
-            value: "Offline".to_string(),
-            detail: "No internet connection detected. Offline host cannot download container images or third-party packages.".to_string(),
-            remediation: Some("Connect your Linux host to the internet to download required system images and packages.".to_string()),
-        });
-    }
+        item("network", "Network Connection", "warning", "Offline",
+            "No internet connection detected. Offline host cannot download container images or third-party packages.",
+            Some("Connect your Linux host to the internet to download required system images and packages.".to_string()))
+    });
 
     // 17. Waydroid Android image initialization
-    if waydroid::is_initialized() {
-        items.push(DiagnosticItem {
-            key: "waydroid_image".to_string(),
-            title: "Android System Image".to_string(),
-            status: "ok".to_string(),
-            value: "Initialized".to_string(),
-            detail: "The Waydroid Android image is initialized and ready for sessions and add-ons."
-                .to_string(),
-            remediation: None,
-        });
+    items.push(if facts.initialized {
+        item("waydroid_image", "Android System Image", "ok", "Initialized",
+            "The Waydroid Android image is initialized and ready for sessions and add-ons.", None)
     } else {
-        items.push(DiagnosticItem {
-            key: "waydroid_image".to_string(),
-            title: "Android System Image".to_string(),
-            status: "warning".to_string(),
-            value: "Not Initialized".to_string(),
-            detail: "The Android image has not been initialized. GApps and ARM Translation need an initialized image."
-                .to_string(),
-            remediation: Some(
-                "Run the Setup Wizard, or run: sudo waydroid init".to_string(),
-            ),
-        });
-    }
+        item("waydroid_image", "Android System Image", "warning", "Not Initialized",
+            "The Android image has not been initialized. GApps and ARM Translation need an initialized image.",
+            Some("Run the Setup Wizard, or run: sudo waydroid init".to_string()))
+    });
 
     DiagnosticsReport {
         items,
@@ -606,6 +571,235 @@ fn waydroid_missing_detail(pm: Option<platform::PackageManager>) -> String {
 
 #[cfg(test)]
 mod tests {
+    fn healthy() -> HostFacts {
+        HostFacts {
+            pm: Some(crate::platform::PackageManager::Pacman),
+            wayland: true,
+            kvm: Kvm::Ready,
+            binder: true,
+            gpu: true,
+            service_active: true,
+            waydroid: WaydroidCli::Installed,
+            adb: true,
+            pkexec: true,
+            sudo: true,
+            polkit_agent: true,
+            tty: false,
+            git: true,
+            python: true,
+            venv: true,
+            unsquashfs: true,
+            lzip: true,
+            xdg_open: true,
+            terminal: Some("foot".to_string()),
+            disk_kb: Some(20_000_000),
+            online: true,
+            initialized: true,
+        }
+    }
+
+    /// (status, value, has remediation) of the item `key` for `facts`.
+    fn check(facts: &HostFacts, key: &str) -> (String, String, bool) {
+        let report = super::report(facts);
+        let item = report
+            .items
+            .iter()
+            .find(|i| i.key == key)
+            .unwrap_or_else(|| panic!("no {key} item"));
+        (
+            item.status.clone(),
+            item.value.clone(),
+            item.remediation.is_some(),
+        )
+    }
+
+    #[test]
+    fn a_healthy_host_reports_every_check_ok_or_info() {
+        let report = super::report(&healthy());
+        assert_eq!(report.items.len(), 17);
+        assert_eq!(report.package_manager.as_deref(), Some("pacman"));
+        for item in &report.items {
+            assert_eq!(item.status, "ok", "{}: {}", item.key, item.value);
+            assert!(item.remediation.is_none(), "{}", item.key);
+        }
+    }
+
+    #[test]
+    fn each_failing_fact_turns_its_own_check_and_says_how_to_fix_it() {
+        type Edit = fn(&mut HostFacts);
+        let cases: &[(&str, Edit, &str, &str, bool)] = &[
+            (
+                "session",
+                |f| f.wayland = false,
+                "warning",
+                "X11 Display",
+                true,
+            ),
+            (
+                "kvm",
+                |f| f.kvm = Kvm::PermissionDenied,
+                "warning",
+                "Permission Denied",
+                true,
+            ),
+            (
+                "kvm",
+                |f| f.kvm = Kvm::Missing,
+                "warning",
+                "Not Detected",
+                true,
+            ),
+            (
+                "binder",
+                |f| f.binder = false,
+                "ok",
+                "Managed by Daemon",
+                false,
+            ),
+            (
+                "gpu",
+                |f| f.gpu = false,
+                "warning",
+                "Software Rendering",
+                true,
+            ),
+            (
+                "service",
+                |f| f.service_active = false,
+                "info",
+                "Service Inactive",
+                false,
+            ),
+            (
+                "waydroid",
+                |f| f.waydroid = WaydroidCli::Missing,
+                "error",
+                "Not Installed",
+                true,
+            ),
+            (
+                "waydroid",
+                |f| f.waydroid = WaydroidCli::NotInRepositories,
+                "error",
+                "Not in Repositories",
+                false,
+            ),
+            ("adb", |f| f.adb = false, "warning", "Not Installed", true),
+            ("git", |f| f.git = false, "warning", "Not Installed", true),
+            ("python", |f| f.venv = false, "error", "venv Missing", true),
+            (
+                "python",
+                |f| {
+                    f.python = false;
+                    f.venv = false
+                },
+                "error",
+                "Not Installed",
+                true,
+            ),
+            (
+                "squashfs",
+                |f| f.unsquashfs = false,
+                "warning",
+                "Missing",
+                true,
+            ),
+            ("lzip", |f| f.lzip = false, "warning", "Missing", true),
+            ("xdg_open", |f| f.xdg_open = false, "info", "Missing", true),
+            (
+                "terminal",
+                |f| f.terminal = None,
+                "info",
+                "Not Detected",
+                true,
+            ),
+            (
+                "disk",
+                |f| f.disk_kb = Some(1_000_000),
+                "warning",
+                "977 MB Free",
+                true,
+            ),
+            (
+                "disk",
+                |f| f.disk_kb = Some(100_000),
+                "error",
+                "98 MB Free",
+                true,
+            ),
+            ("disk", |f| f.disk_kb = None, "info", "Unknown", false),
+            ("network", |f| f.online = false, "warning", "Offline", true),
+            (
+                "waydroid_image",
+                |f| f.initialized = false,
+                "warning",
+                "Not Initialized",
+                true,
+            ),
+        ];
+        for (key, edit, status, value, fix) in cases {
+            let mut facts = healthy();
+            edit(&mut facts);
+            let got = check(&facts, key);
+            assert_eq!(
+                (got.0.as_str(), got.2),
+                (*status, *fix),
+                "{key} with {value}: {got:?}"
+            );
+            assert_eq!(got.1, *value, "{key}");
+        }
+    }
+
+    #[test]
+    fn privilege_elevation_covers_agent_tty_and_missing_tools() {
+        let with = |edit: fn(&mut HostFacts)| {
+            let mut facts = healthy();
+            edit(&mut facts);
+            check(&facts, "elevation")
+        };
+        // pkexec without an agent: sudo in a terminal can still ask.
+        assert_eq!(with(|f| f.polkit_agent = false).0, "error");
+        assert_eq!(
+            with(|f| {
+                f.polkit_agent = false;
+                f.tty = true
+            })
+            .0,
+            "warning"
+        );
+        // sudo only: needs the terminal ArchDroid was started from.
+        let no_tty = with(|f| f.pkexec = false);
+        assert_eq!(
+            (no_tty.0.as_str(), no_tty.1.as_str()),
+            ("error", "sudo Needs a TTY")
+        );
+        let tty = with(|f| {
+            f.pkexec = false;
+            f.tty = true
+        });
+        assert_eq!((tty.0.as_str(), tty.1.as_str()), ("ok", "sudo (terminal)"));
+        assert_eq!(with(|_| {}).1, "Polkit (pkexec)");
+        let none = with(|f| {
+            f.pkexec = false;
+            f.sudo = false
+        });
+        assert_eq!(
+            (none.0.as_str(), none.1.as_str(), none.2),
+            ("error", "Missing", true)
+        );
+    }
+
+    #[test]
+    fn without_a_package_manager_no_install_command_is_invented() {
+        let mut facts = healthy();
+        facts.pm = None;
+        facts.git = false;
+        assert_eq!(
+            check(&facts, "git"),
+            ("warning".into(), "Not Installed".into(), false)
+        );
+    }
+
     #[test]
     fn unavailable_waydroid_explains_where_to_get_it() {
         use crate::platform::PackageManager::*;

@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { sessionRunning } from "../lib/waydroidStatus";
+
+const BOOT_POLL_MS = 2000;
+const BOOT_POLL_ATTEMPTS = 45; // ~90 s
 
 /**
  * Waydroid session state: polling, and the Start/Stop/Restart handlers that
@@ -8,8 +12,13 @@ import { invoke } from "@tauri-apps/api/core";
  */
 export function useEngineStatus({ addToast, onOnline }) {
   const [status, setStatus] = useState("offline");
-  const [isInitialized, setIsInitialized] = useState(true);
+  // `null` until the first status reply, so a first run does not flash the
+  // (empty) app library before the setup screen.
+  const [isInitialized, setIsInitialized] = useState(null);
   const [isOperating, setIsOperating] = useState(false);
+  // The session runs but Android has not finished booting yet.
+  const [booting, setBooting] = useState(false);
+  const bootWatchRef = useRef(0);
   const prevStatusRef = useRef("offline");
   const statusCheckInFlight = useRef(false);
   const onOnlineRef = useRef(onOnline);
@@ -33,24 +42,44 @@ export function useEngineStatus({ addToast, onOnline }) {
     });
   }, []);
 
+  // After the session comes online, poll sys.boot_completed until Android is
+  // up. Without adb (an error reply) the answer is unknowable, and the cap
+  // keeps a stuck probe from showing "booting" forever.
+  const watchBoot = useCallback(async () => {
+    const watch = ++bootWatchRef.current;
+    setBooting(true);
+    for (let attempt = 0; attempt < BOOT_POLL_ATTEMPTS; attempt++) {
+      let res;
+      try {
+        res = await invoke("waydroid_boot_state");
+      } catch {
+        break;
+      }
+      if (watch !== bootWatchRef.current) return;
+      if (!(res?.status === "success" && res.data === "booting")) break;
+      await new Promise((resolve) => setTimeout(resolve, BOOT_POLL_MS));
+      if (watch !== bootWatchRef.current) return;
+    }
+    if (watch === bootWatchRef.current) setBooting(false);
+  }, []);
+
   const checkStatus = useCallback(async () => {
     if (statusCheckInFlight.current) return;
     statusCheckInFlight.current = true;
     try {
       const res = await invoke("waydroid_status");
-      if (
-        res.status === "success" &&
-        res.data &&
-        res.data.includes("RUNNING")
-      ) {
+      if (sessionRunning(res)) {
         setStatus("online");
         setIsInitialized(true);
         lastStatusErrorRef.current = null;
         if (prevStatusRef.current !== "online") {
           onOnlineRef.current?.();
+          watchBoot();
         }
       } else {
         setStatus("offline");
+        bootWatchRef.current++;
+        setBooting(false);
         const missing =
           res.code === "not_found" || res.code === "not_initialized";
         setIsInitialized(!missing);
@@ -63,20 +92,20 @@ export function useEngineStatus({ addToast, onOnline }) {
     } catch (e) {
       console.error("Status check failed:", e);
       setStatus("offline");
+      // The status is unreadable, not missing: show the app, not the setup.
+      setIsInitialized((known) => known ?? true);
       reportStatusError(String(e));
     } finally {
       statusCheckInFlight.current = false;
     }
-  }, [reportStatusError]);
+  }, [reportStatusError, watchBoot]);
 
   const pollStatusUntil = useCallback(
     async (targetStatus, maxAttempts = 15, intervalMs = 400) => {
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
         await new Promise((resolve) => setTimeout(resolve, intervalMs));
         const res = await invoke("waydroid_status");
-        const isRunning =
-          res.status === "success" && res.data && res.data.includes("RUNNING");
-        const current = isRunning ? "online" : "offline";
+        const current = sessionRunning(res) ? "online" : "offline";
         if (current === targetStatus) {
           await checkStatus();
           return true;
@@ -236,6 +265,7 @@ export function useEngineStatus({ addToast, onOnline }) {
     status,
     isInitialized,
     isOperating,
+    booting,
     checkStatus,
     handleStart,
     handleStop,

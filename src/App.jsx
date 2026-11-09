@@ -14,14 +14,18 @@ import ToastContainer from "./components/ui/ToastContainer";
 import ConfirmModal from "./components/ui/ConfirmModal";
 import { useToasts } from "./hooks/useToasts";
 import { useStreamingTask } from "./hooks/useStreamingTask";
+import { useTouchMode } from "./hooks/useTouchMode";
 import { useEngineStatus } from "./hooks/useEngineStatus";
 import { useDeviceConfig } from "./hooks/useDeviceConfig";
 import { useApkInstall } from "./hooks/useApkInstall";
+import { TASKS } from "./lib/tasks";
 
 const APP_LIST_POLL_MS = 10000;
 export default function App() {
   const [activeTab, setActiveTab] = useState("home");
   const [apps, setApps] = useState([]);
+  // Save APK copies the app out of Android; a big game takes a while.
+  const [savingApk, setSavingApk] = useState(false);
   const [gappsStatus, setGappsStatus] = useState("unknown");
   const [houdiniStatus, setHoudiniStatus] = useState("unknown");
   const [multitouchStatus, setMultitouchStatus] = useState("unknown");
@@ -32,6 +36,7 @@ export default function App() {
     status,
     isInitialized,
     isOperating,
+    booting,
     handleStart,
     handleStop,
     handleRestart,
@@ -47,11 +52,21 @@ export default function App() {
     multiWindow,
     invertColors,
     displayRes,
+    loadConfigs,
     toggleMultiWindow,
     toggleInvertColors,
     handleApplyResolution,
     handlePropSet,
   } = useDeviceConfig({ addToast });
+
+  // Android answers property reads and `wm density` only once it has booted:
+  // at "RUNNING" the platform service and adb are still seconds
+  // away (measured: adb 7-12 s later), so read Settings when booting ends.
+  const androidReady = status === "online" && !booting;
+  useEffect(() => {
+    if (androidReady) loadConfigs();
+  }, [androidReady, loadConfigs]);
+
   const {
     installing,
     operationInFlight,
@@ -70,6 +85,7 @@ export default function App() {
     onTaskSuccess: () => {
       checkGappsStatus();
       checkHoudiniStatus();
+      checkMultitouchStatus();
       loadApps();
     },
   });
@@ -107,6 +123,11 @@ export default function App() {
     loadApps();
     checkGappsStatus();
     checkHoudiniStatus();
+    // Answers from the overlay file and marker even while the engine is off.
+    checkMultitouchStatus();
+    // Mount only. loadApps is declared further down, so it cannot be listed
+    // here, and the status checks are plain functions recreated each render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const checkGappsStatus = async () => {
@@ -168,6 +189,16 @@ export default function App() {
   } = useApkInstall({ addToast, operationInFlight, loadApps });
 
   const handleLaunchApp = async (pkg) => {
+    if (booting) {
+      addToast({
+        type: "info",
+        title: "Android Is Booting",
+        message:
+          "Wait until the top bar says Engine Running, then launch again.",
+        duration: 3000,
+      });
+      return;
+    }
     try {
       const res = await invoke("waydroid_launch_app", { package: pkg });
       if (res?.status === "success") {
@@ -219,6 +250,37 @@ export default function App() {
         message: String(e),
       });
     }
+  };
+
+  const handleBackupApk = async (pkg, name = pkg) => {
+    if (savingApk) return;
+    setSavingApk(true);
+    addToast({
+      type: "info",
+      title: "Saving APK",
+      message: `Copying ${name}'s APKs from Android...`,
+      duration: 2500,
+    });
+    try {
+      const res = await invoke("waydroid_backup_apk", { package: pkg });
+      if (res?.status === "success") {
+        addToast({
+          type: "success",
+          title: "APK Saved",
+          message: `Saved to ${res.data}. App data is not included; install the file again to restore the app.`,
+        });
+      } else {
+        addToast({
+          type: "error",
+          title: "Save APK Failed",
+          message: res?.message || `Could not save ${name}.`,
+        });
+      }
+    } catch (e) {
+      console.error("Backup APK error:", e);
+      addToast({ type: "error", title: "Save APK Failed", message: String(e) });
+    }
+    setSavingApk(false);
   };
 
   const handleCopyPackage = async (pkg) => {
@@ -294,148 +356,6 @@ export default function App() {
     });
   };
 
-  const executeInstallGApps = async (approvedPackages = []) => {
-    try {
-      await runStreamingTask("install_gapps", {
-        taskType: "gapps",
-        title: "Installing Google Play Services (GApps)",
-        args: { approvedPackages },
-      });
-    } catch (e) {
-      console.error("GApps install error:", e);
-      addToast({
-        type: "error",
-        title: "GApps Error",
-        message: String(e),
-      });
-    }
-  };
-
-  const handleInstallGApps = async () => {
-    const preview = await previewPackageInstall("gapps");
-    if (!preview) return;
-
-    setConfirmModal({
-      isOpen: true,
-      title: "Install Google Play Services (Root Required)",
-      description:
-        "This installer modifies the Waydroid Android system image (/var/lib/waydroid/overlay/system) to inject Google Play Store and Services framework.\n\n" +
-        "• Source: waydroid_script (pinned commit 48dbfaf) • MindTheGapps / OpenGApps\n" +
-        "• Privilege: Requires Administrator (Root) access via Polkit or sudo\n" +
-        "• Consequence: Adds Google proprietary services to Android rootfs. Waydroid must be restarted after completion.\n\n" +
-        "Do you want to proceed with root installation?",
-      confirmText: "Proceed & Authorize Root",
-      confirmVariant: "primary",
-      iconType: "shield",
-      packagePreview: preview,
-      onConfirm: async () => {
-        setConfirmModal((prev) => ({ ...prev, isOpen: false }));
-        await executeInstallGApps(preview.packages);
-      },
-    });
-  };
-
-  const executeInstallHoudini = async (approvedPackages = []) => {
-    try {
-      await runStreamingTask("install_houdini", {
-        taskType: "houdini",
-        title: "Installing ARM Translation (libhoudini)",
-        args: { approvedPackages },
-      });
-    } catch (e) {
-      console.error("Houdini install error:", e);
-      addToast({
-        type: "error",
-        title: "ARM Translation Error",
-        message: String(e),
-      });
-    }
-  };
-
-  const handleInstallHoudini = async () => {
-    const preview = await previewPackageInstall("houdini");
-    if (!preview) return;
-
-    setConfirmModal({
-      isOpen: true,
-      title: "Install ARM Translation Layer (Root Required)",
-      description:
-        "This installer modifies the Waydroid Android system image (/var/lib/waydroid/overlay/system) and waydroid.cfg to inject Intel libhoudini ARM translation libraries.\n\n" +
-        "• Source: waydroid_script (pinned commit 48dbfaf) • Intel proprietary prebuilts\n" +
-        "• Privilege: Requires Administrator (Root) access via Polkit or sudo\n" +
-        "• Consequence: Injects binary translation bridge (binfmt_misc) to execute ARM/ARM64 games on x86_64 CPUs.\n\n" +
-        "Do you want to proceed with root installation?",
-      confirmText: "Proceed & Authorize Root",
-      confirmVariant: "primary",
-      iconType: "shield",
-      packagePreview: preview,
-      onConfirm: async () => {
-        setConfirmModal((prev) => ({ ...prev, isOpen: false }));
-        await executeInstallHoudini(preview.packages);
-      },
-    });
-  };
-
-  const executeInstallMultitouch = async () => {
-    try {
-      const result = await runStreamingTask("install_multitouch", {
-        taskType: "multitouch",
-        title: "Declaring Touch Features for Google Play",
-      });
-      if (result?.status === "success") {
-        addToast({
-          type: "info",
-          title: "Restart Required",
-          message:
-            "Android reads declared features at boot. Restart Waydroid, then check Google Play again.",
-        });
-      }
-    } catch (e) {
-      console.error("Touch feature install error:", e);
-      addToast({
-        type: "error",
-        title: "Touch Feature Error",
-        message: String(e),
-      });
-    }
-  };
-
-  const handleInstallMultitouch = () => {
-    setConfirmModal({
-      isOpen: true,
-      title: "Declare Touch Features (Root Required)",
-      description:
-        "This operation writes Android touchscreen hardware capability declarations to the Waydroid vendor overlay (/var/lib/waydroid/overlay).\n\n" +
-        "• Source: ArchDroid internal hardware profile\n" +
-        "• Privilege: Requires Administrator (Root) access via Polkit or sudo\n" +
-        "• Consequence: Declares multitouch hardware features so Google Play Store permits downloading touch-dependent games. Requires restarting Waydroid.\n\n" +
-        "Do you want to proceed with root installation?",
-      confirmText: "Proceed & Authorize Root",
-      confirmVariant: "primary",
-      iconType: "shield",
-      onConfirm: async () => {
-        setConfirmModal((prev) => ({ ...prev, isOpen: false }));
-        await executeInstallMultitouch();
-      },
-    });
-  };
-
-  const handleViewLogs = async () => {
-    try {
-      await runStreamingTask("waydroid_log", {
-        taskType: "logs",
-        title: "Waydroid Diagnostic Logs",
-      });
-    } catch (e) {
-      console.error("View logs error:", e);
-      addToast({
-        type: "error",
-        title: "Log Read Error",
-        message: String(e),
-      });
-    }
-  };
-
   const handleOpenSharedFolder = async () => {
     try {
       const res = await invoke("open_shared_folder");
@@ -463,21 +383,7 @@ export default function App() {
     }
   };
 
-  const handleInstallPhantom = async () => {
-    try {
-      await runStreamingTask("install_phantom", {
-        taskType: "phantom",
-        title: "Installing / Updating Phantom Keymapper",
-      });
-    } catch (e) {
-      console.error("Install Phantom error:", e);
-      addToast({
-        type: "error",
-        title: "Phantom Error",
-        message: String(e),
-      });
-    }
-  };
+  const touchMode = useTouchMode({ addToast });
 
   const handleRunPhantom = async () => {
     try {
@@ -505,112 +411,82 @@ export default function App() {
     }
   };
 
-  const executeInitWaydroid = async (approvedPackages = []) => {
+  // Side effects after a task finished successfully, beyond the refresh that
+  // `onTaskSuccess` does for every task.
+  const afterTaskSuccess = {
+    multitouch: () =>
+      addToast({
+        type: "info",
+        title: "Restart Required",
+        message:
+          "Android reads declared features at boot. Restart Waydroid, then check Google Play again.",
+      }),
+    "touch-access": () => touchMode.refresh(),
+  };
+
+  const runTask = async (taskType, args) => {
+    const task = TASKS[taskType];
     try {
-      await runStreamingTask("waydroid_init", {
-        taskType: "init",
-        title: "Initializing Waydroid System Image",
-        args: { approvedPackages },
+      const result = await runStreamingTask(task.command, {
+        taskType,
+        title: task.title,
+        args,
       });
+      if (result?.status === "success") {
+        await afterTaskSuccess[taskType]?.();
+      }
     } catch (e) {
-      console.error("Init Waydroid error:", e);
+      console.error(`${task.command} error:`, e);
       addToast({
         type: "error",
-        title: "Init Error",
+        title: task.errorTitle,
         message: String(e),
       });
     }
   };
 
-  const handleInitWaydroid = async () => {
-    const preview = await previewPackageInstall("init");
-    if (!preview) return;
-
+  /** Start a task, behind its consent dialog and package preview if it has one. */
+  const startTask = async (taskType) => {
+    const task = TASKS[taskType];
+    if (!task.confirm) {
+      await runTask(taskType);
+      return;
+    }
+    let preview;
+    if (task.preview) {
+      preview = await previewPackageInstall(task.preview);
+      if (!preview) return;
+    }
     setConfirmModal({
       isOpen: true,
-      title: "Initialize Waydroid Container (Root Required)",
-      description:
-        "Initializing Waydroid will download the official LineageOS container images (~1.2 GB) and configure the LXC Android container under /var/lib/waydroid.\n\n" +
-        "• Source: Official Waydroid / LineageOS system images\n" +
-        "• Privilege: Requires Administrator (Root) access via Polkit or sudo\n" +
-        "• Consequence: Sets up root container files and system partitions on disk.\n\n" +
-        "Do you want to proceed?",
-      confirmText: "Initialize & Authorize Root",
-      confirmVariant: "primary",
-      iconType: "shield",
+      ...task.confirm,
       packagePreview: preview,
       onConfirm: async () => {
         setConfirmModal((prev) => ({ ...prev, isOpen: false }));
-        await executeInitWaydroid(preview.packages);
+        await runTask(
+          taskType,
+          preview ? { approvedPackages: preview.packages } : undefined
+        );
       },
     });
   };
 
-  const handleWipeData = () => {
-    setConfirmModal({
-      isOpen: true,
-      title: "Factory Reset Waydroid?",
-      description:
-        "WARNING: This will completely destroy all Waydroid container data, installed games, GApps modules, and configurations. Back up anything you need first (use Settings → Android Shared Storage to copy files out). You will need to re-initialize the emulator from scratch. This cannot be undone!",
-      confirmText: "Wipe Everything",
-      confirmVariant: "danger",
-      iconType: "danger",
-      onConfirm: async () => {
-        setConfirmModal((prev) => ({ ...prev, isOpen: false }));
-        try {
-          await runStreamingTask("waydroid_wipe", {
-            taskType: "wipe",
-            title: "Factory Reset (Wiping Waydroid Data)",
-          });
-        } catch (e) {
-          console.error("Wipe data error:", e);
-          addToast({
-            type: "error",
-            title: "Wipe Failed",
-            message: String(e),
-          });
-        }
-      },
-    });
-  };
+  const handleInstallGApps = () => startTask("gapps");
+  const handleInstallHoudini = () => startTask("houdini");
+  const handleInstallMultitouch = () => startTask("multitouch");
+  const handleEnableTouchAccess = () => startTask("touch-access");
+  const handleInitWaydroid = () => startTask("init");
+  const handleWipeData = () => startTask("wipe");
+  const handleInstallPhantom = () => startTask("phantom");
+  const handleViewLogs = () => startTask("logs");
 
   const handleRetryTask = () => {
-    // Retrying must go back through the confirmation flow. The package plan or
+    // A task with a consent dialog is retried through it: the package plan or
     // the root scope may have changed since the first attempt, so a retry must
     // never call an installer command directly.
-    if (
-      ["gapps", "houdini", "multitouch", "init", "wipe"].includes(
-        terminalTaskType
-      )
-    ) {
-      setTerminalOpen(false);
-    }
-
-    switch (terminalTaskType) {
-      case "gapps":
-        handleInstallGApps();
-        break;
-      case "houdini":
-        handleInstallHoudini();
-        break;
-      case "multitouch":
-        handleInstallMultitouch();
-        break;
-      case "init":
-        handleInitWaydroid();
-        break;
-      case "phantom":
-        handleInstallPhantom();
-        break;
-      case "logs":
-        handleViewLogs();
-        break;
-      case "wipe":
-        handleWipeData();
-        break;
-      default:
-        break;
-    }
+    if (!TASKS[terminalTaskType]) return;
+    if (TASKS[terminalTaskType].confirm) setTerminalOpen(false);
+    startTask(terminalTaskType);
   };
 
   return (
@@ -627,6 +503,7 @@ export default function App() {
         status={status}
         isInitialized={isInitialized}
         isOperating={isOperating}
+        booting={booting}
         busy={installing}
         onStart={handleStart}
         onStop={handleStop}
@@ -637,9 +514,15 @@ export default function App() {
       <main
         className={`main-content ${isInitialized && activeTab === "home" ? "main-content-split" : ""}`}
       >
-        <PageHeading activeTab={isInitialized ? activeTab : "setup"} />
+        <PageHeading
+          activeTab={isInitialized === false ? "setup" : activeTab}
+        />
         <div className="content-scrollable">
-          {!isInitialized ? (
+          {isInitialized === null ? (
+            <p className="status-pending" role="status">
+              Reading Waydroid status…
+            </p>
+          ) : !isInitialized ? (
             <SetupWizard
               onInitWaydroid={handleInitWaydroid}
               installing={installing}
@@ -650,12 +533,15 @@ export default function App() {
                 <MyAppsView
                   apps={apps}
                   engineOnline={status === "online"}
+                  booting={booting}
                   onLaunchApp={handleLaunchApp}
                   onForceStopApp={handleForceStopApp}
                   onOpenKeymap={() => setActiveTab("keymap")}
                   onInstallApk={handleInstallApk}
                   onUninstallApp={handleUninstallApp}
                   onCopyPackage={handleCopyPackage}
+                  onBackupApk={handleBackupApk}
+                  savingApk={savingApk}
                   busy={installing}
                 />
               )}
@@ -665,6 +551,9 @@ export default function App() {
                   onRunPhantom={handleRunPhantom}
                   onInstallPhantom={handleInstallPhantom}
                   installing={installing}
+                  touchMode={touchMode}
+                  onToggleTouchMode={touchMode.setEnabled}
+                  onEnableTouchAccess={handleEnableTouchAccess}
                 />
               )}
 
@@ -694,7 +583,7 @@ export default function App() {
                   currentHeight={displayRes.height}
                   currentDpi={displayRes.dpi}
                   onApplyResolution={handleApplyResolution}
-                  engineRunning={status === "online"}
+                  engineRunning={androidReady}
                   onRestartEngine={handleRestart}
                   busy={installing}
                 />
@@ -743,8 +632,9 @@ export default function App() {
             </div>
             <h3 className="dropzone-title">Drop APK to Install</h3>
             <p className="dropzone-desc">
-              Release your <code>.apk</code> file anywhere to automatically
-              install it into Waydroid.
+              Release your <code>.apk</code> (or <code>.apks</code>,{" "}
+              <code>.xapk</code>, <code>.apkm</code> bundle) anywhere to
+              automatically install it into Waydroid.
             </p>
             <div className="dropzone-pills">
               <span className="dropzone-pill">Instant Android Sideload</span>

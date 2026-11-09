@@ -1,0 +1,168 @@
+From a08df818f0b93c155cd6e946277cf86b755c9e1c Mon Sep 17 00:00:00 2001
+From: Wisang Drillian Geni <gwisang45@gmail.com>
+Date: Thu, 5 Nov 2026 20:24:39 +0700
+Subject: [PATCH] Fake touch inputs for select apps
+
+Based on "Core: Add force mouse click as touch toggle"
+
+For packages listed in persist.waydroid.fake_touch, a primary-button
+mouse gesture is delivered as a finger gesture: tool type FINGER, no
+button state, source TOUCHSCREEN. Hover events and primary
+BUTTON_PRESS/RELEASE are dropped, since a finger has neither. Right and
+middle clicks and the scroll wheel stay mouse input.
+
+Rewriting only the source is not enough: WebView (Chromium's
+EventForwarder) sends any event whose tool type is MOUSE and whose
+button state is non-zero down the mouse path, so touch-only pages
+never see the click.
+
+Co-authored-by: Alessandro Astone <ales.astone@gmail.com>
+Co-authored-by: Umang96 <umangleekha3@gmail.com>
+Change-Id: Ibe26a1cdc41744ad201427093ec384b9a5a0e4b2
+---
+ core/java/android/view/ViewRootImpl.java | 94 ++++++++++++++++++++++++
+ 1 file changed, 94 insertions(+)
+
+diff --git a/core/java/android/view/ViewRootImpl.java b/core/java/android/view/ViewRootImpl.java
+index f6211fd..29cbe15 100644
+--- a/core/java/android/view/ViewRootImpl.java
++++ b/core/java/android/view/ViewRootImpl.java
+@@ -146,6 +146,7 @@ import android.os.IBinder;
+ import android.os.Looper;
+ import android.os.Message;
+ import android.os.ParcelFileDescriptor;
++import android.os.PatternMatcher;
+ import android.os.Process;
+ import android.os.RemoteException;
+ import android.os.SystemClock;
+@@ -227,6 +228,7 @@ import java.io.StringWriter;
+ import java.lang.ref.WeakReference;
+ import java.util.ArrayDeque;
+ import java.util.ArrayList;
++import java.util.Arrays;
+ import java.util.HashSet;
+ import java.util.List;
+ import java.util.Objects;
+@@ -546,6 +548,7 @@ public final class ViewRootImpl implements ViewParent,
+     final Choreographer mChoreographer;
+     protected final ViewFrameInfo mViewFrameInfo = new ViewFrameInfo();
+     private final InputEventAssigner mInputEventAssigner = new InputEventAssigner();
++    final boolean mFakeClickAsTouch;
+ 
+     // Whether to draw this surface as DISPLAY_DECORATION.
+     boolean mDisplayDecorationCached = false;
+@@ -1006,6 +1009,16 @@ public final class ViewRootImpl implements ViewParent,
+         mScrollCaptureRequestTimeout = SCROLL_CAPTURE_REQUEST_TIMEOUT_MILLIS;
+         mOnBackInvokedDispatcher = new WindowOnBackInvokedDispatcher(
+                 context.getApplicationInfo().isOnBackInvokedCallbackEnabled());
++
++        String packageName = context.getPackageName();
++        mFakeClickAsTouch = Arrays.stream(SystemProperties.get("persist.waydroid.fake_touch").split(","))
++            .map(x -> x.replace(".", "\\."))
++            .map(x -> x.replace("*", ".*"))
++            .map(x -> new PatternMatcher(x, PatternMatcher.PATTERN_SIMPLE_GLOB))
++            .anyMatch(p -> p.match(packageName));
++
++        if (mFakeClickAsTouch)
++            Log.d(TAG, "Faking touch inputs for " + packageName);
+     }
+ 
+     public static void addFirstDrawHandler(Runnable callback) {
+@@ -9299,6 +9312,74 @@ public final class ViewRootImpl implements ViewParent,
+     }
+     final TraversalRunnable mTraversalRunnable = new TraversalRunnable();
+ 
++    // Whether the primary button started a gesture that is being faked as a finger.
++    private boolean mFakeTouchActive;
++
++    /**
++     * For apps in persist.waydroid.fake_touch: a primary-button mouse gesture
++     * becomes a finger gesture. Changing only the source is not enough, since
++     * views such as WebView tell mouse from finger by the tool type and the
++     * button state. Returns the finger copy, {@code null} to drop the event,
++     * or the event itself to deliver it unchanged.
++     */
++    private InputEvent fakeTouchFor(MotionEvent ev) {
++        switch (ev.getActionMasked()) {
++            case MotionEvent.ACTION_HOVER_ENTER:
++            case MotionEvent.ACTION_HOVER_MOVE:
++            case MotionEvent.ACTION_HOVER_EXIT:
++                // A finger cannot hover.
++                return null;
++            case MotionEvent.ACTION_BUTTON_PRESS:
++            case MotionEvent.ACTION_BUTTON_RELEASE:
++                return ev.getActionButton() == MotionEvent.BUTTON_PRIMARY ? null : ev;
++            case MotionEvent.ACTION_DOWN:
++                if ((ev.getButtonState() & MotionEvent.BUTTON_PRIMARY) == 0) {
++                    // Right and middle clicks stay mouse clicks.
++                    return ev;
++                }
++                mFakeTouchActive = true;
++                return mouseToFinger(ev);
++            case MotionEvent.ACTION_MOVE:
++                return mFakeTouchActive ? mouseToFinger(ev) : ev;
++            case MotionEvent.ACTION_UP:
++            case MotionEvent.ACTION_CANCEL:
++                if (!mFakeTouchActive) {
++                    return ev;
++                }
++                mFakeTouchActive = false;
++                return mouseToFinger(ev);
++            default:
++                // Scroll wheel and everything else.
++                return ev;
++        }
++    }
++
++    private static MotionEvent mouseToFinger(MotionEvent ev) {
++        final int count = ev.getPointerCount();
++        final MotionEvent.PointerProperties[] properties =
++                MotionEvent.PointerProperties.createArray(count);
++        final MotionEvent.PointerCoords[] coords = MotionEvent.PointerCoords.createArray(count);
++        for (int i = 0; i < count; i++) {
++            ev.getPointerProperties(i, properties[i]);
++            properties[i].toolType = MotionEvent.TOOL_TYPE_FINGER;
++            ev.getPointerCoords(i, coords[i]);
++            // Raw (display) coordinates; setLocation below restores the
++            // window offset so both getX() and getRawX() stay right.
++            coords[i].x = ev.getRawX(i);
++            coords[i].y = ev.getRawY(i);
++            if (coords[i].pressure == 0f) {
++                coords[i].pressure = 1f;
++            }
++        }
++        final MotionEvent finger = MotionEvent.obtain(ev.getDownTime(), ev.getEventTime(),
++                ev.getAction(), count, properties, coords, ev.getMetaState(),
++                0 /* buttonState */, ev.getXPrecision(), ev.getYPrecision(), ev.getDeviceId(),
++                ev.getEdgeFlags(), InputDevice.SOURCE_TOUCHSCREEN, ev.getDisplayId(),
++                ev.getFlags());
++        finger.setLocation(ev.getX(), ev.getY());
++        return finger;
++    }
++
+     final class WindowInputEventReceiver extends InputEventReceiver {
+         public WindowInputEventReceiver(InputChannel inputChannel, Looper looper) {
+             super(inputChannel, looper);
+@@ -9306,6 +9387,19 @@ public final class ViewRootImpl implements ViewParent,
+ 
+         @Override
+         public void onInputEvent(InputEvent event) {
++            if (mFakeClickAsTouch && event instanceof MotionEvent
++                    && ((MotionEvent) event).getToolType(0) == MotionEvent.TOOL_TYPE_MOUSE) {
++                final InputEvent faked = fakeTouchFor((MotionEvent) event);
++                if (faked != event) {
++                    // The finger copy has no receiver, like other synthesized
++                    // events; the mouse event it replaces is finished here.
++                    if (faked != null) {
++                        enqueueInputEvent(faked, null, 0, true);
++                    }
++                    finishInputEvent(event, true);
++                    return;
++                }
++            }
+             Trace.traceBegin(Trace.TRACE_TAG_VIEW, "processInputEventForCompatibility");
+             List<InputEvent> processedEvents;
+             try {
+-- 
+2.56.0
+
