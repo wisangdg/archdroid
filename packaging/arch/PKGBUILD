@@ -16,6 +16,7 @@ optdepends=(
     'squashfs-tools: for GApps extraction'
     'lzip: for image decompression'
     'git: for libhoudini translation repository'
+    'android-tools: adb, for DPI presets, split APKs, Save APK, boot status and Force stop'
 )
 provides=('archdroid')
 conflicts=('archdroid')
