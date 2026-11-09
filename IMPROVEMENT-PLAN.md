@@ -14,38 +14,78 @@
 
 ## Status pengerjaan
 
-Branch `improve/plan-0.1.6` (dari `feat/touch-mode`), 9 Nov 2026, PR #2. CI dan workflow paket hijau di GitHub. `cargo audit` di CI menangkap 4 advisory pada `zip` 4.6.1 → diganti `zip` 9 (Rust minimum 1.88). Setiap item
-satu commit atau lebih; semua test, lint, clippy, dan E2E hijau setelah tiap
-commit.
+Branch `improve/plan-0.1.6` (dari `feat/touch-mode`), PR #2 ke `main`, belum
+di-merge. Setiap item satu commit atau lebih. Direview 9 Nov 2026; temuannya
+menjadi R1–R10 di §12.
 
-| Item | Status |
+**Hasil uji saat review:** CI di GitHub hijau, termasuk smoke biner asli, dan
+workflow paket hijau (AppImage, `.deb`, `.rpm`, paket Arch). Lokal:
+`cargo test` 179 lulus (198 dengan `dev-commands`; 4 test live `#[ignore]`),
+`node --test` 51 lulus dan 1 skip, Vitest 80, E2E 7/7; clippy, fmt, ESLint, dan
+Prettier bersih. `cargo audit` di CI menangkap 4 advisory pada `zip` 4.6.1, jadi
+crate itu diganti `zip` 9 (Rust minimum 1.88).
+
+### Selesai
+
+| Item | Hasil |
 |---|---|
-| A1, A2, A3 | ✅ Selesai, dengan test yang gagal sebelum perbaikan |
-| A4 | ✅ Selesai: root hanya saat `PermissionDenied` |
-| A5 | ✅ Terbukti lebih parah dari dugaan: `ro.sf.lcd_density` di-set saat boot, `prop set` ditolak, jadi preset DPI **selalu** gagal. Diganti `wm density` (diuji live: langsung berlaku, bertahan setelah restart). Resolusi (`persist.waydroid.width/height`) diuji live dan bekerja |
-| A6 | ✅ Selesai: tahap init digabung; status awal `null` |
-| B1 | ⏳ Tindakan maintainer: merge, smoke rilis, tanda tangan, publikasi |
-| B2 | ✅ (1) `.deb`/`.rpm` dicek glibc 2.35. (2) Workflow membangun AppImage, `.deb`, `.rpm` dan paket Arch (job container); hijau di GitHub. Tool AppImage (AppRun, linuxdeploy) di-prefetch lewat API dengan checksum karena URL rilis Tauri 504 pada 9 Nov |
-| B3 | ✅ Selesai (termasuk `Cargo.lock`) |
-| C1 | ✅ Selesai; `npm audit` penuh kini 0, risiko dev-only ditutup |
-| C2, C3 | ✅ Selesai; CI hijau di GitHub (PR #2) |
-| D1 | ✅ Selesai: `src/lib/tasks.js`; `App.jsx` 826 → ±590 baris |
-| D2 | ✅ Versi ringan: parser baris di frontend (`src/lib/waydroidStatus.js`) alih-alih mengubah format wire, supaya mock test dan E2E tidak berubah |
-| D3 | ✅ Selesai |
-| E2 | ✅ Selesai: command `waydroid_boot_state`, "Android Booting…" |
-| B4 | ✅ `packaging/aur/PKGBUILD` diuji dengan `makepkg` terhadap v0.1.5 (signature + checksum lolos). Publikasi ke AUR: tindakan maintainer |
-| C4 | ✅ `scripts/e2e/real-binary-smoke.py` lulus di GitHub Actions (PR #2): 9/9 cek (jendela, IPC, CSP memblokir eval/inline/fetch/script remote) |
-| D4 | ✅ Langkah pertama: `logs.rs` (area yang disentuh A4). Area lain menunggu disentuh |
-| D5 | ✅ `HostFacts::probe()` + `report()` murni; 4 test tabel; laporan host identik sebelum/sesudah |
-| F5 | ✅ Sebagian: hardware ini diukur (jendela 212–402 ms; PSS ±290 MB, budget baru PSS < 350 MB). GNOME/KDE/AMD tetap butuh mesin lain |
-| E1 | ⏳ Tindakan maintainer: kirim issue/PR ke upstream |
-| E3 | ⏳ Dicoba 9 Nov dengan harness aman (jendela fullscreen milik harness menutup kedua monitor sebelum satu sentuhan pun dikirim): Hyprland 0.56 mengenali touchscreen virtual (`archdroid-touch-probe`, juga `ArchDroid Touch` dari kode touch mode), tetapi jendela GTK3 maupun GTK4 harness tidak menerima event sentuh apa pun, jadi pemetaan monitor belum bisa diamati. Langkah berikut: harness dengan klien Wayland yang terbukti menerima `wl_touch` (mis. `wev`), atau uji langsung dengan Waydroid di DP-2 bersama pengguna. Kode belum diubah |
-| E4 | ✅ `.apks`/`.xapk`/`.apkm` lewat `adb install-multiple` (`src-tauri/src/apk.rs`, crate `zip` 4.6.1 deflate-only). Diuji live: ARCore (4 split) terpasang ulang dari `.apks` dan `.xapk` bersarang; bundle tanpa base ditolak dengan alasan Android. OBB ditolak dengan petunjuk (belum didukung) |
-| E5 | ⏳ Spike selesai, keputusan maintainer: [`docs/BACKUP-DESIGN.md`](docs/BACKUP-DESIGN.md). Diuji live: APK bisa dicadangkan tanpa root, data app tidak (`adb root` tidak tersedia; data di host milik uid app, mode 700). Opsi 1 (backup APK tanpa root, "Save APK") **sudah dikerjakan** dan diuji live (simpan ARCore → pasang ulang). Opsi 2/3 (data) menunggu keputusan |
-| F1, F2, F3, F4 | ✅ Selesai |
+| A1, A2 | ✅ Dengan test yang gagal sebelum perbaikan |
+| A3 | ✅ Toggle di-disable saat engine mati; properti dibaca ulang saat sesi `RUNNING`, dengan test. Celah: pembacaan ulang itu terjadi sebelum Android selesai boot (R2), dan preset Display belum ikut di-disable (R6) |
+| A4 | ✅ Root hanya saat `PermissionDenied` (unit test pemilihan jalur). Di host ini log ber-mode `0666`, jadi View Logs memakai jalur user |
+| A5 | ✅ Terbukti lebih parah dari dugaan: `ro.sf.lcd_density` di-set saat boot dan `prop set` ditolak, jadi preset DPI **selalu** gagal. Diganti `wm density` (diuji live: langsung berlaku, bertahan setelah restart). Resolusi (`persist.waydroid.width/height`) diuji live dan bekerja |
+| A6 | ✅ Tahap init digabung; status awal `null` |
+| B2 | ✅ (1) `.deb`/`.rpm` dicek terhadap glibc 2.35. (2) Workflow membangun AppImage, `.deb`, `.rpm`, dan paket Arch (job container); hijau di GitHub. Tool AppImage (AppRun, linuxdeploy) di-prefetch lewat API dengan checksum, karena URL rilis Tauri menjawab 504 pada 9 Nov |
+| B3 | ✅ Termasuk `Cargo.lock` |
+| B4 (paket) | ✅ `packaging/aur/PKGBUILD` diuji dengan `makepkg` terhadap v0.1.5 (signature dan checksum lolos); `.SRCINFO` sinkron |
+| C1 | ✅ `npm audit` penuh kini 0; risiko dev-only ditutup |
+| C2 | ✅ CI ±9–11 menit (`main`, 3 Nov) → ±3,5–4 menit di PR #2 dengan cache hangat (7,7 menit saat cache dingin), sudah termasuk smoke biner asli |
+| C3 | ✅ `.github/dependabot.yml` (npm, cargo, actions; dikelompokkan). Baru berjalan setelah merge, karena Dependabot membaca branch default |
+| C4 | ✅ `scripts/e2e/real-binary-smoke.py` lulus di PR #2: 9/9 cek (jendela, IPC, CSP memblokir eval, inline script, fetch dan script remote). Celah: cek IPC bisa lolos walau `invoke` gagal (R4) |
+| D1 | ✅ `src/lib/tasks.js`; `App.jsx` 807 → 628 baris, sudah termasuk Save APK dan status Booting |
+| D2 | ✅ Versi ringan: parser baris di frontend (`src/lib/waydroidStatus.js`) alih-alih mengubah format wire, supaya mock test dan E2E tidak berubah; tidak ada lagi `includes("RUNNING")` di `src/` |
+| D3 | ✅ |
+| D4 | ✅ Dua langkah: `logs.rs` (saat A4) dan `apk.rs` (saat E4); `lib.rs` 2052 → 1875 baris. Area lain menunggu disentuh |
+| D5 | ✅ `HostFacts::probe()` + `report()` murni; 4 test tabel, setiap fakta yang gagal punya baris; laporan host identik sebelum/sesudah |
+| E2 | ✅ Command `waydroid_boot_state`, "Android Booting…", test transisi. Celah: double-click dan menu konteks masih bisa Launch saat booting (R3) |
+| E4 | ✅ `.apks`/`.xapk`/`.apkm` lewat `adb install-multiple` (`src-tauri/src/apk.rs`, crate `zip` 9 deflate-only). Diuji live: ARCore (4 split) terpasang ulang dari `.apks` dan `.xapk` bersarang; bundle tanpa base ditolak dengan alasan dari Android; OBB ditolak dengan petunjuk. DoD belum penuh: batas jumlah dan ukuran belum diuji (R7), `.apks` buatan bundletool belum dicoba (R8) |
+| E5 opsi 1 | ✅ "Save APK" tanpa root, diuji live (simpan ARCore → pasang ulang). Spike dan opsi data: [`docs/BACKUP-DESIGN.md`](docs/BACKUP-DESIGN.md) |
+| F1–F4 | ✅ |
+| F5 (sebagian) | ✅ Hardware ini diukur: jendela tampil dalam 212–402 ms; PSS ±290 MB (budget baru: PSS < 350 MB) |
 
-Item baru dari arsip gate (P2 yang belum tercakup): optimasi daftar app
-besar dan virtualisasi log terminal; kerjakan hanya bila ada laporan lambat.
+### To-do
+
+Urut prioritas. ⬜ belum · ⏳ menunggu tindakan atau keputusan maintainer.
+Detail R1–R10 di §12. Item yang selesai diberi ✅ dan tanggal.
+
+| # | Pekerjaan | Prio | Status |
+|---|---|---|---|
+| R1 | `.pyc` ikut ter-commit; komentar basi di `apk.rs` | P1 | ✅ 9 Nov |
+| R2 | Settings dibaca ulang setelah Android selesai boot, bukan saat sesi `RUNNING` | P1 | ⬜ |
+| R3 | Launch saat booting juga dicegah di double-click dan menu konteks | P2 | ⬜ |
+| R4 | Smoke biner asli memeriksa jawaban IPC secara langsung | P2 | ⬜ |
+| R5 | Paket Arch, `.deb`, dan `.rpm` merekomendasikan adb | P2 | ⬜ |
+| R6 | Preset Display di-disable saat engine mati atau booting | P2 | ⬜ |
+| B1 | Rilis 0.1.6: merge PR #2, smoke rilis, tanda tangan, publikasi; sebaiknya setelah R2–R6 | P1 | ⏳ maintainer |
+| — | Setelah merge: PR Dependabot pertama lewat CI (DoD C3); smoke biner asli hijau di `main` (DoD C4) | P2 | ⏳ setelah merge |
+| B4 | Publikasi `archdroid-bin` ke AUR, setelah B1 | P2 | ⏳ maintainer |
+| E1 | Kirim issue dan PR `fake_touch` ke upstream | P2 | ⏳ maintainer |
+| F5 | Uji di GNOME, KDE, dan GPU AMD | P2 | ⏳ butuh mesin lain |
+| R7 | E4: test batas jumlah split dan ukuran | P3 | ⬜ |
+| R8 | E4: uji `.apks` buatan bundletool | P3 | ⬜ |
+| R9 | E4: ekstraksi split ke disk, bukan `/tmp` (tmpfs) | P3 | ⬜ |
+| R10 | Save APK: tanpa file setengah jadi; tombol sibuk selama menyalin | P3 | ⬜ |
+| E3 | Touch mode multi-monitor (catatan di bawah) | P3 | ⏳ uji bersama pengguna |
+| E5 opsi 2/3 | Backup data app. Tanpa root tidak bisa: `adb root` tidak tersedia, dan data di host milik uid app dengan mode `0700` (diuji live) | P3 | ⏳ keputusan maintainer |
+| — | Optimasi daftar app besar dan virtualisasi log terminal (dari arsip gate) | P3 | hanya bila ada laporan lambat |
+
+**Catatan E3 (9 Nov):** dicoba dengan harness aman (jendela fullscreen milik
+harness menutup kedua monitor sebelum satu sentuhan pun dikirim). Hyprland 0.56
+mengenali touchscreen virtual (`archdroid-touch-probe`, juga `ArchDroid Touch`
+dari kode touch mode), tetapi jendela GTK3 maupun GTK4 harness tidak menerima
+event sentuh apa pun, jadi pemetaan monitor belum bisa diamati. Langkah
+berikutnya: harness dengan klien Wayland yang terbukti menerima `wl_touch`
+(mis. `wev`), atau uji langsung dengan Waydroid di DP-2 bersama pengguna. Kode
+belum diubah.
 
 ---
 
@@ -473,6 +513,10 @@ Kerjakan duluan. Setiap perbaikan dimulai dengan test yang gagal.
 
 ## 10. Urutan eksekusi
 
+**Per 9 Nov:** semua item kode di urutan 1–4 sudah dikerjakan, kecuali
+yang tercatat di To-do. Sisa: R2–R6 → B1 (merge PR #2 dan rilis) → B4, E1,
+dan verifikasi C3/C4 setelah merge → R7–R10, E3, E5, F5.
+
 1. **Menuju 0.1.6:** A1, A2, A3, A4, verifikasi A5, B2 langkah (1), B3, C1, F1,
    F2, lalu B1.
 2. **Setelah 0.1.6:** C2, C3, F3, D1, D2, E1, B2 langkah (2), B4.
@@ -490,3 +534,136 @@ Kerjakan duluan. Setiap perbaikan dimulai dengan test yang gagal.
   tetap di balik `dev-commands`.
 - Setelah item selesai, centang di sini dengan tanggal dan bukti singkat, seperti
   di `RELEASE-GATE-0.1.md`.
+
+---
+
+## 12. R — Temuan review 9 Nov 2026
+
+Review atas seluruh diff PR #2 (`d66aa50..ee3480d`): backend Rust, frontend, CI,
+packaging, dan dokumen. Semua check lokal dijalankan ulang, dan pembacaan
+Settings selama boot diukur live.
+
+Diperiksa dan tidak bermasalah: nama paket divalidasi sebelum `adb shell` dan
+sebelum menjadi nama file (`pull_apks`); DPI dibatasi 120–640 sebelum adb; nama
+entri bundle direduksi ke nama file, ditulis dengan `create_new` di direktori
+`0700`, dan dipotong ke ukuran yang dideklarasikan; log Waydroid dibaca dengan
+path yang di-quote; refactor `diagnostics.rs` setara dengan aslinya
+(`has_program` sama dengan `resolve_program || trusted_program`); semua action
+di-pin ke SHA; `.SRCINFO` sinkron dengan PKGBUILD AUR.
+
+### R1 — Kebersihan repo (P1, S) ✅ 9 Nov
+- **Bukti:** `scripts/e2e/__pycache__/real-binary-smoke.cpython-314.pyc` ikut
+  ter-commit di `84ef69f`; `.gitignore` tidak mengabaikan `__pycache__/`.
+  Komentar `APK_SCAN_BYTES` di `apk.rs` masih menulis "without adding a zip
+  dependency", padahal crate `zip` kini dipakai.
+- **Dikerjakan:** file di-untrack, `__pycache__/` di-ignore, komentar dibetulkan.
+
+### R2 — Settings dibaca sebelum Android selesai boot (P1, S)
+- **Bukti:** `onOnline` memanggil `loadConfigs()` begitu `waydroid status`
+  melaporkan `RUNNING` (`src/App.jsx:43-49`). Diukur live 9 Nov (Waydroid 1.6.3,
+  host ini): `waydroid prop get` menunggu layanan platform ±6 s, adb
+  `wm density` baru menjawab 7–12 s setelah `RUNNING`, dan
+  `sys.boot_completed=1` di ±14 s. `loadConfigs` sampai ke `waydroid_density_get`
+  di detik ±7 (`src/hooks/useDeviceConfig.js:58`), dan tidak ada pembacaan
+  ulang setelah boot.
+- **Dampak:** setelah Start dari keadaan mati, kolom DPI bisa kosong dan preset
+  tidak cocok sampai pengguna menerapkan sesuatu. Di host ini hasilnya mepet;
+  di host yang lebih lambat, atau pada boot pertama setelah init, hampir pasti
+  gagal.
+- **Kerjakan:** baca ulang saat `booting` berubah ke `false` selama status
+  `online` (efek kecil di `App.jsx`, atau callback `onBooted` dari
+  `useEngineStatus`). Kalimat CHANGELOG "when the session comes online" ikut
+  disesuaikan.
+- **DoD:** test Vitest: online + booting → `waydroid_density_get` dipanggil
+  setelah `waydroid_boot_state` menjawab `booted`; uji live: Start dari keadaan
+  mati → Settings menampilkan DPI tanpa aksi pengguna.
+
+### R3 — Launch saat booting lewat double-click dan menu konteks (P2, S)
+- **Bukti:** hanya tombol Launch di detail app yang di-disable saat booting
+  (`AppDetail.jsx`). `AppRow` (double-click) dan `ContextMenu` ("Launch App")
+  hanya memeriksa `busy` (`src/components/apps/MyAppsView.jsx:218`, `:248`),
+  padahal CHANGELOG menulis "Launch waits for it".
+- **Dampak:** launch saat boot tetap bisa lambat atau gagal tanpa penjelasan,
+  justru hal yang ingin dicegah E2.
+- **Kerjakan:** satu guard di `handleLaunchApp` (`src/App.jsx:182`): saat
+  booting, beri toast "Android is still booting" tanpa memanggil backend.
+- **DoD:** test: saat booting, double-click dan menu konteks tidak memanggil
+  `waydroid_launch_app`.
+
+### R4 — Smoke biner asli bisa lolos walau IPC gagal (P2, S)
+- **Bukti:** bila `invoke("waydroid_status")` melempar error, `checkStatus`
+  men-set `isInitialized` ke `true` (`src/hooks/useEngineStatus.js:92-97`). Jadi
+  placeholder hilang dan smoke mengambil cabang main UI, yang hanya membuka tab
+  tanpa memeriksa jawaban backend (`scripts/e2e/real-binary-smoke.py:93`). Cek
+  IPC hanya bermakna bila jalur setup yang terambil (CI tanpa Waydroid).
+- **Dampak:** regresi yang membuat `invoke` gagal (mis. command hilang dari
+  `generate_handler!`, atau ACL Tauri) tidak memecah job pada jalur itu.
+- **Kerjakan:** cek langsung
+  `window.__TAURI_INTERNALS__.invoke("waydroid_status")` dan harapkan objek
+  dengan `status` berupa string.
+- **DoD:** uji negatif sekali secara lokal: tanpa `waydroid_status` di handler,
+  smoke gagal.
+
+### R5 — Paket belum merekomendasikan adb (P2, S)
+- **Bukti:** adb kini dibutuhkan preset DPI (A5), split APK (E4), Save APK
+  (E5), status Booting (E2), dan Force stop. PKGBUILD AUR mencantumkan
+  `android-tools` di `optdepends`, tetapi `packaging/arch/PKGBUILD:15-19`
+  (paket Tier 1) tidak, dan `recommends` `.deb`/`.rpm` di
+  `src-tauri/tauri.conf.json:51`, `:64` hanya berisi `waydroid`,
+  `squashfs-tools`, `lzip`, `git`.
+- **Kerjakan:** `android-tools` di `optdepends` Arch; `adb` di `recommends`
+  `.deb` (Debian/Ubuntu); `android-tools` di `recommends` `.rpm` (Fedora).
+- **DoD:** test metadata (mis. di `package-metadata.test.js`) bahwa ketiga paket
+  menyebut adb.
+
+### R6 — Preset Display aktif saat engine mati (P2, S)
+- **Bukti:** tombol Apply di
+  `src/components/settings/ResolutionPresets.jsx:357-367` hanya di-disable oleh
+  `busy`, `isApplying`, `isUnchanged`, dan kolom kosong, bukan oleh status
+  engine; A3 hanya menutup kedua toggle. `waydroid prop set` butuh sesi, dan
+  `wm density` butuh adb serta Android yang sudah boot.
+- **Dampak:** Apply saat engine mati selalu berakhir "Display Config Failed".
+- **Kerjakan:** disable Apply saat engine mati atau booting, dengan catatan yang
+  sama seperti di toggle.
+- **DoD:** test komponen: offline atau booting → Apply disabled; online → aktif.
+
+### R7 — E4: batas split dan ukuran belum diuji (P3, S)
+- **Bukti:** DoD E4 meminta test batas ukuran, tetapi `MAX_SPLITS` (64) dan
+  `MAX_BUNDLE_BYTES` (4 GiB) di `src-tauri/src/apk.rs:16`, `:18` tidak punya
+  test.
+- **Kerjakan:** batas sebagai parameter fungsi dalam, lalu test dengan batas
+  kecil.
+- **DoD:** split ke-65 dan total di atas batas ditolak sebelum ada yang ditulis.
+
+### R8 — E4: `.apks` buatan bundletool belum diuji (P3, M)
+- **Bukti:** uji live hanya memakai bundle dari split ARCore (gaya SAI/XAPK).
+  `bundletool build-apks` menghasilkan `toc.pb` dan `splits/*.apk` untuk semua
+  ABI, density, dan bahasa, plus `standalones/*.apk` bila minSdk < 21.
+  `extract_splits` memasang setiap `.apk`, jadi APK standalone ikut dikirim ke
+  `install-multiple`.
+- **Dampak:** belum diketahui; Android kemungkinan menolak dua APK base dalam
+  satu sesi install.
+- **Kerjakan:** uji live dengan `.apks` dari bundletool; bila gagal, abaikan
+  `standalones/`, dan pertimbangkan memilih split ABI/density yang cocok.
+- **DoD:** hasil uji dicatat; unit test untuk struktur bundletool.
+
+### R9 — E4: split diekstrak ke `/tmp` (P3, S)
+- **Bukti:** `PrivateDir` memakai `std::env::temp_dir()`
+  (`src-tauri/src/apk.rs:198`). Di host ini `/tmp` adalah tmpfs 7,7 GB (RAM),
+  sementara batas bundle 4 GiB.
+- **Dampak:** bundle game besar memakan RAM selama install, dan bisa gagal
+  `ENOSPC` di mesin dengan RAM kecil.
+- **Kerjakan:** direktori kerja di `$XDG_CACHE_HOME/archdroid` (disk), tetap
+  `0700` dan dihapus setelahnya.
+- **DoD:** test lokasi direktori kerja; pesan jelas saat ruang habis.
+
+### R10 — Save APK: file setengah jadi, tanpa status sibuk (P3, S)
+- **Bukti:** `write_bundle` (`src-tauri/src/apk.rs:163`) menulis langsung ke
+  `~/Downloads/<paket>-<waktu>.apks`. Bila penulisan gagal (mis. disk penuh),
+  file terpotong tertinggal dengan nama seperti backup yang sah. Tombol Save APK
+  tidak di-disable selama penyalinan dan hanya ada toast info 2,5 detik
+  (`src/App.jsx:236`), padahal `adb pull` game besar bisa makan puluhan detik.
+- **Kerjakan:** tulis ke `.part`, lalu `rename`; hapus bila gagal. Tandai sibuk
+  di UI selama backup.
+- **DoD:** test: penulisan yang gagal tidak meninggalkan file; tombol disabled
+  selama backup.
