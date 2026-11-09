@@ -60,12 +60,12 @@ Detail R1–R10 di §12. Item yang selesai diberi ✅ dan tanggal.
 | # | Pekerjaan | Prio | Status |
 |---|---|---|---|
 | R1 | `.pyc` ikut ter-commit; komentar basi di `apk.rs` | P1 | ✅ 9 Nov |
-| R2 | Settings dibaca ulang setelah Android selesai boot, bukan saat sesi `RUNNING` | P1 | ⬜ |
-| R3 | Launch saat booting juga dicegah di double-click dan menu konteks | P2 | ⬜ |
-| R4 | Smoke biner asli memeriksa jawaban IPC secara langsung | P2 | ⬜ |
-| R5 | Paket Arch, `.deb`, dan `.rpm` merekomendasikan adb | P2 | ⬜ |
-| R6 | Preset Display di-disable saat engine mati atau booting | P2 | ⬜ |
-| B1 | Rilis 0.1.6: merge PR #2, smoke rilis, tanda tangan, publikasi; sebaiknya setelah R2–R6 | P1 | ⏳ maintainer |
+| R2 | Settings dibaca ulang setelah Android selesai boot, bukan saat sesi `RUNNING` | P1 | ✅ 9 Nov (`a8a1c73`) |
+| R3 | Launch saat booting juga dicegah di double-click dan menu konteks | P2 | ✅ 9 Nov (`a8a1c73`) |
+| R4 | Smoke biner asli memeriksa jawaban IPC secara langsung | P2 | ✅ 9 Nov (`77ea431`) |
+| R5 | Paket Arch, `.deb`, dan `.rpm` merekomendasikan adb | P2 | ✅ 9 Nov (`0449a4d`) |
+| R6 | Preset Display di-disable saat engine mati atau booting | P2 | ✅ 9 Nov (`a8a1c73`) |
+| B1 | Rilis 0.1.6: merge PR #2, smoke rilis, tanda tangan, publikasi (R2–R6 sudah selesai) | P1 | ⏳ maintainer |
 | — | Setelah merge: PR Dependabot pertama lewat CI (DoD C3); smoke biner asli hijau di `main` (DoD C4) | P2 | ⏳ setelah merge |
 | B4 | Publikasi `archdroid-bin` ke AUR, setelah B1 | P2 | ⏳ maintainer |
 | E1 | Kirim issue dan PR `fake_touch` ke upstream | P2 | ⏳ maintainer |
@@ -514,7 +514,7 @@ Kerjakan duluan. Setiap perbaikan dimulai dengan test yang gagal.
 ## 10. Urutan eksekusi
 
 **Per 9 Nov:** semua item kode di urutan 1–4 sudah dikerjakan, kecuali
-yang tercatat di To-do. Sisa: R2–R6 → B1 (merge PR #2 dan rilis) → B4, E1,
+yang tercatat di To-do. Sisa (R2–R6 selesai 9 Nov): B1 (merge PR #2 dan rilis) → B4, E1,
 dan verifikasi C3/C4 setelah merge → R7–R10, E3, E5, F5.
 
 1. **Menuju 0.1.6:** A1, A2, A3, A4, verifikasi A5, B2 langkah (1), B3, C1, F1,
@@ -558,7 +558,8 @@ di-pin ke SHA; `.SRCINFO` sinkron dengan PKGBUILD AUR.
   dependency", padahal crate `zip` kini dipakai.
 - **Dikerjakan:** file di-untrack, `__pycache__/` di-ignore, komentar dibetulkan.
 
-### R2 — Settings dibaca sebelum Android selesai boot (P1, S)
+### R2 — Settings dibaca sebelum Android selesai boot (P1, S) ✅ 9 Nov
+- **Dikerjakan:** `loadConfigs` jalan saat `status === "online" && !booting`, bukan di `onOnline`. Test Vitest gagal pada kode lama, lulus sekarang. Uji live Start dari keadaan mati: belum.
 - **Bukti:** `onOnline` memanggil `loadConfigs()` begitu `waydroid status`
   melaporkan `RUNNING` (`src/App.jsx:43-49`). Diukur live 9 Nov (Waydroid 1.6.3,
   host ini): `waydroid prop get` menunggu layanan platform ±6 s, adb
@@ -578,7 +579,8 @@ di-pin ke SHA; `.SRCINFO` sinkron dengan PKGBUILD AUR.
   setelah `waydroid_boot_state` menjawab `booted`; uji live: Start dari keadaan
   mati → Settings menampilkan DPI tanpa aksi pengguna.
 
-### R3 — Launch saat booting lewat double-click dan menu konteks (P2, S)
+### R3 — Launch saat booting lewat double-click dan menu konteks (P2, S) ✅ 9 Nov
+- **Dikerjakan:** guard di `handleLaunchApp` (toast "Android Is Booting"); test double-click dan menu konteks.
 - **Bukti:** hanya tombol Launch di detail app yang di-disable saat booting
   (`AppDetail.jsx`). `AppRow` (double-click) dan `ContextMenu` ("Launch App")
   hanya memeriksa `busy` (`src/components/apps/MyAppsView.jsx:218`, `:248`),
@@ -590,7 +592,8 @@ di-pin ke SHA; `.SRCINFO` sinkron dengan PKGBUILD AUR.
 - **DoD:** test: saat booting, double-click dan menu konteks tidak memanggil
   `waydroid_launch_app`.
 
-### R4 — Smoke biner asli bisa lolos walau IPC gagal (P2, S)
+### R4 — Smoke biner asli bisa lolos walau IPC gagal (P2, S) ✅ 9 Nov
+- **Dikerjakan:** smoke memanggil `waydroid_status` langsung lewat `__TAURI_INTERNALS__.invoke` dan mengharapkan `CommandResult`; uji negatifnya ikut di script (command yang tidak ada harus ditolak), jadi tidak perlu build terpisah.
 - **Bukti:** bila `invoke("waydroid_status")` melempar error, `checkStatus`
   men-set `isInitialized` ke `true` (`src/hooks/useEngineStatus.js:92-97`). Jadi
   placeholder hilang dan smoke mengambil cabang main UI, yang hanya membuka tab
@@ -604,7 +607,8 @@ di-pin ke SHA; `.SRCINFO` sinkron dengan PKGBUILD AUR.
 - **DoD:** uji negatif sekali secara lokal: tanpa `waydroid_status` di handler,
   smoke gagal.
 
-### R5 — Paket belum merekomendasikan adb (P2, S)
+### R5 — Paket belum merekomendasikan adb (P2, S) ✅ 9 Nov
+- **Dikerjakan:** `adb` di `recommends` `.deb`, `android-tools` di `.rpm` dan `optdepends` Arch; dijaga `package-metadata.test.js`.
 - **Bukti:** adb kini dibutuhkan preset DPI (A5), split APK (E4), Save APK
   (E5), status Booting (E2), dan Force stop. PKGBUILD AUR mencantumkan
   `android-tools` di `optdepends`, tetapi `packaging/arch/PKGBUILD:15-19`
@@ -616,7 +620,8 @@ di-pin ke SHA; `.SRCINFO` sinkron dengan PKGBUILD AUR.
 - **DoD:** test metadata (mis. di `package-metadata.test.js`) bahwa ketiga paket
   menyebut adb.
 
-### R6 — Preset Display aktif saat engine mati (P2, S)
+### R6 — Preset Display aktif saat engine mati (P2, S) ✅ 9 Nov
+- **Dikerjakan:** Apply dan kedua toggle di-disable sampai Android selesai boot, dengan catatan; test komponen.
 - **Bukti:** tombol Apply di
   `src/components/settings/ResolutionPresets.jsx:357-367` hanya di-disable oleh
   `busy`, `isApplying`, `isUnchanged`, dan kolom kosong, bukan oleh status
