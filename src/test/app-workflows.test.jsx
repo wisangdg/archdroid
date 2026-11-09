@@ -866,4 +866,27 @@ describe("App state & workflow integration", () => {
       expect(screen.getByText("Save APK Failed")).toBeTruthy()
     );
   });
+
+  it("keeps Save APK busy until the copy has finished", async () => {
+    let finish;
+    bootingSession(() => true);
+    const base = invoke.getMockImplementation();
+    invoke.mockImplementation((cmd, args) =>
+      cmd === "waydroid_backup_apk"
+        ? new Promise((resolve) => (finish = resolve))
+        : base(cmd, args)
+    );
+    render(<App />);
+    const save = await screen.findByRole("button", { name: "Save APK" });
+    await waitFor(() => expect(save.disabled).toBe(false));
+
+    fireEvent.click(save);
+    await waitFor(() => expect(save.disabled).toBe(true));
+    expect(save.textContent).toContain("Saving APK");
+    fireEvent.click(save);
+    expect(callsOf("waydroid_backup_apk")).toBe(1);
+
+    await act(async () => finish({ status: "success", data: "~/x.apks" }));
+    await waitFor(() => expect(save.disabled).toBe(false));
+  });
 });

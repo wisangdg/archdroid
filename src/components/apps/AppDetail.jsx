@@ -25,6 +25,7 @@ export default function AppDetail({
   onOpenKeymap,
   onCopyPackage,
   onBackupApk,
+  savingApk = false,
   onUninstall,
 }) {
   if (!app) {
@@ -100,7 +101,8 @@ export default function AppDetail({
             type="button"
             className="btn btn-outline"
             onClick={() => onBackupApk(app.package, app.name)}
-            disabled={busy || !engineOnline || booting}
+            disabled={busy || !engineOnline || booting || savingApk}
+            aria-busy={savingApk}
             title={
               engineOnline
                 ? "Save the app's APKs to Downloads (app data is not included)"
@@ -108,7 +110,7 @@ export default function AppDetail({
             }
           >
             <Download size={15} aria-hidden="true" />
-            <span>Save APK</span>
+            <span>{savingApk ? "Saving APK…" : "Save APK"}</span>
           </button>
         )}
         <button

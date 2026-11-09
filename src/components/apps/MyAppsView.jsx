@@ -36,6 +36,7 @@ export default function MyAppsView({
   onUninstallApp,
   onCopyPackage,
   onBackupApk,
+  savingApk = false,
   busy = false,
 }) {
   const [searchQuery, setSearchQuery] = useState("");
@@ -234,6 +235,7 @@ export default function MyAppsView({
         onOpenKeymap={onOpenKeymap}
         onCopyPackage={onCopyPackage}
         onBackupApk={onBackupApk}
+        savingApk={savingApk}
         onUninstall={onUninstallApp}
       />
 

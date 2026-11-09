@@ -24,6 +24,8 @@ const APP_LIST_POLL_MS = 10000;
 export default function App() {
   const [activeTab, setActiveTab] = useState("home");
   const [apps, setApps] = useState([]);
+  // Save APK copies the app out of Android; a big game takes a while.
+  const [savingApk, setSavingApk] = useState(false);
   const [gappsStatus, setGappsStatus] = useState("unknown");
   const [houdiniStatus, setHoudiniStatus] = useState("unknown");
   const [multitouchStatus, setMultitouchStatus] = useState("unknown");
@@ -251,6 +253,8 @@ export default function App() {
   };
 
   const handleBackupApk = async (pkg, name = pkg) => {
+    if (savingApk) return;
+    setSavingApk(true);
     addToast({
       type: "info",
       title: "Saving APK",
@@ -276,6 +280,7 @@ export default function App() {
       console.error("Backup APK error:", e);
       addToast({ type: "error", title: "Save APK Failed", message: String(e) });
     }
+    setSavingApk(false);
   };
 
   const handleCopyPackage = async (pkg) => {
@@ -536,6 +541,7 @@ export default function App() {
                   onUninstallApp={handleUninstallApp}
                   onCopyPackage={handleCopyPackage}
                   onBackupApk={handleBackupApk}
+                  savingApk={savingApk}
                   busy={installing}
                 />
               )}
