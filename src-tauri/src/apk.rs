@@ -51,7 +51,7 @@ pub(crate) fn install_blocking(path: String, cancel: Option<&AtomicBool>) -> Res
 /// How much of each end of an APK to scan for the manifest entry. The local
 /// header for `AndroidManifest.xml` is normally in the first block; the central
 /// directory is at the end. This rejects text files and zips that are not APKs
-/// before the slow install call, without adding a zip dependency.
+/// before the slow install call, without parsing the archive.
 const APK_SCAN_BYTES: u64 = 8 * 1024 * 1024;
 
 fn contains_marker(bytes: &[u8], marker: &[u8]) -> bool {

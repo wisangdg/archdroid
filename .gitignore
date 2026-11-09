@@ -7,6 +7,9 @@ dist/
 src-tauri/target/
 src-tauri/gen/schemas/
 
+# Python (scripts/e2e, scripts/test-vm)
+__pycache__/
+
 # Editors & OS
 .vscode/*
 !.vscode/extensions.json
