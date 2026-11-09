@@ -12,10 +12,23 @@ use crate::waydroid;
 
 /// Bundle file extensions; everything else must be a plain `.apk`.
 pub(crate) const BUNDLE_EXTENSIONS: [&str; 3] = ["apks", "xapk", "apkm"];
-/// More splits than any real app ships (base + ABI + density + languages).
-const MAX_SPLITS: usize = 64;
-/// Uncompressed size limit for all splits together.
-const MAX_BUNDLE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+/// What a bundle may unpack to.
+struct Limits {
+    /// More splits than any real app ships (base + ABI + density + languages).
+    splits: usize,
+    /// Uncompressed size of all splits together.
+    bytes: u64,
+}
+
+const LIMITS: Limits = Limits {
+    splits: 64,
+    bytes: 4 * 1024 * 1024 * 1024,
+};
+
+/// Top-level folders of a `bundletool build-apks` archive that are not part
+/// of the split set: `standalones/` holds full APKs for Android < 5 (a second
+/// base would make `install-multiple` fail), `instant/` the instant-app splits.
+const SKIPPED_BUNDLE_DIRS: [&str; 2] = ["standalones/", "instant/"];
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Kind {
@@ -160,13 +173,31 @@ fn bundle_file_name(package: &str, stamp: &str) -> String {
 }
 
 /// Store `apks` (already compressed) in a new ZIP at `target`, owner-only.
+///
+/// The ZIP is written as `<target>.part` and linked to `target` only when
+/// complete, so a failed copy (disk full) never leaves a truncated file that
+/// looks like a backup. An existing `target` is never overwritten.
 fn write_bundle(target: &Path, apks: &[PathBuf]) -> Result<()> {
+    if target.exists() {
+        return Err(AppError::Io(std::io::Error::from(
+            std::io::ErrorKind::AlreadyExists,
+        )));
+    }
+    let mut part = target.as_os_str().to_owned();
+    part.push(".part");
+    let part = PathBuf::from(part);
+    let result = write_zip(&part, apks).and_then(|()| Ok(std::fs::hard_link(&part, target)?));
+    let _ = std::fs::remove_file(&part);
+    result
+}
+
+fn write_zip(path: &Path, apks: &[PathBuf]) -> Result<()> {
     use std::os::unix::fs::OpenOptionsExt;
     let file = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .mode(0o600)
-        .open(target)?;
+        .open(path)?;
     let mut zip = zip::ZipWriter::new(file);
     let options = zip::write::SimpleFileOptions::default()
         .compression_method(zip::CompressionMethod::Stored)
@@ -184,18 +215,37 @@ fn write_bundle(target: &Path, apks: &[PathBuf]) -> Result<()> {
     Ok(())
 }
 
-/// A `0700` directory under the temp dir, removed on drop.
+/// Where split bundles are unpacked: `~/.cache/archdroid`, on disk. `/tmp`
+/// is RAM (tmpfs) on many desktops, and a game bundle can be gigabytes.
+fn work_root() -> PathBuf {
+    dirs::cache_dir()
+        .map(|cache| cache.join("archdroid"))
+        .unwrap_or_else(std::env::temp_dir)
+}
+
+/// Work directories older than this are leftovers of a crash.
+const STALE_WORK_DIR: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+
+/// A `0700` directory under [`work_root`], removed on drop.
 struct PrivateDir(PathBuf);
 
 impl PrivateDir {
     fn create() -> Result<Self> {
+        Self::create_in(&work_root())
+    }
+
+    fn create_in(root: &Path) -> Result<Self> {
         use std::os::unix::fs::DirBuilderExt;
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(root)?;
+        remove_stale_work_dirs(root);
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or(0);
-        let dir =
-            std::env::temp_dir().join(format!("archdroid-splits-{}-{nanos}", std::process::id()));
+        let dir = root.join(format!("archdroid-splits-{}-{nanos}", std::process::id()));
         std::fs::DirBuilder::new().mode(0o700).create(&dir)?;
         Ok(Self(dir))
     }
@@ -211,6 +261,42 @@ impl Drop for PrivateDir {
     }
 }
 
+/// Remove work directories a crashed install left behind (`/tmp` was emptied
+/// at boot; the cache directory is not).
+fn remove_stale_work_dirs(root: &Path) {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let stale = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|modified| modified.elapsed().ok())
+            .is_some_and(|age| age > STALE_WORK_DIR);
+        if stale
+            && entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("archdroid-splits-")
+        {
+            let _ = std::fs::remove_dir_all(entry.path());
+        }
+    }
+}
+
+/// A full disk while unpacking says where the space ran out.
+fn unpack_error(error: std::io::Error, into: &Path) -> AppError {
+    if error.kind() == std::io::ErrorKind::StorageFull {
+        AppError::command_failed(format!(
+            "Not enough disk space to unpack the bundle in {}. Free some space and try again.",
+            into.display()
+        ))
+    } else {
+        AppError::Io(error)
+    }
+}
+
 /// Unpack every `.apk` entry of `archive` into `into` and return their paths.
 ///
 /// Only the file name of an entry is used, so `../` or absolute entry names
@@ -218,6 +304,10 @@ impl Drop for PrivateDir {
 /// content, and OBB game data (which `install-multiple` cannot place) are
 /// refused rather than half-installed.
 pub(crate) fn extract_splits(archive: &Path, into: &Path) -> Result<Vec<PathBuf>> {
+    extract_splits_within(archive, into, &LIMITS)
+}
+
+fn extract_splits_within(archive: &Path, into: &Path, limits: &Limits) -> Result<Vec<PathBuf>> {
     let file = std::fs::File::open(archive)?;
     let mut zip = zip::ZipArchive::new(file).map_err(|e| {
         AppError::invalid_input(format!(
@@ -244,7 +334,9 @@ pub(crate) fn extract_splits(archive: &Path, into: &Path) -> Result<Vec<PathBuf>
                 archive.display()
             )));
         }
-        if !name.to_ascii_lowercase().ends_with(".apk") {
+        if !name.to_ascii_lowercase().ends_with(".apk")
+            || SKIPPED_BUNDLE_DIRS.iter().any(|dir| name.starts_with(dir))
+        {
             continue;
         }
         let file_name = name
@@ -253,16 +345,18 @@ pub(crate) fn extract_splits(archive: &Path, into: &Path) -> Result<Vec<PathBuf>
             .filter(|base| !base.is_empty() && !base.starts_with('.'))
             .ok_or_else(|| AppError::invalid_input(format!("Invalid bundle entry name {name:?}")))?
             .to_string();
-        if splits.len() == MAX_SPLITS {
+        if splits.len() == limits.splits {
             return Err(AppError::invalid_input(format!(
-                "The bundle has more than {MAX_SPLITS} APKs."
+                "The bundle has more than {} APKs.",
+                limits.splits
             )));
         }
         total = total.saturating_add(entry.size());
-        if total > MAX_BUNDLE_BYTES {
-            return Err(AppError::invalid_input(
-                "The bundle's APKs are larger than 4 GiB together.",
-            ));
+        if total > limits.bytes {
+            return Err(AppError::invalid_input(format!(
+                "The bundle's APKs are larger than {} MiB together.",
+                limits.bytes / (1024 * 1024)
+            )));
         }
         let target = into.join(&file_name);
         let mut out = std::fs::OpenOptions::new()
@@ -273,11 +367,11 @@ pub(crate) fn extract_splits(archive: &Path, into: &Path) -> Result<Vec<PathBuf>
                 std::io::ErrorKind::AlreadyExists => {
                     AppError::invalid_input(format!("The bundle contains {file_name} twice."))
                 }
-                _ => AppError::Io(e),
+                _ => unpack_error(e, into),
             })?;
         // `take` holds the copy to the declared size even if the header lies.
         let size = entry.size();
-        std::io::copy(&mut (&mut entry).take(size), &mut out)?;
+        std::io::copy(&mut (&mut entry).take(size), &mut out).map_err(|e| unpack_error(e, into))?;
         splits.push(target);
     }
     if splits.is_empty() {
@@ -454,16 +548,119 @@ mod tests {
     }
 
     #[test]
+    fn splits_unpack_on_disk_and_crash_leftovers_are_removed() {
+        assert!(work_root().ends_with("archdroid"));
+        assert!(!work_root().starts_with("/tmp") || dirs::cache_dir().is_none());
+
+        let root = scratch("workroot");
+        let stale = root.join("archdroid-splits-1-1");
+        let fresh = root.join("archdroid-splits-2-2");
+        let other = root.join("keep-me");
+        for dir in [&stale, &fresh, &other] {
+            std::fs::create_dir(dir).unwrap();
+        }
+        let old = std::time::SystemTime::now() - STALE_WORK_DIR * 2;
+        for dir in [&stale, &other] {
+            std::fs::File::open(dir).unwrap().set_modified(old).unwrap();
+        }
+        let work = PrivateDir::create_in(&root).unwrap();
+        assert!(work.path().starts_with(&root));
+        assert!(!stale.exists(), "a day-old work dir is removed");
+        assert!(fresh.exists() && other.exists());
+        drop(work);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn bundletool_archives_install_only_the_split_set() {
+        let dir = scratch("bundletool");
+        let archive = dir.join("app.apks");
+        bundle(
+            &archive,
+            &[
+                ("toc.pb", b"\x0a"),
+                ("splits/base-master.apk", SPLIT),
+                ("splits/base-x86_64.apk", SPLIT),
+                ("standalones/standalone-x86_64_hdpi.apk", SPLIT),
+                ("instant/instant-base-master.apk", SPLIT),
+            ],
+        );
+        let out = dir.join("out");
+        std::fs::create_dir(&out).unwrap();
+        let names: Vec<_> = extract_splits(&archive, &out)
+            .unwrap()
+            .iter()
+            .map(|p| p.file_name().unwrap().to_str().unwrap().to_string())
+            .collect();
+        assert_eq!(names, ["base-master.apk", "base-x86_64.apk"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn too_many_or_too_large_splits_are_refused() {
+        let dir = scratch("limits");
+        let archive = dir.join("big.apks");
+        bundle(
+            &archive,
+            &[("a.apk", SPLIT), ("b.apk", SPLIT), ("c.apk", SPLIT)],
+        );
+        let cases = [
+            (
+                Limits {
+                    splits: 2,
+                    bytes: 1 << 20,
+                },
+                "more than 2 APKs",
+            ),
+            (
+                Limits {
+                    splits: 64,
+                    bytes: 2 * SPLIT.len() as u64,
+                },
+                "larger than",
+            ),
+        ];
+        for (i, (limits, message)) in cases.iter().enumerate() {
+            let out = dir.join(format!("out-{i}"));
+            std::fs::create_dir(&out).unwrap();
+            let error = extract_splits_within(&archive, &out, limits).unwrap_err();
+            assert_eq!(error.code(), error::code::INVALID_INPUT);
+            assert!(error.to_string().contains(message), "{error}");
+            // The refused split is never written.
+            assert!(!out.join("c.apk").exists());
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_failed_save_leaves_no_file_behind() {
+        let dir = scratch("backup-fail");
+        let present = dir.join("base.apk");
+        std::fs::write(&present, SPLIT).unwrap();
+        let target = dir.join("com.game-1.apks");
+        let missing = dir.join("split_gone.apk");
+        assert!(write_bundle(&target, &[present, missing]).is_err());
+        assert!(!target.exists());
+        assert!(
+            std::fs::read_dir(&dir).unwrap().count() == 1,
+            "only base.apk"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn the_private_directory_is_owner_only_and_removed() {
         use std::os::unix::fs::PermissionsExt;
+        let root = scratch("private");
         let path = {
-            let dir = PrivateDir::create().unwrap();
+            let dir = PrivateDir::create_in(&root).unwrap();
             let mode = std::fs::metadata(dir.path()).unwrap().permissions().mode();
             assert_eq!(mode & 0o777, 0o700);
             std::fs::write(dir.path().join("x.apk"), "x").unwrap();
             dir.path().to_path_buf()
         };
         assert!(!path.exists());
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// Live: `ARCHDROID_BUNDLE=/path/app.apks cargo test live_bundle_install -- --ignored`
