@@ -48,13 +48,14 @@ crate itu diganti `zip` 9 (Rust minimum 1.88).
 | D5 | ✅ `HostFacts::probe()` + `report()` murni; 4 test tabel, setiap fakta yang gagal punya baris; laporan host identik sebelum/sesudah |
 | E2 | ✅ Command `waydroid_boot_state`, "Android Booting…", test transisi. Celah: double-click dan menu konteks masih bisa Launch saat booting (R3) |
 | E4 | ✅ `.apks`/`.xapk`/`.apkm` lewat `adb install-multiple` (`src-tauri/src/apk.rs`, crate `zip` 9 deflate-only). Diuji live: ARCore (4 split) terpasang ulang dari `.apks` dan `.xapk` bersarang; bundle tanpa base ditolak dengan alasan dari Android; OBB ditolak dengan petunjuk. DoD belum penuh: batas jumlah dan ukuran belum diuji (R7), `.apks` buatan bundletool belum dicoba (R8) |
-| E5 opsi 1 | ✅ "Save APK" tanpa root, diuji live (simpan ARCore → pasang ulang). Spike dan opsi data: [`docs/BACKUP-DESIGN.md`](docs/BACKUP-DESIGN.md) |
+| E5 | ✅ Diputuskan 9 Nov: hanya opsi 1. "Save APK" tanpa root, diuji live (simpan ARCore → pasang ulang). Spike dan opsi data: [`docs/BACKUP-DESIGN.md`](docs/BACKUP-DESIGN.md) |
 | F1–F4 | ✅ |
 | F5 (sebagian) | ✅ Hardware ini diukur: jendela tampil dalam 212–402 ms; PSS ±290 MB (budget baru: PSS < 350 MB) |
 
 ### To-do
 
-Urut prioritas. ⬜ belum · ⏳ menunggu tindakan atau keputusan maintainer.
+Urut prioritas. ⬜ belum · ⏳ menunggu tindakan atau keputusan maintainer ·
+❌ diputuskan tidak dikerjakan.
 Detail R1–R10 di §12. Item yang selesai diberi ✅ dan tanggal.
 
 | # | Pekerjaan | Prio | Status |
@@ -68,14 +69,14 @@ Detail R1–R10 di §12. Item yang selesai diberi ✅ dan tanggal.
 | B1 | Rilis 0.1.6: merge PR #2, smoke rilis, tanda tangan, publikasi (R2–R6 sudah selesai) | P1 | ⏳ maintainer |
 | — | Setelah merge: PR Dependabot pertama lewat CI (DoD C3); smoke biner asli hijau di `main` (DoD C4) | P2 | ⏳ setelah merge |
 | B4 | Publikasi `archdroid-bin` ke AUR, setelah B1 | P2 | ⏳ maintainer |
-| E1 | Kirim issue dan PR `fake_touch` ke upstream | P2 | ⏳ maintainer |
+| E1 | Kirim patch `fake_touch` ke upstream | P2 | ✅ 9 Nov: [PR #60](https://github.com/waydroid/android_vendor_waydroid/pull/60) (memperbaiki issue #30 yang sudah ada). Sisa: tanggapi review; build image hanya bila diminta |
 | F5 | Uji di GNOME, KDE, dan GPU AMD | P2 | ⏳ butuh mesin lain |
 | R7 | E4: test batas jumlah split dan ukuran | P3 | ⬜ |
 | R8 | E4: uji `.apks` buatan bundletool | P3 | ⬜ |
 | R9 | E4: ekstraksi split ke disk, bukan `/tmp` (tmpfs) | P3 | ⬜ |
 | R10 | Save APK: tanpa file setengah jadi; tombol sibuk selama menyalin | P3 | ⬜ |
 | E3 | Touch mode multi-monitor (catatan di bawah) | P3 | ⏳ uji bersama pengguna |
-| E5 opsi 2/3 | Backup data app. Tanpa root tidak bisa: `adb root` tidak tersedia, dan data di host milik uid app dengan mode `0700` (diuji live) | P3 | ⏳ keputusan maintainer |
+| E5 opsi 2/3 | Backup data app (butuh root) | — | ❌ Diputuskan 9 Nov: tidak dikerjakan; cukup opsi 1 (Save APK) |
 | — | Optimasi daftar app besar dan virtualisasi log terminal (dari arsip gate) | P3 | hanya bila ada laporan lambat |
 
 **Catatan E3 (9 Nov):** dicoba dengan harness aman (jendela fullscreen milik
@@ -514,8 +515,9 @@ Kerjakan duluan. Setiap perbaikan dimulai dengan test yang gagal.
 ## 10. Urutan eksekusi
 
 **Per 9 Nov:** semua item kode di urutan 1–4 sudah dikerjakan, kecuali
-yang tercatat di To-do. Sisa (R2–R6 selesai 9 Nov): B1 (merge PR #2 dan rilis) → B4, E1,
-dan verifikasi C3/C4 setelah merge → R7–R10, E3, E5, F5.
+yang tercatat di To-do. Sisa (R2–R6 selesai 9 Nov): B1 (merge PR #2 dan rilis) → B4
+dan verifikasi C3/C4 setelah merge → R7–R10, E3, F5. E1 terkirim (PR #60);
+E5 cukup opsi 1.
 
 1. **Menuju 0.1.6:** A1, A2, A3, A4, verifikasi A5, B2 langkah (1), B3, C1, F1,
    F2, lalu B1.

@@ -1,6 +1,7 @@
 # Backup data app — catatan desain (E5)
 
-Status: **belum diimplementasikan; butuh keputusan maintainer.** Fakta di bawah
+Status: **diputuskan 9 Nov 2026: hanya opsi 1 (Save APK, sudah ada).** Opsi 2
+dan 3 tidak dikerjakan; data app tetap harus dicadangkan sendiri bila perlu. Fakta di bawah
 diperiksa live pada 9 Nov 2026 (Waydroid 1.6.3, LineageOS 20 `userdebug`,
 Arch, host uid 1000).
 
