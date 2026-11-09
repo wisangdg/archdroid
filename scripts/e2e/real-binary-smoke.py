@@ -82,9 +82,22 @@ def main(binary):
               document.addEventListener('securitypolicyviolation', e =>
                 window.__cspv.push({dir: e.violatedDirective, uri: e.blockedURI}));""")
 
+        # Ask the backend directly: the UI alone cannot prove IPC, because a
+        # status call that throws also ends the "Reading" placeholder (the app
+        # then shows its main screen). An unknown command must throw, which
+        # shows the check can fail.
+        ipc = """const done = arguments[arguments.length - 1];
+            window.__TAURI_INTERNALS__.invoke(%s).then(
+              r => done(r && typeof r.status === 'string' ? 'answered' : 'odd ' + JSON.stringify(r)),
+              e => done('threw ' + e));"""
+        reply = ajs(ipc % "'waydroid_status'")
+        expect(reply == "answered", f"waydroid_status answers over IPC ({reply})")
+        reply = ajs(ipc % "'no_such_command'")
+        expect(reply.startswith("threw"), f"an unknown command is rejected ({reply})")
+
         # The status poll and the host checks are IPC round trips to Rust.
         expect(wait_for("!/Reading Waydroid status/.test(document.body.innerText)", 30),
-               "waydroid_status answered over IPC")
+               "the first status reply reaches the UI")
         setup = js("return /Initialize Android Emulator/.test(document.body.innerText)")
         if setup:
             expect(wait_for("/Wayland|Binder|KVM/.test(document.body.innerText)", 30),
