@@ -14,7 +14,7 @@
 
 ## Status pengerjaan
 
-Branch `improve/plan-0.1.6` (dari `feat/touch-mode`), 9 Nov 2026. Setiap item
+Branch `improve/plan-0.1.6` (dari `feat/touch-mode`), 9 Nov 2026, PR #2. CI dan workflow paket hijau di GitHub. `cargo audit` di CI menangkap 4 advisory pada `zip` 4.6.1 → diganti `zip` 9 (Rust minimum 1.88). Setiap item
 satu commit atau lebih; semua test, lint, clippy, dan E2E hijau setelah tiap
 commit.
 
@@ -25,16 +25,16 @@ commit.
 | A5 | ✅ Terbukti lebih parah dari dugaan: `ro.sf.lcd_density` di-set saat boot, `prop set` ditolak, jadi preset DPI **selalu** gagal. Diganti `wm density` (diuji live: langsung berlaku, bertahan setelah restart). Resolusi (`persist.waydroid.width/height`) diuji live dan bekerja |
 | A6 | ✅ Selesai: tahap init digabung; status awal `null` |
 | B1 | ⏳ Tindakan maintainer: merge, smoke rilis, tanda tangan, publikasi |
-| B2 | ✅ (1) `.deb`/`.rpm` dicek glibc 2.35 (0.1.5 butuh 2.34). (2) workflow membangun `.deb`/`.rpm` + paket Arch (job container); `makepkg` diuji lokal, workflow belum jalan di GitHub |
+| B2 | ✅ (1) `.deb`/`.rpm` dicek glibc 2.35. (2) Workflow membangun AppImage, `.deb`, `.rpm` dan paket Arch (job container); hijau di GitHub. Tool AppImage (AppRun, linuxdeploy) di-prefetch lewat API dengan checksum karena URL rilis Tauri 504 pada 9 Nov |
 | B3 | ✅ Selesai (termasuk `Cargo.lock`) |
 | C1 | ✅ Selesai; `npm audit` penuh kini 0, risiko dev-only ditutup |
-| C2, C3 | ✅ Selesai (belum terbukti di GitHub Actions sampai di-push) |
+| C2, C3 | ✅ Selesai; CI hijau di GitHub (PR #2) |
 | D1 | ✅ Selesai: `src/lib/tasks.js`; `App.jsx` 826 → ±590 baris |
 | D2 | ✅ Versi ringan: parser baris di frontend (`src/lib/waydroidStatus.js`) alih-alih mengubah format wire, supaya mock test dan E2E tidak berubah |
 | D3 | ✅ Selesai |
 | E2 | ✅ Selesai: command `waydroid_boot_state`, "Android Booting…" |
 | B4 | ✅ `packaging/aur/PKGBUILD` diuji dengan `makepkg` terhadap v0.1.5 (signature + checksum lolos). Publikasi ke AUR: tindakan maintainer |
-| C4 | ✅ `scripts/e2e/real-binary-smoke.py` + langkah CI; tidak bisa dijalankan lokal (Arch tidak punya WebKitWebDriver untuk webkit2gtk-4.1), belum terbukti sampai di-push |
+| C4 | ✅ `scripts/e2e/real-binary-smoke.py` lulus di GitHub Actions (PR #2): 9/9 cek (jendela, IPC, CSP memblokir eval/inline/fetch/script remote) |
 | D4 | ✅ Langkah pertama: `logs.rs` (area yang disentuh A4). Area lain menunggu disentuh |
 | D5 | ✅ `HostFacts::probe()` + `report()` murni; 4 test tabel; laporan host identik sebelum/sesudah |
 | F5 | ✅ Sebagian: hardware ini diukur (jendela 212–402 ms; PSS ±290 MB, budget baru PSS < 350 MB). GNOME/KDE/AMD tetap butuh mesin lain |
