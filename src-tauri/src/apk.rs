@@ -231,7 +231,10 @@ pub(crate) fn extract_splits(archive: &Path, into: &Path) -> Result<Vec<PathBuf>
         let mut entry = zip
             .by_index(index)
             .map_err(|e| AppError::invalid_input(format!("Unreadable bundle entry: {e}")))?;
-        let name = entry.name().to_string();
+        let name = entry
+            .name()
+            .map_err(|e| AppError::invalid_input(format!("Unreadable bundle entry name: {e}")))?
+            .to_string();
         if entry.is_dir() {
             continue;
         }

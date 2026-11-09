@@ -7,7 +7,7 @@ license = "MIT"
 repository = "https://github.com/wisangdg/archdroid"
 homepage = "https://github.com/wisangdg/archdroid"
 edition = "2021"
-rust-version = "1.77.2"
+rust-version = "1.88"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -35,4 +35,4 @@ tauri-plugin-dialog = "2.7.2"
 base64 = "0.22.1"
 evdev = "0.13.2"
 libc = "0.2"
-zip = { version = "4.2.0", default-features = false, features = ["deflate"] }
+zip = { version = "9", default-features = false, features = ["deflate"] }

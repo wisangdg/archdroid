@@ -711,11 +711,12 @@ fn fits_relay(
     keys: &AttributeSet<KeyCode>,
     axes: &AttributeSet<RelativeAxisCode>,
 ) -> bool {
-    device.supported_keys().map_or(true, |supported| {
-        supported.iter().all(|key| keys.contains(key))
-    }) && device.supported_relative_axes().map_or(true, |supported| {
-        supported.iter().all(|axis| axes.contains(axis))
-    })
+    device
+        .supported_keys()
+        .is_none_or(|supported| supported.iter().all(|key| keys.contains(key)))
+        && device
+            .supported_relative_axes()
+            .is_none_or(|supported| supported.iter().all(|axis| axes.contains(axis)))
 }
 
 fn grab(path: &Path, mut device: Device) -> Option<Device> {
