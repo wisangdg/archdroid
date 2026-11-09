@@ -67,7 +67,8 @@ Detail R1–R10 di §12. Item yang selesai diberi ✅ dan tanggal.
 | R5 | Paket Arch, `.deb`, dan `.rpm` merekomendasikan adb | P2 | ✅ 9 Nov (`0449a4d`) |
 | R6 | Preset Display di-disable saat engine mati atau booting | P2 | ✅ 9 Nov (`a8a1c73`) |
 | B1 | Rilis 0.1.6 | P1 | ✅ 9 Nov: PR #2 di-merge, tag `v0.1.6` bertanda tangan, [rilis](https://github.com/wisangdg/archdroid/releases/tag/v0.1.6) dengan artefak CI; smoke di VM Arch (0.1.5 → 0.1.6 → rollback → 0.1.6) dan AppImage di hardware asli, lihat `docs/P0-8.2-MATRIX-RESULTS.md`. Debian 12/Fedora 44 tidak diulang |
-| — | Setelah merge: PR Dependabot pertama lewat CI (DoD C3); smoke biner asli hijau di `main` (DoD C4) | P2 | ⏳ setelah merge |
+| — | Setelah merge: PR Dependabot pertama lewat CI (DoD C3); smoke biner asli hijau di `main` (DoD C4) | P2 | ✅ 9 Nov: CI `main` hijau di `508c43e`; Dependabot membuka #3–#6 dan CI menilai semuanya |
+| R11 | PR Dependabot #4–#6 gagal CI: Tauri npm (#5, #6) dan crate Tauri (#4) naik di PR terpisah, jadi `tauri build` menolak versi yang tidak cocok; #5/#6 juga membawa lompatan major (ESLint 10 yang belum didukung `eslint-plugin-react`, React 19, lucide-react 1.x). Kerjakan: satu grup untuk paket Tauri, update major dipisah dan diabaikan di grup mingguan; #3 (actions) lulus dan bisa di-merge | P2 | ⬜ |
 | B4 | Publikasi `archdroid-bin` ke AUR | P2 | ⏳ PKGBUILD 0.1.6 siap dan lolos `makepkg` terhadap rilis (biner identik dengan `.deb` bertanda tangan). Butuh akun AUR + SSH key, lalu `scripts/release/publish-aur.sh` |
 | E1 | Kirim patch `fake_touch` ke upstream | P2 | ✅ 9 Nov: [PR #60](https://github.com/waydroid/android_vendor_waydroid/pull/60) (memperbaiki issue #30 yang sudah ada). Sisa: tanggapi review; build image hanya bila diminta |
 | F5 | Uji di GNOME, KDE, dan GPU AMD | P2 | ⏳ butuh mesin lain |
