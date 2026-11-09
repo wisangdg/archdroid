@@ -66,9 +66,9 @@ Detail R1–R10 di §12. Item yang selesai diberi ✅ dan tanggal.
 | R4 | Smoke biner asli memeriksa jawaban IPC secara langsung | P2 | ✅ 9 Nov (`77ea431`) |
 | R5 | Paket Arch, `.deb`, dan `.rpm` merekomendasikan adb | P2 | ✅ 9 Nov (`0449a4d`) |
 | R6 | Preset Display di-disable saat engine mati atau booting | P2 | ✅ 9 Nov (`a8a1c73`) |
-| B1 | Rilis 0.1.6: merge PR #2, smoke rilis, tanda tangan, publikasi (R2–R6 sudah selesai) | P1 | ⏳ maintainer |
+| B1 | Rilis 0.1.6 | P1 | ✅ 9 Nov: PR #2 di-merge, tag `v0.1.6` bertanda tangan, [rilis](https://github.com/wisangdg/archdroid/releases/tag/v0.1.6) dengan artefak CI; smoke di VM Arch (0.1.5 → 0.1.6 → rollback → 0.1.6) dan AppImage di hardware asli, lihat `docs/P0-8.2-MATRIX-RESULTS.md`. Debian 12/Fedora 44 tidak diulang |
 | — | Setelah merge: PR Dependabot pertama lewat CI (DoD C3); smoke biner asli hijau di `main` (DoD C4) | P2 | ⏳ setelah merge |
-| B4 | Publikasi `archdroid-bin` ke AUR, setelah B1 | P2 | ⏳ maintainer |
+| B4 | Publikasi `archdroid-bin` ke AUR | P2 | ⏳ PKGBUILD 0.1.6 siap dan lolos `makepkg` terhadap rilis (biner identik dengan `.deb` bertanda tangan). Butuh akun AUR + SSH key, lalu `scripts/release/publish-aur.sh` |
 | E1 | Kirim patch `fake_touch` ke upstream | P2 | ✅ 9 Nov: [PR #60](https://github.com/waydroid/android_vendor_waydroid/pull/60) (memperbaiki issue #30 yang sudah ada). Sisa: tanggapi review; build image hanya bila diminta |
 | F5 | Uji di GNOME, KDE, dan GPU AMD | P2 | ⏳ butuh mesin lain |
 | R7 | E4: test batas jumlah split dan ukuran | P3 | ✅ 9 Nov (`9df44f1`) |

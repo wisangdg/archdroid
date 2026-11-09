@@ -5,7 +5,7 @@
 # against SHA256SUMS, whose signature makepkg verifies with the release key.
 # Bump pkgver and the .deb checksum each release (docs/RELEASE-AND-UPDATES.md).
 pkgname=archdroid-bin
-pkgver=0.1.5
+pkgver=0.1.6
 pkgrel=1
 pkgdesc="Desktop app for Waydroid: set up Android, install APKs, add Google Play and ARM support"
 arch=('x86_64')
@@ -25,12 +25,13 @@ source=("ArchDroid_${pkgver}_amd64.deb::${_release}/ArchDroid_${pkgver}_amd64.de
         "SHA256SUMS-${pkgver}::${_release}/SHA256SUMS"
         "SHA256SUMS-${pkgver}.asc::${_release}/SHA256SUMS.asc"
         "LICENSE-${pkgver}::https://raw.githubusercontent.com/wisangdg/archdroid/v${pkgver}/LICENSE")
-sha256sums=('6350a128db7f9a1d7ef0b75ad7e36d450617cb5aa64e1d07e2caf432f169ea49'
+sha256sums=('908643de03f1f3003cdc84b196a135f0d73a3294e452d11e550620073754a232'
             'SKIP'
             'SKIP'
             'dcbe9ac5226364598f45a3e18d9290f54d577800d6b48d4b5ffe91cc91f8d3fb')
 # Release key, see docs/VERIFY-RELEASE.md and keys.openpgp.org.
 validpgpkeys=('EB0290C2138FA472E18F020318F47067ACC5BBF9')
+options=('!debug' '!strip')  # ship the signed binary byte for byte
 noextract=("ArchDroid_${pkgver}_amd64.deb")
 
 prepare() {
