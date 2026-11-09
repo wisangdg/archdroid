@@ -44,8 +44,6 @@ export default function App() {
       checkGappsStatus();
       checkHoudiniStatus();
       checkMultitouchStatus();
-      // Waydroid properties can only be read while the session runs.
-      loadConfigs();
     },
   });
   const {
@@ -58,6 +56,15 @@ export default function App() {
     handleApplyResolution,
     handlePropSet,
   } = useDeviceConfig({ addToast });
+
+  // Android answers property reads and `wm density` only once it has booted:
+  // at "RUNNING" the platform service and adb are still seconds
+  // away (measured: adb 7-12 s later), so read Settings when booting ends.
+  const androidReady = status === "online" && !booting;
+  useEffect(() => {
+    if (androidReady) loadConfigs();
+  }, [androidReady, loadConfigs]);
+
   const {
     installing,
     operationInFlight,
@@ -180,6 +187,16 @@ export default function App() {
   } = useApkInstall({ addToast, operationInFlight, loadApps });
 
   const handleLaunchApp = async (pkg) => {
+    if (booting) {
+      addToast({
+        type: "info",
+        title: "Android Is Booting",
+        message:
+          "Wait until the top bar says Engine Running, then launch again.",
+        duration: 3000,
+      });
+      return;
+    }
     try {
       const res = await invoke("waydroid_launch_app", { package: pkg });
       if (res?.status === "success") {
@@ -560,7 +577,7 @@ export default function App() {
                   currentHeight={displayRes.height}
                   currentDpi={displayRes.dpi}
                   onApplyResolution={handleApplyResolution}
-                  engineRunning={status === "online"}
+                  engineRunning={androidReady}
                   onRestartEngine={handleRestart}
                   busy={installing}
                 />

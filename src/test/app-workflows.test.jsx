@@ -718,7 +718,7 @@ describe("App state & workflow integration", () => {
     });
     expect(toggle.disabled).toBe(true);
     expect(
-      screen.getByText(/Start the engine to read and change/)
+      screen.getByText(/wait for Android to boot to read and change/)
     ).toBeTruthy();
 
     status = RUNNING;
@@ -733,6 +733,79 @@ describe("App state & workflow integration", () => {
       { timeout: 4000 }
     );
   });
+  // Mock for a running session whose Android boot finishes when `booted()`
+  // returns true; the app list holds one app.
+  const bootingSession = (booted) =>
+    invoke.mockImplementation((cmd) => {
+      if (cmd === "waydroid_status") return Promise.resolve(RUNNING);
+      if (cmd === "get_waydroid_apps")
+        return Promise.resolve([
+          { name: "F-Droid", package: "org.fdroid.fdroid", icon: null },
+        ]);
+      if (cmd === "waydroid_boot_state")
+        return Promise.resolve({
+          status: "success",
+          data: booted() ? "booted" : "booting",
+        });
+      if (cmd === "waydroid_density_get")
+        return Promise.resolve({ status: "success", data: "225" });
+      if (cmd === "waydroid_prop_get")
+        return Promise.resolve({ status: "success", data: "" });
+      return Promise.resolve({ status: "not_installed" });
+    });
+  const callsOf = (name) =>
+    invoke.mock.calls.filter(([cmd]) => cmd === name).length;
+
+  it("reads Settings again only after Android has booted", async () => {
+    let booted = false;
+    bootingSession(() => booted);
+    render(<App />);
+    await screen.findByText("Android Booting…");
+    // At "RUNNING" adb and the platform service do not answer yet.
+    const beforeBoot = callsOf("waydroid_density_get");
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(callsOf("waydroid_density_get")).toBe(beforeBoot);
+
+    booted = true;
+    await waitFor(
+      () => expect(callsOf("waydroid_density_get")).toBe(beforeBoot + 1),
+      { timeout: 4000 }
+    );
+    await screen.findByText("Engine Running");
+  }, 10000);
+
+  it("does not launch from the list or the menu while Android boots", async () => {
+    bootingSession(() => false);
+    render(<App />);
+    await screen.findByText("Android Booting…");
+    const row = (await screen.findAllByText("F-Droid"))[0];
+
+    fireEvent.doubleClick(row);
+    await screen.findByText("Android Is Booting");
+    fireEvent.contextMenu(row);
+    fireEvent.click(await screen.findByText("Launch App"));
+    expect(callsOf("waydroid_launch_app")).toBe(0);
+  });
+
+  it("keeps the display profile from being applied while the engine is off", async () => {
+    invoke.mockImplementation((cmd) => {
+      if (cmd === "waydroid_status")
+        return Promise.resolve({
+          status: "success",
+          data: "Session:\tSTOPPED\n",
+        });
+      if (cmd === "get_waydroid_apps") return Promise.resolve([]);
+      return Promise.resolve({ status: "error", message: "session stopped" });
+    });
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+    const apply = await screen.findByRole("button", {
+      name: /^Apply \d+ × \d+/,
+    });
+    expect(apply.disabled).toBe(true);
+    expect(screen.getByText(/to apply a display/)).toBeTruthy();
+  });
+
   it("shows neither the library nor the setup before the first status reply", async () => {
     let reply;
     invoke.mockImplementation((cmd) => {

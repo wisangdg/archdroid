@@ -79,7 +79,8 @@ export default function SettingsView({
 
         {!engineRunning && (
           <p className="config-offline-note" role="note">
-            Start the engine to read and change these settings.
+            Start the engine and wait for Android to boot to read and change
+            these settings.
           </p>
         )}
         <div className="config-toggle-list">
