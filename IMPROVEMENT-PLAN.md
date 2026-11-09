@@ -71,10 +71,10 @@ Detail R1–R10 di §12. Item yang selesai diberi ✅ dan tanggal.
 | B4 | Publikasi `archdroid-bin` ke AUR, setelah B1 | P2 | ⏳ maintainer |
 | E1 | Kirim patch `fake_touch` ke upstream | P2 | ✅ 9 Nov: [PR #60](https://github.com/waydroid/android_vendor_waydroid/pull/60) (memperbaiki issue #30 yang sudah ada). Sisa: tanggapi review; build image hanya bila diminta |
 | F5 | Uji di GNOME, KDE, dan GPU AMD | P2 | ⏳ butuh mesin lain |
-| R7 | E4: test batas jumlah split dan ukuran | P3 | ⬜ |
-| R8 | E4: uji `.apks` buatan bundletool | P3 | ⬜ |
-| R9 | E4: ekstraksi split ke disk, bukan `/tmp` (tmpfs) | P3 | ⬜ |
-| R10 | Save APK: tanpa file setengah jadi; tombol sibuk selama menyalin | P3 | ⬜ |
+| R7 | E4: test batas jumlah split dan ukuran | P3 | ✅ 9 Nov (`9df44f1`) |
+| R8 | E4: uji `.apks` buatan bundletool | P3 | ✅ 9 Nov (`9df44f1`), uji live |
+| R9 | E4: ekstraksi split ke disk, bukan `/tmp` (tmpfs) | P3 | ✅ 9 Nov (`9df44f1`) |
+| R10 | Save APK: tanpa file setengah jadi; tombol sibuk selama menyalin | P3 | ✅ 9 Nov (`9df44f1`, `14962f4`) |
 | E3 | Touch mode multi-monitor (catatan di bawah) | P3 | ⏳ uji bersama pengguna |
 | E5 opsi 2/3 | Backup data app (butuh root) | — | ❌ Diputuskan 9 Nov: tidak dikerjakan; cukup opsi 1 (Save APK) |
 | — | Optimasi daftar app besar dan virtualisasi log terminal (dari arsip gate) | P3 | hanya bila ada laporan lambat |
@@ -516,7 +516,7 @@ Kerjakan duluan. Setiap perbaikan dimulai dengan test yang gagal.
 
 **Per 9 Nov:** semua item kode di urutan 1–4 sudah dikerjakan, kecuali
 yang tercatat di To-do. Sisa (R2–R6 selesai 9 Nov): B1 (merge PR #2 dan rilis) → B4
-dan verifikasi C3/C4 setelah merge → R7–R10, E3, F5. E1 terkirim (PR #60);
+dan verifikasi C3/C4 setelah merge → E3, F5. R7–R10 selesai 9 Nov. E1 terkirim (PR #60);
 E5 cukup opsi 1.
 
 1. **Menuju 0.1.6:** A1, A2, A3, A4, verifikasi A5, B2 langkah (1), B3, C1, F1,
@@ -634,7 +634,8 @@ di-pin ke SHA; `.SRCINFO` sinkron dengan PKGBUILD AUR.
   sama seperti di toggle.
 - **DoD:** test komponen: offline atau booting → Apply disabled; online → aktif.
 
-### R7 — E4: batas split dan ukuran belum diuji (P3, S)
+### R7 — E4: batas split dan ukuran belum diuji (P3, S) ✅ 9 Nov
+- **Dikerjakan:** batas menjadi data (`Limits`); test dengan batas kecil: split berlebih dan total kebesaran ditolak, split yang ditolak tidak ditulis.
 - **Bukti:** DoD E4 meminta test batas ukuran, tetapi `MAX_SPLITS` (64) dan
   `MAX_BUNDLE_BYTES` (4 GiB) di `src-tauri/src/apk.rs:16`, `:18` tidak punya
   test.
@@ -642,7 +643,8 @@ di-pin ke SHA; `.SRCINFO` sinkron dengan PKGBUILD AUR.
   kecil.
 - **DoD:** split ke-65 dan total di atas batas ditolak sebelum ada yang ditulis.
 
-### R8 — E4: `.apks` buatan bundletool belum diuji (P3, M)
+### R8 — E4: `.apks` buatan bundletool belum diuji (P3, M) ✅ 9 Nov
+- **Dikerjakan:** dugaan terbukti live: arsip bergaya bundletool (split ARCore di `splits/`, salinan base di `standalones/`, `toc.pb`) ditolak Android dengan "Split null was defined multiple times" bila semua APK dipasang. `standalones/` dan `instant/` kini dilewati; arsip yang sama lalu terpasang (`live_bundle_install`). Belum dicoba dengan output bundletool asli dari `.aab` (tidak ada `.aab` di mesin ini); pemilihan split ABI/density tidak dikerjakan.
 - **Bukti:** uji live hanya memakai bundle dari split ARCore (gaya SAI/XAPK).
   `bundletool build-apks` menghasilkan `toc.pb` dan `splits/*.apk` untuk semua
   ABI, density, dan bahasa, plus `standalones/*.apk` bila minSdk < 21.
@@ -654,7 +656,8 @@ di-pin ke SHA; `.SRCINFO` sinkron dengan PKGBUILD AUR.
   `standalones/`, dan pertimbangkan memilih split ABI/density yang cocok.
 - **DoD:** hasil uji dicatat; unit test untuk struktur bundletool.
 
-### R9 — E4: split diekstrak ke `/tmp` (P3, S)
+### R9 — E4: split diekstrak ke `/tmp` (P3, S) ✅ 9 Nov
+- **Dikerjakan:** direktori kerja di `~/.cache/archdroid` (`0700`); sisa crash > 24 jam dihapus; disk penuh dilaporkan dengan lokasinya.
 - **Bukti:** `PrivateDir` memakai `std::env::temp_dir()`
   (`src-tauri/src/apk.rs:198`). Di host ini `/tmp` adalah tmpfs 7,7 GB (RAM),
   sementara batas bundle 4 GiB.
@@ -664,7 +667,8 @@ di-pin ke SHA; `.SRCINFO` sinkron dengan PKGBUILD AUR.
   `0700` dan dihapus setelahnya.
 - **DoD:** test lokasi direktori kerja; pesan jelas saat ruang habis.
 
-### R10 — Save APK: file setengah jadi, tanpa status sibuk (P3, S)
+### R10 — Save APK: file setengah jadi, tanpa status sibuk (P3, S) ✅ 9 Nov
+- **Dikerjakan:** ditulis ke `.part` lalu di-link ke nama akhir; gagal tidak meninggalkan file. Tombol "Saving APK…" disabled selama menyalin. Test untuk keduanya.
 - **Bukti:** `write_bundle` (`src-tauri/src/apk.rs:163`) menulis langsung ke
   `~/Downloads/<paket>-<waktu>.apks`. Bila penulisan gagal (mis. disk penuh),
   file terpotong tertinggal dengan nama seperti backup yang sah. Tombol Save APK
