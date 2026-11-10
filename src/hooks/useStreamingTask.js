@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { isEventForTask, appendLogLine } from "../lib/taskEvents";
+import {
+  isEventForTask,
+  applyOutput,
+  lastStepId,
+  EMPTY_TERMINAL,
+} from "../lib/taskEvents";
 
 const PROCESS_ERROR_TITLES = {
   elevation_denied: "Root Access Denied",
@@ -18,11 +23,20 @@ const PROCESS_ERROR_TITLES = {
 export function useStreamingTask({ addToast, onTaskSuccess }) {
   const [installing, setInstalling] = useState(false);
   const [terminalOpen, setTerminalOpen] = useState(false);
-  const [terminalLogs, setTerminalLogs] = useState([]);
+  // Lines shown in the terminal, plus how many the cap dropped.
+  const [terminal, setTerminal] = useState(EMPTY_TERMINAL);
+  // The stage the task announced last ("[STEP] <id>"). Kept apart from the
+  // lines: a long download used to push the marker out of the capped buffer
+  // and the stepper fell back to its first stage.
+  const [terminalStep, setTerminalStep] = useState(null);
+  // Counts the tasks started, so the modal can reset per task.
+  const [runId, setRunId] = useState(0);
+  // Output waiting for the next frame: one render per frame, not per line.
+  const pendingOutput = useRef([]);
+  const flushHandle = useRef(null);
   const [terminalTitle, setTerminalTitle] = useState("");
   const [terminalTaskType, setTerminalTaskType] = useState("logs");
   const [terminalTaskResult, setTerminalTaskResult] = useState(null);
-  const terminalRef = useRef(null);
   const operationInFlight = useRef(false);
   // ID of the streaming task currently shown in the terminal. Events from any
   // other task (a late finish, or a non-modal background write) are ignored.
@@ -31,6 +45,7 @@ export function useStreamingTask({ addToast, onTaskSuccess }) {
   // A preflight error returns before any event, so the terminal must be closed
   // and the error shown instead of leaving it stuck on "Awaiting...".
   const taskStartedRef = useRef(false);
+  const taskTypeRef = useRef("logs");
   const onTaskSuccessRef = useRef(onTaskSuccess);
   onTaskSuccessRef.current = onTaskSuccess;
 
@@ -49,9 +64,13 @@ export function useStreamingTask({ addToast, onTaskSuccess }) {
     activeTaskId.current = null;
     taskStartedRef.current = false;
     setInstalling(true);
+    taskTypeRef.current = taskType;
     setTerminalTaskType(taskType);
     setTerminalTitle(title);
-    setTerminalLogs([]);
+    pendingOutput.current = [];
+    setTerminal(EMPTY_TERMINAL);
+    setTerminalStep(null);
+    setRunId((id) => id + 1);
     setTerminalTaskResult(null);
     setTerminalOpen(true);
 
@@ -94,11 +113,24 @@ export function useStreamingTask({ addToast, onTaskSuccess }) {
       }
     });
 
+    const flush = () => {
+      flushHandle.current = null;
+      const entries = pendingOutput.current;
+      if (entries.length === 0) return;
+      pendingOutput.current = [];
+      const step = lastStepId(entries);
+      if (step) setTerminalStep(step);
+      setTerminal((prev) => applyOutput(prev, entries));
+    };
+
     const unlistenOutput = listen("cmd-output", (event) => {
       if (!isEventForTask(event.payload, activeTaskId.current)) return;
-      setTerminalLogs((prev) => appendLogLine(prev, event.payload.line));
-      if (terminalRef.current) {
-        terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
+      pendingOutput.current.push({
+        line: event.payload.line,
+        progress: event.payload.progress,
+      });
+      if (flushHandle.current === null) {
+        flushHandle.current = requestAnimationFrame(flush);
       }
     });
 
@@ -109,20 +141,30 @@ export function useStreamingTask({ addToast, onTaskSuccess }) {
       if (!isEventForTask(event.payload, activeTaskId.current)) return;
       activeTaskId.current = null;
       setTerminalTaskResult({ success, code, message });
-      setTerminalLogs((prev) => [
-        ...prev,
-        success
-          ? "\n[PROCESS COMPLETED SUCCESSFULLY]"
-          : `\n[PROCESS FINISHED WITH ERRORS${code ? ` (${code})` : ""}]`,
-      ]);
+      if (flushHandle.current !== null) {
+        cancelAnimationFrame(flushHandle.current);
+      }
+      flush();
+      setTerminal((prev) =>
+        applyOutput(prev, [
+          {
+            line: success
+              ? "\n[PROCESS COMPLETED SUCCESSFULLY]"
+              : `\n[PROCESS FINISHED WITH ERRORS${code ? ` (${code})` : ""}]`,
+          },
+        ])
+      );
       operationInFlight.current = false;
       setInstalling(false);
       if (success) {
-        addToast({
-          type: "success",
-          title: "Process Finished",
-          message: "Operation completed successfully.",
-        });
+        // Reading a log is not an operation worth announcing.
+        if (taskTypeRef.current !== "logs") {
+          addToast({
+            type: "success",
+            title: "Process Finished",
+            message: "Operation completed successfully.",
+          });
+        }
         onTaskSuccessRef.current?.();
       } else {
         addToast({
@@ -173,9 +215,11 @@ export function useStreamingTask({ addToast, onTaskSuccess }) {
   return {
     installing,
     operationInFlight,
-    terminalRef,
     terminalOpen,
-    terminalLogs,
+    terminalLogs: terminal.lines,
+    terminalDropped: terminal.dropped,
+    terminalStep,
+    runId,
     terminalTitle,
     terminalTaskType,
     terminalTaskResult,

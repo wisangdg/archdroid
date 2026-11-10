@@ -85,7 +85,7 @@ try {
         longest = Math.max(longest, now - last);
         last = now;
         for (let k = 0; k < perTask && sent < count; k++, sent++)
-          window.__emitTauriEvent("cmd-output", { task_id: "task-probe", line: line(sent) });
+          window.__emitTauriEvent("cmd-output", { task_id: "task-probe", line: line(sent), progress: sent % 3 === 0 && !window.__noProgressFlag });
         if (sent < count) return channel.port2.postMessage(0);
         const sentAt = performance.now();
         requestAnimationFrame(() => requestAnimationFrame(() => done({

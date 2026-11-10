@@ -1,4 +1,10 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, {
+  useState,
+  useMemo,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+} from "react";
 import {
   Terminal,
   Copy,
@@ -12,19 +18,26 @@ import {
   RotateCw,
   FileText,
   Ban,
+  ArrowDownToLine,
 } from "lucide-react";
 import ProcessStepper from "./ProcessStepper";
 import { detectStepProgress } from "./stepConfigs";
 import { useFocusTrap } from "../../lib/useFocusTrap";
+import { progressPercent } from "../../lib/taskEvents";
+
+/** Within this many pixels of the end, new output keeps the view at the end. */
+const STICK_TO_END_PX = 40;
 
 export default function TerminalModal({
   isOpen,
   title,
   taskType = "logs", // 'gapps' | 'houdini' | 'init' | 'phantom' | 'wipe' | 'logs'
   logs = [],
+  dropped = 0,
+  currentStep = null,
+  runId = 0,
   taskResult = null,
   installing,
-  terminalRef,
   onClose,
   onRetry,
   onCancel,
@@ -47,18 +60,53 @@ export default function TerminalModal({
     }
   };
   const [showConsole, setShowConsole] = useState(false);
+  const consoleRef = useRef(null);
+  // Follow new output only while the reader is at the end; scrolling up to
+  // read something earlier must not be undone by the next line.
+  const [atEnd, setAtEnd] = useState(true);
+  const atEndRef = useRef(true);
+
+  const handleConsoleScroll = (e) => {
+    const el = e.currentTarget;
+    const end =
+      el.scrollHeight - el.scrollTop - el.clientHeight <= STICK_TO_END_PX;
+    atEndRef.current = end;
+    setAtEnd(end);
+  };
+
+  const jumpToEnd = () => {
+    const el = consoleRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+    atEndRef.current = true;
+    setAtEnd(true);
+  };
+
+  // After the lines are in the DOM, so the last one is really visible.
+  useLayoutEffect(() => {
+    const el = consoleRef.current;
+    if (el && atEndRef.current) el.scrollTop = el.scrollHeight;
+  }, [logs, showConsole]);
+
+  // A new task starts with the console closed (stepper tasks) and at the end.
+  useEffect(() => {
+    setShowConsole(false);
+    atEndRef.current = true;
+    setAtEnd(true);
+  }, [runId]);
 
   // Compute step progress from logs and structured taskResult
   const progress = useMemo(() => {
-    return detectStepProgress(taskType, logs, taskResult);
-  }, [taskType, logs, taskResult]);
+    return detectStepProgress(taskType, logs, taskResult, currentStep);
+  }, [taskType, logs, taskResult, currentStep]);
+
+  const percent = installing ? progressPercent(logs[logs.length - 1]) : null;
 
   // If viewing logs or if process failed/cancelled, ensure console is visible
   useEffect(() => {
     if (taskType === "logs" || progress.isFailed || progress.isCancelled) {
       setShowConsole(true);
     }
-  }, [taskType, progress.isFailed, progress.isCancelled]);
+  }, [taskType, runId, progress.isFailed, progress.isCancelled]);
 
   if (!isOpen) return null;
 
@@ -138,7 +186,7 @@ export default function TerminalModal({
               </h3>
               <span className="terminal-status-text">
                 {installing
-                  ? "Task running in background..."
+                  ? "Running…"
                   : progress.isCancelled
                     ? "Operation cancelled"
                     : progress.isFailed
@@ -183,29 +231,6 @@ export default function TerminalModal({
               <Download size={14} />
               <span>Export</span>
             </button>
-
-            {/* Cancel Button in Header */}
-            {installing && onCancel && (
-              <button
-                type="button"
-                className="btn btn-danger btn-sm btn-cancel-top"
-                onClick={handleCancelClick}
-                disabled={cancelling}
-                title="Cancel running operation"
-              >
-                {cancelling ? (
-                  <>
-                    <Loader2 size={13} className="spinner" />
-                    <span>Cancelling...</span>
-                  </>
-                ) : (
-                  <>
-                    <Ban size={13} />
-                    <span>Cancel</span>
-                  </>
-                )}
-              </button>
-            )}
 
             {!installing && (
               <button
@@ -264,6 +289,14 @@ export default function TerminalModal({
               <p className="status-card-message">
                 {progress.errorMessage || progress.currentMessage}
               </p>
+              {percent !== null && (
+                <progress
+                  className="status-card-progress"
+                  max="100"
+                  value={percent}
+                  aria-label={`Download progress: ${percent}%`}
+                />
+              )}
 
               {(progress.isFailed || progress.isCancelled) && (
                 <div className="status-failure-advice">
@@ -314,7 +347,11 @@ export default function TerminalModal({
 
         {/* Monospace Output Window */}
         {(showConsole || !hasStepper) && (
-          <div ref={terminalRef} className="terminal-console-body">
+          <div
+            ref={consoleRef}
+            className="terminal-console-body"
+            onScroll={handleConsoleScroll}
+          >
             {logs.length === 0 ? (
               <div className="terminal-empty-text">
                 <Loader2 size={16} className="spinner" />
@@ -323,7 +360,7 @@ export default function TerminalModal({
             ) : (
               logs.map((line, idx) => (
                 <div
-                  key={idx}
+                  key={dropped + idx}
                   className={`terminal-log-line ${
                     line.includes("[ERROR]")
                       ? "log-error"
@@ -346,8 +383,19 @@ export default function TerminalModal({
           <div className="terminal-footer-meta">
             <FileText size={14} className="meta-icon" />
             <span className="terminal-lines-count">
-              {logs.length} log lines stream captured
+              {logs.length} lines
+              {dropped > 0 && ` (${dropped} earlier lines not kept)`}
             </span>
+            {(showConsole || !hasStepper) && !atEnd && (
+              <button
+                type="button"
+                className="btn btn-outline btn-sm"
+                onClick={jumpToEnd}
+              >
+                <ArrowDownToLine size={14} aria-hidden="true" />
+                <span>Latest</span>
+              </button>
+            )}
           </div>
 
           <div className="terminal-footer-actions">
@@ -362,12 +410,12 @@ export default function TerminalModal({
                 {cancelling ? (
                   <>
                     <Loader2 size={14} className="spinner" />
-                    <span>Cancelling Task...</span>
+                    <span>Cancelling...</span>
                   </>
                 ) : (
                   <>
                     <Ban size={14} />
-                    <span>Cancel Task</span>
+                    <span>Cancel</span>
                   </>
                 )}
               </button>

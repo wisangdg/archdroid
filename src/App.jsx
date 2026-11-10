@@ -70,9 +70,11 @@ export default function App() {
   const {
     installing,
     operationInFlight,
-    terminalRef,
     terminalOpen,
     terminalLogs,
+    terminalDropped,
+    terminalStep,
+    runId,
     terminalTitle,
     terminalTaskType,
     terminalTaskResult,
@@ -629,9 +631,11 @@ export default function App() {
         title={terminalTitle}
         taskType={terminalTaskType}
         logs={terminalLogs}
+        dropped={terminalDropped}
+        currentStep={terminalStep}
+        runId={runId}
         taskResult={terminalTaskResult}
         installing={installing}
-        terminalRef={terminalRef}
         onClose={() => {
           setTerminalOpen(false);
           setTerminalTaskResult(null);

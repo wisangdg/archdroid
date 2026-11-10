@@ -12,7 +12,7 @@ const emit = (lines) =>
      const ch = new MessageChannel();
      ch.port1.onmessage = () => {
        for (let k = 0; k < 20 && i < lines.length; k++, i++)
-         window.__emitTauriEvent("cmd-output", { task_id: "task-probe", line: lines[i] });
+         window.__emitTauriEvent("cmd-output", { task_id: "task-probe", line: lines[i], progress: /%\|/.test(lines[i]) });
        if (i < lines.length) ch.port2.postMessage(0);
        else requestAnimationFrame(() => requestAnimationFrame(done));
      };
@@ -53,6 +53,11 @@ try {
   console.log("after 2100 progress lines:", await phase());
   await d.shot("stepper-after-flood");
 
+  // The console is closed by default for a stepper task; open it to look.
+  if (!(await d.exec('return !!document.querySelector(".terminal-console-body")'))) {
+    await d.exec(`document.querySelector(".btn-console-toggle").click();`);
+    await sleep(200);
+  }
   // Finish: is the last line visible?
   await d.exec(`window.__emitTauriEvent("cmd-finished", { task_id: "task-probe", success: true, code: null, message: null }); window.__finishTask(true);`);
   await sleep(500);

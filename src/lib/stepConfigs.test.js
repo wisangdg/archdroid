@@ -121,3 +121,26 @@ test("before the first [STEP] marker the stepper stays on the first stage", () =
   const result = detectStepProgress("gapps", logs, null);
   assert.equal(result.activeStepIndex, 0);
 });
+
+test("the stage survives when its marker left the capped log", async () => {
+  const { detectStepProgress } =
+    await import("../components/terminal/stepConfigs.js");
+  // 2000 kept lines of a download; "[STEP] download" was dropped long ago.
+  const logs = Array.from({ length: 2000 }, (_, i) => ` ${i % 100}%|x`);
+  const progress = detectStepProgress("houdini", logs, null, "download");
+  assert.equal(progress.steps[progress.activeStepIndex].id, "download");
+  // Without the tracked stage this is the old bug: back to the first stage.
+  assert.equal(detectStepProgress("houdini", logs, null).activeStepIndex, 0);
+});
+
+test("a marker in the log wins over an older tracked stage", async () => {
+  const { detectStepProgress } =
+    await import("../components/terminal/stepConfigs.js");
+  const progress = detectStepProgress(
+    "houdini",
+    ["[STEP] inject", "copying"],
+    null,
+    "download"
+  );
+  assert.equal(progress.steps[progress.activeStepIndex].id, "inject");
+});
