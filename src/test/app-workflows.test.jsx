@@ -15,8 +15,15 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 let eventListeners = {};
 vi.mock("@tauri-apps/api/event", () => ({
+  // Like Tauri: every listener of an event is called, not only the last one.
   listen: vi.fn((event, cb) => {
-    eventListeners[event] = cb;
+    const previous = eventListeners[event];
+    eventListeners[event] = previous
+      ? (payload) => {
+          previous(payload);
+          cb(payload);
+        }
+      : cb;
     return Promise.resolve(() => {});
   }),
 }));

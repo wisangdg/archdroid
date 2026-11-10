@@ -3455,3 +3455,23 @@ pre,
     gap: 12px;
   }
 }
+
+/* An APK install in progress (My Apps) */
+.install-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-accent);
+  background: var(--accent-glow-subtle);
+  font-size: 13px;
+}
+
+.install-progress-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

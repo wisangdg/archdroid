@@ -187,6 +187,8 @@ export default function App() {
 
   const {
     isDraggingOver,
+    installingApk,
+    cancelInstall,
     handleInstallApk,
     handleDragOver,
     handleDragLeave,
@@ -539,7 +541,7 @@ export default function App() {
         isInitialized={isInitialized}
         isOperating={isOperating}
         booting={booting}
-        busy={installing}
+        busy={installing || Boolean(installingApk)}
         onStart={handleStart}
         onStop={handleStop}
         onRestart={handleRestart}
@@ -573,6 +575,8 @@ export default function App() {
                   onForceStopApp={handleForceStopApp}
                   onOpenKeymap={() => setActiveTab("keymap")}
                   onInstallApk={handleInstallApk}
+                  installingApk={installingApk}
+                  onCancelInstall={cancelInstall}
                   onUninstallApp={handleUninstallApp}
                   onCopyPackage={handleCopyPackage}
                   onBackupApk={handleBackupApk}

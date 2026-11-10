@@ -7,6 +7,14 @@ import { useApkInstall } from "../hooks/useApkInstall";
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 
+let startedListener = null;
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: vi.fn((event, cb) => {
+    if (event === "cmd-started") startedListener = cb;
+    return Promise.resolve(() => {});
+  }),
+}));
+
 let dropHandler = null;
 vi.mock("@tauri-apps/api/webview", () => ({
   getCurrentWebview: () => ({
@@ -120,6 +128,38 @@ describe("useApkInstall", () => {
     expect(installCalls()).toHaveLength(0);
     expect(addToast).toHaveBeenCalledWith(
       expect.objectContaining({ title: "Unsupported File" })
+    );
+  });
+
+  it("shows the file while it installs and cancels by task ID", async () => {
+    let finish;
+    invoke.mockImplementation((cmd) =>
+      cmd === "waydroid_install_apk"
+        ? new Promise((resolve) => (finish = resolve))
+        : Promise.resolve({ status: "success" })
+    );
+    open.mockResolvedValue("/home/u/Downloads/game.apks");
+    const addToast = vi.fn();
+    const { result } = renderHook(() =>
+      useApkInstall({
+        addToast,
+        operationInFlight: { current: false },
+        loadApps: vi.fn(),
+      })
+    );
+    act(() => {
+      result.current.handleInstallApk();
+    });
+    await waitFor(() => expect(result.current.installingApk).toBe("game.apks"));
+    act(() => startedListener({ payload: { task_id: "task-7" } }));
+    await act(() => result.current.cancelInstall());
+    expect(invoke).toHaveBeenCalledWith("cancel_task", { taskId: "task-7" });
+    await act(async () =>
+      finish({ status: "error", code: "cancelled", message: "cancelled" })
+    );
+    expect(result.current.installingApk).toBe(null);
+    expect(addToast).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Install Cancelled" })
     );
   });
 });

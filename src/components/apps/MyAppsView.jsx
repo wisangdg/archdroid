@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
-import { Search, X, PackagePlus, AlertCircle } from "lucide-react";
+import { Search, X, PackagePlus, AlertCircle, Loader2 } from "lucide-react";
 import AppRow from "./AppRow";
 import AppDetail from "./AppDetail";
 import ContextMenu from "./ContextMenu";
@@ -39,6 +39,8 @@ export default function MyAppsView({
   onForceStopApp,
   onOpenKeymap,
   onInstallApk,
+  installingApk = null,
+  onCancelInstall,
   onUninstallApp,
   onCopyPackage,
   onBackupApk,
@@ -133,13 +135,31 @@ export default function MyAppsView({
             type="button"
             className="btn btn-primary btn-sm"
             onClick={onInstallApk}
-            disabled={busy}
+            disabled={busy || Boolean(installingApk)}
             title="Install an APK from your computer, or drop one on the window"
           >
             <PackagePlus size={16} aria-hidden="true" />
             <span>Install APK</span>
           </button>
         </div>
+
+        {installingApk && (
+          <div className="install-progress" role="status">
+            <Loader2 size={15} className="spinner" aria-hidden="true" />
+            <span className="install-progress-text">
+              Installing {installingApk}…
+            </span>
+            {onCancelInstall && (
+              <button
+                type="button"
+                className="btn btn-outline btn-sm"
+                onClick={onCancelInstall}
+              >
+                Cancel
+              </button>
+            )}
+          </div>
+        )}
 
         <div className="search-box">
           <Search size={16} className="search-icon" aria-hidden="true" />
