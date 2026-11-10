@@ -214,35 +214,43 @@ export default function SettingsView({
       <HostDiagnostics />
 
       <span id="settings-logs" className="settings-anchor" />
-
-      <AppLogPanel />
-
-      <DiagnosticBundlePanel />
-
-      {/* Diagnostic Logs */}
-      <div className="glass-panel settings-card">
-        <div className="settings-card-content">
-          <div className="settings-card-icon">
-            <Terminal size={24} />
-          </div>
-          <div className="settings-card-text">
-            <h3>Diagnostic & System Logs</h3>
+      {/* One section for every log: Waydroid's, ArchDroid's, and the bundle. */}
+      <section className="glass-panel logs-panel" aria-labelledby="logs-title">
+        <div className="section-title-wrap">
+          <Terminal size={20} className="section-title-icon" />
+          <div>
+            <h3 id="logs-title">Logs &amp; Support</h3>
             <p>
-              Inspect the live <code>/var/lib/waydroid/waydroid.log</code> file
-              to diagnose crashes, container boot failures, or graphic driver
-              errors.
+              Stored on this computer only; ArchDroid never uploads logs or
+              telemetry.
             </p>
           </div>
         </div>
-        <button
-          className="btn btn-outline"
-          onClick={onViewLogs}
-          disabled={busy}
-        >
-          <Terminal size={17} />
-          <span>View Logs</span>
-        </button>
-      </div>
+
+        <div className="log-row">
+          <div className="log-row-text">
+            <h4>Waydroid Log</h4>
+            <p>
+              <code>/var/lib/waydroid/waydroid.log</code>: container boot
+              failures, crashes, and graphics driver errors.
+            </p>
+          </div>
+          <div className="log-row-actions">
+            <button
+              className="btn btn-outline"
+              onClick={onViewLogs}
+              disabled={busy}
+            >
+              <Terminal size={17} />
+              <span>View Logs</span>
+            </button>
+          </div>
+        </div>
+
+        <AppLogPanel />
+
+        <DiagnosticBundlePanel />
+      </section>
 
       <span id="settings-reset" className="settings-anchor" />
       {/* Danger Zone */}

@@ -1,6 +1,5 @@
 import React, { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { LifeBuoy } from "lucide-react";
 
 export default function DiagnosticBundlePanel() {
   const [busy, setBusy] = useState(false);
@@ -32,33 +31,23 @@ export default function DiagnosticBundlePanel() {
   };
 
   return (
-    <div className="glass-panel settings-card">
-      <div className="settings-card-content">
-        <div className="settings-card-icon">
-          <LifeBuoy size={24} aria-hidden="true" />
-        </div>
-        <div className="settings-card-text">
-          <h3>Diagnostic Bundle</h3>
-          <p>
-            One text file for bug reports: system and Waydroid versions, host
-            checks, add-on state, and recent logs. The logs can include Android
-            package names and APK file names you have used; home paths and
-            secrets are masked. Collected without root, saved to your Downloads
-            folder, and never uploaded.
-          </p>
-          {note && <p role="status">{note}</p>}
-          {bundle && (
-            <pre
-              className="app-log-view"
-              aria-label="Diagnostic bundle preview"
-              style={{ maxHeight: 240, overflow: "auto" }}
-            >
-              {bundle.content}
-            </pre>
-          )}
-        </div>
+    <div className="log-row">
+      <div className="log-row-text">
+        <h4>Diagnostic Bundle</h4>
+        <p>
+          One text file for bug reports: system and Waydroid versions, host
+          checks, add-on state, and recent logs. The logs can include Android
+          package names and APK file names you have used; home paths and secrets
+          are masked. Collected without root and saved to your Downloads folder.
+        </p>
+        {note && <p role="status">{note}</p>}
+        {bundle && (
+          <pre className="app-log-view" aria-label="Diagnostic bundle preview">
+            {bundle.content}
+          </pre>
+        )}
       </div>
-      <div style={{ display: "flex", gap: 8 }}>
+      <div className="log-row-actions">
         <button className="btn btn-outline" onClick={create} disabled={busy}>
           {busy ? "Creating…" : "Create Bundle"}
         </button>

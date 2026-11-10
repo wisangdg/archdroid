@@ -1215,6 +1215,43 @@ body {
 .app-log-view {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  max-height: 240px;
+  overflow: auto;
+}
+
+/* Settings: Logs & Support, one panel with a row per log */
+.log-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px 20px;
+  padding: 16px 0;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.log-row-text {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+
+.log-row-text h4 {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.log-row-text p {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.log-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .settings-card-icon {

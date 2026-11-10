@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { FileText } from "lucide-react";
 
 export default function AppLogPanel() {
   const [location, setLocation] = useState("");
@@ -35,30 +34,17 @@ export default function AppLogPanel() {
   };
 
   return (
-    <div className="glass-panel settings-card">
-      <div className="settings-card-content">
-        <div className="settings-card-icon">
-          <FileText size={24} aria-hidden="true" />
-        </div>
-        <div className="settings-card-text">
-          <h3>Application Log</h3>
-          <p>
-            Stored locally only; ArchDroid never uploads logs or telemetry. Home
-            paths and secrets are masked when shown. Location:{" "}
-            <code>{location || "…"}</code>
-          </p>
-          {note && <p role="status">{note}</p>}
-          {text !== null && (
-            <pre
-              className="app-log-view"
-              style={{ maxHeight: 240, overflow: "auto" }}
-            >
-              {text}
-            </pre>
-          )}
-        </div>
+    <div className="log-row">
+      <div className="log-row-text">
+        <h4>ArchDroid Log</h4>
+        <p>
+          This app's own log. Home paths and secrets are masked when shown.
+          Location: <code>{location || "…"}</code>
+        </p>
+        {note && <p role="status">{note}</p>}
+        {text !== null && <pre className="app-log-view">{text}</pre>}
       </div>
-      <div style={{ display: "flex", gap: 8 }}>
+      <div className="log-row-actions">
         <button className="btn btn-outline" onClick={view}>
           View
         </button>
