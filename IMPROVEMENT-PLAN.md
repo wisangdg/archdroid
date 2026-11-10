@@ -14,6 +14,10 @@
 
 ## Status pengerjaan
 
+> **Review 10 Nov 2026 (performa dan tampilan):** 26 item baru (R12–R18,
+> G0–G6, H1–H12) dengan bukti ukur ada di §13. Yang paling mendesak: R12
+> (Launch saat engine mati merusak sesi) dan G1 (titik status memakan CPU).
+
 Branch `improve/plan-0.1.6` (dari `feat/touch-mode`), PR #2 ke `main`, belum
 di-merge. Setiap item satu commit atau lebih. Direview 9 Nov 2026; temuannya
 menjadi R1–R10 di §12.
@@ -679,3 +683,310 @@ di-pin ke SHA; `.SRCINFO` sinkron dengan PKGBUILD AUR.
   di UI selama backup.
 - **DoD:** test: penulisan yang gagal tidak meninggalkan file; tombol disabled
   selama backup.
+
+---
+
+## 13. Review 10 Nov 2026: performa dan tampilan
+
+Diperiksa: `main` di `11e26cb` (kode app sama dengan tag `v0.1.6`).
+
+- **VM:** paket rilis `archdroid-bin 0.1.6-1` di VM Arch (KVM, WebKitGTK 2.54.2
+  di Xvfb tanpa GPU, Waydroid 1.6.3), digerakkan lewat WebKitWebDriver.
+- **Chromium:** bundle produksi dengan IPC tiruan di Chromium headless (font host).
+- **Host:** hanya perintah CLI. Tidak ada jendela yang dibuka di desktop.
+
+Angka mentah, skrip ukur, dan screenshot ada di
+`~/archdroid-test-vm/results/review-2026-11-10/` (`RESULTS.md`).
+
+**Belum diukur:** biaya animasi di hardware asli dengan GPU; apakah polling
+berhenti saat jendela ada di workspace lain (Hyprland); kasus terminal
+satu-event-per-task di WebKitGTK (baru di Chromium).
+
+**Diperiksa dan tidak perlu dikerjakan:** bundle frontend (JS 264 KB, CSS
+45 KB); daftar app besar (300 app, payload 2 MB: script 39 ms per 30 detik,
+10 ketikan di search 78 ms, jadi virtualisasi tidak perlu); `get_waydroid_apps`
+1 ms; `check_host_diagnostics` 88–118 ms; semua command sudah di luar main
+thread; loop touch mode hanya bertanya ke Hyprland saat klik.
+
+### Ringkasan
+
+| ID | Item | Prio | Effort | Status |
+|---|---|---|---|---|
+| R12 | Launch saat engine mati mengunci app 120 detik, lalu merusak sesi | P1 | M | ⬜ |
+| R13 | Display profile: tombol Restart hilang setelah Apply; "Saved & Active" padahal belum aktif | P2 | S | ⬜ |
+| R14 | "Apply Property" aktif saat engine mati (sisa R6) | P2 | S | ⬜ |
+| R15 | Install APK tanpa status sibuk, progress, atau Cancel | P2 | M | ⬜ |
+| R16 | Menu konteks: fokus kembali ke item pertama setiap re-render | P3 | S | ⬜ |
+| R17 | Status touch mode hanya dibaca saat app dibuka | P3 | S | ⬜ |
+| R18 | Save APK gagal di filesystem tanpa hard link | P3 | S | ⬜ |
+| G0 | Skrip ukur masuk repo | P2 | S | ⬜ |
+| G1 | Titik status berdenyut memakan CPU selama engine menyala | P1 | S | ⬜ |
+| G2 | Polling status lewat Python; setiap perintah adb membayar 2× `waydroid status` | P2 | M | ⬜ |
+| G3 | Output terminal: progress bar membanjiri log, stepper mundur, render per baris | P2 | M | ⬜ |
+| G4 | Settings dibaca berurutan | P3 | S | ⬜ |
+| G5 | `backdrop-filter` di semua panel | P3 | S | ⬜ |
+| G6 | Profil release (LTO, strip) | P3 | S | ⬜ |
+| H1 | Top bar tidak muat satu baris pada ukuran jendela default | P1 | S–M | ⬜ |
+| H2 | Font desain (Outfit, JetBrains Mono) tidak pernah terpakai | P2 | S | ⬜ |
+| H3 | Kontras teks redup dan ukuran teks kecil | P2 | S–M | ⬜ |
+| H4 | Terminal: baris terakhir tak terlihat, stepper terpotong, tanpa progress bar | P2 | M | ⬜ |
+| H5 | Toast menutupi kontrol engine, menumpuk, dan terlalu cepat hilang | P2 | S–M | ⬜ |
+| H6 | Dialog destruktif: fokus awal di tombol destruktif | P2 | S | ⬜ |
+| H7 | Halaman Settings terlalu panjang | P2 | M | ⬜ |
+| H8 | My Apps: state hilang saat pindah tab; info berulang | P2 | S–M | ⬜ |
+| H9 | Nama halaman dan teks UI tidak konsisten | P2 | S | ⬜ |
+| H10 | Jendela sempit (tiling) memotong konten | P3 | M | ⬜ |
+| H11 | Keymapping: tanpa status Phantom | P3 | S–M | ⬜ |
+| H12 | Aksesibilitas kecil; teks tidak bisa disalin | P3 | S | ⬜ |
+
+**Urutan:** (1) 0.1.7: R12, G1, H6, R13, R14, H1, langkah (1) G2. (2) G2,
+G3 + H4, H2, H3, H5, R15. (3) H7, H8, H9, G4, G5. (4) Saat menyentuh area itu:
+H10–H12, G6, R16–R18.
+
+### R — Temuan pada yang sudah dikerjakan
+
+#### R12 — Launch saat engine mati (P1, M)
+- **Bukti:** Launch aktif saat engine mati (`AppDetail.jsx:63`;
+  `App.jsx:191-201` hanya menahan saat booting). Backend menjalankan
+  `waydroid app launch` di slot eksklusif dengan batas 120 detik
+  (`lib.rs:479-488`, `waydroid.rs:348-350`). Di Waydroid 1.6.3, perintah itu
+  **menjadi sesi** bila sesi belum jalan (`app_manager.py:62-72`), jadi tidak
+  pernah selesai. Sudah begini sejak `580e851` (0.1.4).
+- **Diukur di VM:** invoke baru kembali setelah 120 021 ms dengan `timeout`;
+  selama itu perintah lain dijawab `busy`. Proses yang dimatikan adalah session
+  manager: `waydroid status` tetap `RUNNING` dan top bar "Engine Running",
+  tetapi `id.waydro.Session` hilang. Launch berikutnya (Calculator) dijawab
+  `success` dalam 122 ms padahal tidak ada yang terbuka; CLI menulis
+  "RuntimeError: Already tracking a session" dengan exit 0. Stop Engine
+  memulihkan.
+- **Dampak:** aksi pertama yang paling wajar (buka ArchDroid, double-click app)
+  berakhir dengan "Launch Failed" dua menit kemudian, lalu tidak ada app yang
+  bisa dibuka sampai engine di-restart.
+- **Kerjakan:** jangan pernah menjalankan `app launch` terhadap sesi yang mati:
+  nyalakan sesi lewat `session_start` yang sudah ada, tunggu boot, baru launch,
+  dengan status "Starting engine…" di UI. Tambahkan "already tracking a
+  session" ke `FAILURE_MARKERS` (`waydroid.rs:65-73`) dengan saran restart.
+  Tampilkan keadaan "sesi rusak" (container jalan, `id.waydro.Session` tidak
+  ada) sebagai "Engine needs restart".
+- **DoD:** test stub: sesi mati → tidak ada spawn `app launch`; test marker;
+  Vitest urutan start → boot → launch; uji VM: Launch dari keadaan mati, app
+  terbuka, sesi masih hidup setelah 3 menit, app kedua terbuka.
+
+#### R13 — Display profile setelah Apply (P2, S)
+- **Bukti:** tombol Restart hanya tampil saat ada perubahan yang **belum**
+  di-Apply (`ResolutionPresets.jsx:350`); setelah Apply tombolnya hilang dan
+  label menjadi "Saved & Active" (`:380-381`), padahal resolusi baru aktif
+  setelah restart. Catatan di `:342-346` masih menulis DPI butuh restart
+  (sejak A5 tidak). Probe: sebelum Apply `["Restart Engine", "Apply 1280 × 720"]`,
+  sesudahnya `["Saved & Active"]`.
+- **Kerjakan:** keadaan "tersimpan, menunggu restart" dengan tombol Restart
+  setelah Apply; betulkan teks; validasi rentang lebar/tinggi sebelum menulis.
+- **DoD:** test komponen untuk ketiga keadaan.
+
+#### R14 — "Apply Property" saat engine mati (P2, S)
+- **Bukti:** hanya di-disable oleh `busy` (`SettingsView.jsx:158-164`); probe:
+  engine mati → tombol aktif, berakhir "Property Error".
+- **Kerjakan / DoD:** disable seperti toggle lain; test komponen.
+
+#### R15 — Install APK tanpa status sibuk (P2, M)
+- **Bukti:** hanya toast 4 detik (`useApkInstall.js:39-44`), padahal bundle
+  besar butuh menit. Backend sudah mengirim `cmd-started` dan punya cancel
+  (`lib.rs:446-460`), tetapi UI mengabaikannya (`useStreamingTask.js:90-95`).
+  Selama itu tombol lain aktif dan dijawab `busy`.
+- **Kerjakan:** indikator tugas di top bar ("Installing X… Cancel") yang
+  memakai `cancel_task`; tombol lain ikut terkunci.
+- **DoD:** test: selama install tombol terkunci; Cancel mengirim `task_id`.
+
+#### R16–R18 (P3, S)
+- **R16:** efek `ContextMenu` bergantung pada `onClose` yang dibuat ulang tiap
+  render (`ContextMenu.jsx:78`, `MyAppsView.jsx:246`). Probe: fokus di
+  "Uninstall App" pindah ke "Launch App" setelah satu poll daftar (10 detik).
+- **R17:** `touch_mode_status` hanya dibaca saat mount `App`
+  (`useTouchMode.js:23-25`); panel bisa tetap "On" setelah thread berhenti.
+  Baca ulang saat tab Keymapping dibuka.
+- **R18:** `write_bundle` memakai `hard_link` (`apk.rs:189`), yang gagal di
+  exFAT/NTFS setelah seluruh salinan selesai. Fallback ke rename tanpa menimpa.
+
+### G — Performa
+
+#### G0 — Skrip ukur masuk repo (P2, S)
+Pindahkan probe dari folder hasil ke `scripts/perf/` (layout, audit kontras,
+biaya render, fase VM), supaya DoD di bawah bisa diulang.
+
+#### G1 — Titik status berdenyut (P1, S)
+- **Bukti:** `.status-online .status-dot { animation: pulse 2s infinite }`
+  (`index.css:295-298`) menganimasikan `box-shadow` (`:1742-1755`) di dalam
+  top bar ber-`backdrop-filter: blur(24px)` (`:136-137`).
+- **Diukur di VM (tanpa GPU), idle di My Apps:** engine menyala 92–99% satu
+  core (WebKitWebProcess 82–88%); tanpa blur top bar 44%; animasi hanya
+  `opacity` tetap 94%; animasi mati 2,5–2,7%. Engine mati 2,4%.
+- **Dampak:** selama engine menyala (berjam-jam), UI memakai CPU yang
+  dibutuhkan game. Pasti terjadi tanpa akselerasi (VM, sebagian setup NVIDIA,
+  X11 tertentu); dengan GPU lebih kecil tetapi tetap 60 frame per detik.
+- **Kerjakan:** titik statis saat Running; animasi hanya untuk keadaan
+  sementara (Booting, Starting, Stopping); top bar berwarna solid tanpa blur.
+- **DoD:** idle engine menyala di VM ≤ 5% satu core; test bahwa selector
+  keadaan tetap tidak punya animasi `infinite`; ukur sekali di hardware asli.
+
+#### G2 — Polling status lewat Python (P2, M)
+- **Bukti:** poll 5 detik (`useEngineStatus.js:249-258`) memanggil
+  `waydroid status`: 112–127 ms CPU per panggilan (host), jadi 2,3% satu core
+  terus-menerus (VM, 60 detik). `with_device` membacanya dua kali per perintah
+  adb (`adb.rs:269`, `:303`): `waydroid_boot_state`, `waydroid_density_get`,
+  dan cek add-on butuh 283 ms, padahal perintah adb-nya sendiri 20 ms. Saat
+  startup dengan engine mati UI mengirim 11 command; 5 di antaranya
+  (4 `prop get` + density, `useDeviceConfig.js:71-73`) pasti gagal dan menulis
+  WARN ke log.
+- **Alternatif terbukti:** `busctl --system call id.waydro.Container
+  /ContainerManager id.waydro.ContainerManager GetSession` menjawab dalam 8 ms
+  sebagai user biasa; itu panggilan yang sama dengan isi `waydroid status`
+  (`status.py:15`). IP ada di `/var/lib/misc/dnsmasq.waydroid0.leases`
+  (terbaca). Crate `gio` sudah ter-link lewat Tauri.
+- **Verifikasi dulu:** apakah `document.hidden` menjadi true saat jendela di
+  workspace lain (hitung proses `waydroid status`).
+- **Kerjakan:** (1) S: hapus `loadConfigs()` saat mount. (2) Baca sesi lewat
+  D-Bus, fallback ke `waydroid status`. (3) Satu snapshot status dipakai
+  bersama ≤ 1 detik; `with_device` tidak membaca dua kali. (4) Poll 30 detik
+  saat jendela tidak fokus.
+- **DoD:** idle engine mati < 0,3% satu core; `waydroid_boot_state` < 60 ms;
+  startup tanpa `prop get` saat engine mati; test parser dan fallback.
+
+#### G3 — Output terminal (P2, M)
+- **Bukti:** backend memecah output pada `\r` (`stream.rs:322-341`), jadi
+  setiap pembaruan progress bar menjadi satu baris. Log install GApps nyata
+  (31 Okt): 110 pembaruan dalam 11 detik (10/detik) berbanding 21 baris lain.
+  Frontend menyalin array dan me-render ulang `App` per baris
+  (`useStreamingTask.js:97-103`), memindai seluruh log 9× per baris
+  (`stepConfigs.js:110-135`), dan memberi key indeks (`TerminalModal.jsx:324-326`).
+- **Bug:** tahap stepper diturunkan dari buffer 2000 baris
+  (`stepConfigs.js:95-108`). Probe: `[STEP] download` + 2100 baris progress →
+  "Stage 1 of 7: Root Access". GApps 198 MB mencapai batas itu pada ±1 MiB/s.
+  Awal log juga hilang dari Copy/Export.
+- **Diukur (Chromium, satu event per task):** 1000 baris pertama 1,6 detik;
+  di batas 2000 baris, 26 ms per baris (3000 baris = 78 detik). Kiriman
+  sekaligus tidak bermasalah: View Logs 1001 baris selesai 60 ms di WebKitGTK.
+- **Kerjakan:** backend menandai baris `\r` sebagai pengganti baris terakhir
+  dan membatasi lajunya; tahap disimpan saat marker tiba, bukan dicari di
+  buffer; flush per frame, key berurut, state terminal keluar dari `App`;
+  tulis "N baris awal dibuang" bila batas tercapai.
+- **DoD:** test: marker + 5000 baris progress → tahap tetap; probe 3000 baris
+  di batas < 2 detik.
+
+#### G4–G6 (P3, S)
+- **G4:** Settings memuat 5 nilai berurutan: 790 ms, paralel 329 ms (VM,
+  `useDeviceConfig.js:47-65`). Satu command atau `Promise.all`.
+- **G5:** 14 `backdrop-filter`; panel berada di atas gradient statis, jadi
+  blur hampir tak terlihat. Scroll Settings di VM: 50–56 fps dengan CPU 3,7
+  detik, tanpa blur 59 fps dengan 2,1 detik. Pertahankan hanya di overlay.
+- **G6:** tidak ada `[profile.release]`; paket 3,2–4,0 MB. Tambah LTO dan
+  strip. Jangan `panic = "abort"`: `off_main_thread` mengandalkan panic yang
+  tertangkap.
+
+### H — Tampilan
+
+#### H1 — Top bar (P1, S–M)
+- **Bukti:** jendela default 1100×720, minimum 860×580
+  (`tauri.conf.json:15-18`). Tinggi top bar 61 px baru tercapai pada lebar
+  ≥ 1280 px. Pada 1100 px dengan engine menyala: 113 px (dua baris, 15,7%
+  tinggi jendela); pada 860×580: 19,5%. Saat engine mati, hanya tab Install
+  Tools yang membuatnya dua baris, karena label tab aktif menebal
+  (`index.css:207-212`): header melompat 52 px saat pindah tab. Di VM (font
+  FreeSans) selalu dua baris.
+- **Kerjakan:** engine pill ringkas (status + satu tombol utama; Restart dan
+  Stop sebagai tombol ikon berlabel aksesibel); lebar tab tidak berubah saat
+  aktif; satu baris sampai 860 px.
+- **DoD:** probe layout: tinggi top bar ≤ 64 px dan sama di semua tab serta
+  keadaan engine pada 1100 dan 860 px.
+
+#### H2 — Font (P2, S)
+- **Bukti:** CSS menyebut "Outfit" dan "JetBrains Mono" (`index.css:48`,
+  `:59-65`) tanpa membundelnya. Host: Liberation Sans dan CaskaydiaMono. Arch
+  bersih (VM): FreeSans dan FreeMono, yang lebar sehingga ID paket terpotong.
+  10 deklarasi menulis `"JetBrains Mono"` langsung, bukan lewat `--font-mono`.
+- **Kerjakan:** bundel kedua font sebagai woff2 (OFL; `font-src 'self'` sudah
+  mengizinkan; sertakan lisensinya), atau pakai `system-ui` dengan sengaja.
+  Rekomendasi: bundel, supaya lebar teks (dan H1) sama di semua distro.
+- **DoD:** screenshot VM memakai font yang sama dengan host; semua
+  `font-family` lewat token.
+
+#### H3 — Kontras dan ukuran teks (P2, S–M)
+- **Bukti:** `--text-muted: #64748b` (`index.css:14`, 35 pemakaian) hanya
+  3,2–4,0:1 di atas panel pada teks 10–13 px (WCAG AA: 4,5:1): deskripsi
+  preset, 17 detail diagnostik, deskripsi panel, hint, badge "Not Installed".
+  Dari 579 potongan teks di empat halaman, 203 (35%) di bawah 12 px. Ada 16
+  ukuran font dan 86 literal `rgba()` tanpa token.
+- **Kerjakan:** warna redup ≥ 4,5:1 (mis. `#8492a6`, ≥ 4,8:1 di semua
+  permukaan yang diaudit); minimum 12 px; skala ukuran sebagai token.
+- **DoD:** audit kontras (G0) tanpa pasangan < 4,5:1 untuk teks aktif.
+
+#### H4 — Terminal (P2, M)
+- **Bukti:** scroll diset sebelum render (`useStreamingTask.js:99-102`) dan
+  tidak untuk baris penutup (`:112-117`): di VM, View Logs berhenti 2 893 px
+  (±125 baris) sebelum akhir log. Auto-scroll tanpa syarat, jadi output lama
+  tidak bisa dibaca selama stream. Stepper 7 tahap hanya menampilkan 5 pada
+  1100 px. Konsol detail selalu terbuka karena `terminalTaskType` awal "logs"
+  (`TerminalModal.jsx:57-61`). Dua tombol Cancel. Waydroid mencetak
+  `[Downloading] X MB/Y MB` tiap 2 detik, tetapi tidak ada progress bar.
+- **Kerjakan:** ikuti bawah hanya bila pengguna di bawah, plus tombol "ke
+  baris terbaru"; tahap aktif selalu terlihat; satu Cancel; progress bar dari
+  persen/MB; tanpa toast sukses untuk View Logs.
+- **DoD:** test untuk tiap butir; baris terakhir terlihat setelah selesai.
+
+#### H5 — Toast (P2, S–M)
+- **Bukti:** posisi kanan-atas (`index.css:1779-1790`) menutupi kontrol engine;
+  tanpa batas (7 toast = 552 dari 720 px); semua jenis hilang setelah 4 detik
+  (`useToasts.js:8`), termasuk error ±200 karakter; `user-select: none`
+  (`index.css:84`) membuat pesan error tidak bisa disalin.
+- **Kerjakan:** pindah ke kanan-bawah; maksimal 3, duplikat digabung; error
+  bertahan sampai ditutup, jeda saat hover; pesan bisa diseleksi.
+- **DoD:** test jumlah, durasi, dan seleksi.
+
+#### H6 — Dialog destruktif (P2, S)
+- **Bukti:** `data-autofocus` selalu di tombol konfirmasi
+  (`ConfirmModal.jsx:135`). Di VM, dialog Factory Reset terbuka dengan fokus
+  di "Wipe Everything"; Uninstall tidak punya gerbang kedua.
+- **Kerjakan:** untuk varian `danger`, fokus awal di Cancel. Dialog wipe
+  menyebut Save APK.
+- **DoD:** test fokus awal.
+
+#### H7 — Settings (P2, M)
+- **Bukti:** 9 panel dalam satu scroll: 2 914 px pada 1100×720 (5,4 layar),
+  3 427 px pada 860×580 (8,7 layar). Panel Display lebih dari satu layar,
+  dengan kartu Custom sendirian di baris kedua. Tiga kartu tentang log. Konten
+  terpotong tepat di bawah subjudul halaman. "Create Bundle" patah dua baris.
+  Emoji "ℹ️" sebagai ikon.
+- **Kerjakan:** sub-navigasi (Display · Android · Diagnostics · Logs & Support
+  · Reset); preset sebagai baris ringkas; satu bagian log; diagnostik berupa
+  ringkasan dengan detail hanya untuk yang bermasalah.
+- **DoD:** tombol Apply terlihat tanpa scroll pada 1100×720; tiap bagian
+  ≤ 1,5 layar.
+
+#### H8 — My Apps (P2, S–M)
+- **Bukti:** search, filter, dan pilihan hilang saat pindah tab
+  (`App.jsx:532-547`); tombol Keymapping di panel detail sendiri memicunya.
+  Jumlah app tampil 4×. "ready to launch" walau engine mati. ID paket tampil
+  dua kali. Fakta "Engine" bukan milik app. Menu konteks tanpa Force stop dan
+  Save APK.
+- **Kerjakan:** state disimpan di `App`; satu angka; subjudul mengikuti engine;
+  fakta app nyata (versi, ukuran); menu konteks sama dengan panel.
+- **DoD:** test: pindah tab mempertahankan search dan pilihan.
+
+#### H9 — Nama dan teks (P2, S)
+- **Bukti:** nav "Install Tools", "Settings", "Keymapping" berjudul halaman
+  "Addons & Tool Injections", "Emulator Configuration", "Smart Keymapping"
+  (`TopBar.jsx:14-19`, `PageHeading.jsx:3-18`). Status add-on: "Installed",
+  "Active", "Declared". Dialog root berupa satu paragraf panjang
+  (`tasks.js:30-35`).
+- **Kerjakan:** satu nama per halaman; satu kata per status; dialog root
+  terstruktur (apa yang berubah, sumber, hak akses, cara membatalkan).
+- **DoD:** test h1 = label nav.
+
+#### H10–H12 (P3)
+- **H10:** Hyprland mengabaikan `minWidth` untuk jendela tiled. Pada 640 px
+  top bar 3 baris dan tombol Apply terpotong; pada 480 px 4 baris (22%) dan
+  beberapa kartu terpotong. Tambah breakpoint 640 dan 480.
+- **H11:** tidak ada status Phantom; "Launch Keymapper" gagal lewat toast bila
+  belum terpasang. Kartu hero dan tiga kartu fitur hanya berisi promosi.
+- **H12:** toggle Settings tanpa `role="switch"` (`SettingsView.jsx:97-107`);
+  label resolusi tidak terhubung ke input (`ResolutionPresets.jsx:272-273`);
+  perintah "Fix" diagnostik tidak bisa diseleksi dan tanpa tombol salin.
