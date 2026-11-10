@@ -2065,6 +2065,39 @@ body {
   white-space: pre-line;
 }
 
+.confirm-modal-details {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  user-select: text;
+}
+
+.confirm-detail-row {
+  display: grid;
+  grid-template-columns: 88px 1fr;
+  gap: 12px;
+}
+
+.confirm-detail-row dt {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.confirm-detail-row dd {
+  margin: 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 480px) {
+  .confirm-detail-row {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+}
+
 .confirm-package-preview {
   margin-top: 4px;
   padding: 12px 14px;

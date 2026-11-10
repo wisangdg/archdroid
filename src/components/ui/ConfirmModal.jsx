@@ -13,6 +13,7 @@ export default function ConfirmModal({
   isOpen,
   title,
   description,
+  details = null,
   confirmText = "Confirm",
   cancelText = "Cancel",
   confirmVariant = "danger",
@@ -90,6 +91,16 @@ export default function ConfirmModal({
             {title}
           </h3>
           <p className="confirm-modal-desc">{description}</p>
+          {details?.length > 0 && (
+            <dl className="confirm-modal-details">
+              {details.map(({ label, text }) => (
+                <div key={label} className="confirm-detail-row">
+                  <dt>{label}</dt>
+                  <dd>{text}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
           {packagePreview && (
             <div className="confirm-package-preview">
               <div className="confirm-package-header">

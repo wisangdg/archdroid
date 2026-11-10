@@ -34,3 +34,18 @@ test("every task with a stepper is a task Retry can restart", () => {
     assert.ok(TASKS[type], `${type} has stepper stages but no task entry`);
   }
 });
+
+test("every root consent dialog is structured: one sentence, then rows", () => {
+  for (const command of ROOT_COMMANDS) {
+    const { confirm } = Object.values(TASKS).find((t) => t.command === command);
+    // A single sentence, not the old wall of text with bullets in it.
+    assert.doesNotMatch(confirm.description, /\n|•/, command);
+    const labels = (confirm.details ?? []).map((row) => row.label);
+    assert.ok(labels.includes("Undo"), `${command} says how to undo it`);
+    assert.ok(
+      labels.includes("Changes") || labels.includes("Deletes"),
+      `${command} says what it changes`
+    );
+    for (const row of confirm.details) assert.ok(row.text, command);
+  }
+});

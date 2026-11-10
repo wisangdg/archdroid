@@ -668,6 +668,7 @@ export default function App() {
         isOpen={confirmModal.isOpen}
         title={confirmModal.title}
         description={confirmModal.description}
+        details={confirmModal.details}
         confirmText={confirmModal.confirmText}
         confirmVariant={confirmModal.confirmVariant}
         iconType={confirmModal.iconType}
