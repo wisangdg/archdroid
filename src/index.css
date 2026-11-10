@@ -1904,9 +1904,10 @@ body {
    ======================================================== */
 
 /* Toast System */
+/* Bottom right: the top right holds the engine controls. */
 .toast-container {
   position: fixed;
-  top: 24px;
+  bottom: 24px;
   right: 28px;
   z-index: 999;
   display: flex;
@@ -1995,10 +1996,11 @@ body {
 }
 
 .toast-message {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-secondary);
   line-height: 1.45;
   word-break: break-word;
+  user-select: text;
 }
 
 .toast-close-btn {
@@ -3333,4 +3335,18 @@ body {
 
 .status-card-progress::-webkit-progress-value {
   background: var(--accent-primary);
+}
+
+/* Content people copy: commands, paths, log output, error text */
+code,
+pre,
+.terminal-console-body,
+.app-detail-package,
+.app-fact dd,
+.diag-item-value,
+.diag-item-detail,
+.setup-preflight-fix,
+.confirm-modal-desc,
+.status-card-message {
+  user-select: text;
 }
