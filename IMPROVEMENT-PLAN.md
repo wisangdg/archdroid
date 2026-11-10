@@ -15,9 +15,10 @@
 ## Status pengerjaan
 
 > **Review 10 Nov 2026 (performa dan tampilan):** 26 item baru (R12–R18,
-> G0–G6, H1–H12) dengan bukti ukur ada di §13. Per 11 Nov, 25 sudah
-> dikerjakan (tiga di antaranya sebagian) di branch `improve/plan-0.1.7`;
-> status per item ada di tabel §13.
+> G0–G6, H1–H12) dengan bukti ukur ada di §13. Per 11 Nov semuanya sudah
+> dikerjakan di branch `improve/plan-0.1.7`; status per item ada di tabel §13.
+> Yang tersisa hanya pengukuran di hardware asli dan cek `document.hidden` di
+> Hyprland.
 
 PR #2 (`improve/plan-0.1.6`) di-merge 9 Nov 2026 dan dirilis sebagai 0.1.6.
 Setiap item satu commit atau lebih. Review 9 Nov atas PR itu menghasilkan
@@ -71,7 +72,7 @@ Detail R1–R10 di §12. Item yang selesai diberi ✅ dan tanggal.
 
 | # | Pekerjaan | Prio | Status |
 |---|---|---|---|
-| R12–R18, G0–G6, H1–H12 | Temuan review 10 Nov: bug, performa, tampilan | P1–P3 | ✅ 11 Nov kecuali H11 dan sisa H7–H9; status per item di tabel §13. Berikutnya: rilis 0.1.7 |
+| R12–R18, G0–G6, H1–H12 | Temuan review 10 Nov: bug, performa, tampilan | P1–P3 | ✅ 11 Nov; status per item di tabel §13. Berikutnya: rilis 0.1.7 |
 | R1 | `.pyc` ikut ter-commit; komentar basi di `apk.rs` | P1 | ✅ 9 Nov |
 | R2 | Settings dibaca ulang setelah Android selesai boot, bukan saat sesi `RUNNING` | P1 | ✅ 9 Nov (`a8a1c73`) |
 | R3 | Launch saat booting juga dicegah di double-click dan menu konteks | P2 | ✅ 9 Nov (`a8a1c73`) |
@@ -80,7 +81,7 @@ Detail R1–R10 di §12. Item yang selesai diberi ✅ dan tanggal.
 | R6 | Preset Display di-disable saat engine mati atau booting | P2 | ✅ 9 Nov (`a8a1c73`) |
 | B1 | Rilis 0.1.6 | P1 | ✅ 9 Nov: PR #2 di-merge, tag `v0.1.6` bertanda tangan, [rilis](https://github.com/wisangdg/archdroid/releases/tag/v0.1.6) dengan artefak CI; smoke di VM Arch (0.1.5 → 0.1.6 → rollback → 0.1.6) dan AppImage di hardware asli, lihat `docs/P0-8.2-MATRIX-RESULTS.md`. Debian 12/Fedora 44 tidak diulang |
 | — | Setelah merge: PR Dependabot pertama lewat CI (DoD C3); smoke biner asli hijau di `main` (DoD C4) | P2 | ✅ 9 Nov: CI `main` hijau di `508c43e`; Dependabot membuka #3–#6 dan CI menilai semuanya |
-| R11 | PR Dependabot #4–#6 gagal CI: Tauri npm (#5, #6) dan crate Tauri (#4) naik di PR terpisah, jadi `tauri build` menolak versi yang tidak cocok; #5/#6 juga membawa lompatan major (ESLint 10 yang belum didukung `eslint-plugin-react`, React 19, lucide-react 1.x). Kerjakan: satu grup untuk paket Tauri, update major dipisah dan diabaikan di grup mingguan; #3 (actions) lulus dan bisa di-merge | P2 | ⬜ |
+| R11 | PR Dependabot #4–#6 gagal CI: Tauri npm (#5, #6) dan crate Tauri (#4) naik di PR terpisah, jadi `tauri build` menolak versi yang tidak cocok; #5/#6 juga membawa lompatan major (ESLint 10 yang belum didukung `eslint-plugin-react`, React 19, lucide-react 1.x) | P2 | ✅ 11 Nov (`.github/dependabot.yml`): Dependabot tidak bisa mengelompokkan lintas ekosistem, jadi grup `tauri` di npm dan cargo hanya menerima patch; minor/major Tauri dan semua major lain diabaikan dan dikerjakan manual dalam satu commit. Baru berlaku setelah merge ke `main`; #4–#6 bisa ditutup, #3 bisa di-merge |
 | B4 | Publikasi `archdroid-bin` ke AUR | P2 | ⏳ PKGBUILD 0.1.6 siap dan lolos `makepkg` terhadap rilis (biner identik dengan `.deb` bertanda tangan). Butuh akun AUR + SSH key, lalu `scripts/release/publish-aur.sh`. **9 Nov 2026: pendaftaran akun AUR sedang ditutup sementara** (gelombang akun otomatis); tunggu pengumuman di aur-general / Arch news |
 | E1 | Kirim patch `fake_touch` ke upstream | P2 | ✅ 9 Nov: [PR #60](https://github.com/waydroid/android_vendor_waydroid/pull/60) (memperbaiki issue #30 yang sudah ada). Sisa: tanggapi review; build image hanya bila diminta |
 | F5 | Uji di GNOME, KDE, dan GPU AMD | P2 | ⏳ butuh mesin lain |
@@ -738,7 +739,7 @@ thread; loop touch mode hanya bertanya ke Hyprland saat klik.
 | R18 | Save APK gagal di filesystem tanpa hard link | P3 | S | ✅ 11 Nov (unit test; drive exFAT asli belum diuji) |
 | G0 | Skrip ukur masuk repo | P2 | S | ✅ 11 Nov: `scripts/perf/`, `scripts/test-vm/live/perf_probe.py` |
 | G1 | Titik status berdenyut memakan CPU selama engine menyala | P1 | S | ✅ 11 Nov. VM: idle engine menyala 92–99% → 0,4%. Hardware ber-GPU belum diukur |
-| G2 | Polling status lewat Python; setiap perintah adb membayar 2× `waydroid status` | P2 | M | ✅ 11 Nov. VM: idle 2,4% → 0,2%; `waydroid_status` 122 → 22 ms; `boot_state` 283 → 83 ms. Belum: jeda poll saat tidak fokus, cek `document.hidden` di Hyprland |
+| G2 | Polling status lewat Python; setiap perintah adb membayar 2× `waydroid status` | P2 | M | ✅ 11 Nov. VM: idle 2,4% → 0,2%; `waydroid_status` 122 → 22 ms; `boot_state` 283 → 83 ms. Langkah (4): poll status dan daftar app 30 detik saat jendela tidak fokus, langsung cek saat fokus kembali (`src/lib/pollGate.js`). Belum: cek `document.hidden` di Hyprland (butuh desktop asli) |
 | G3 | Output terminal: progress bar membanjiri log, stepper mundur, render per baris | P2 | M | ✅ 11 Nov. Probe: tahap tetap setelah 2100 baris progress |
 | G4 | Settings dibaca berurutan | P3 | S | ✅ 11 Nov. VM: 593 → 163 ms |
 | G5 | `backdrop-filter` di semua panel | P3 | S | ✅ 11 Nov (panel; overlay tetap blur) |
@@ -749,17 +750,21 @@ thread; loop touch mode hanya bertanya ke Hyprland saat klik.
 | H4 | Terminal: baris terakhir tak terlihat, stepper terpotong, tanpa progress bar | P2 | M | ✅ 11 Nov. VM: View Logs berakhir di baris terakhir |
 | H5 | Toast menutupi kontrol engine, menumpuk, dan terlalu cepat hilang | P2 | S–M | ✅ 11 Nov |
 | H6 | Dialog destruktif: fokus awal di tombol destruktif | P2 | S | ✅ 11 Nov. VM: fokus di Cancel |
-| H7 | Halaman Settings terlalu panjang | P2 | M | ✅ sebagian, 11 Nov: bar lompat, preset ringkas, ringkasan diagnostik; 2 914 → 2 049 px. Belum: tiga kartu log digabung |
-| H8 | My Apps: state hilang saat pindah tab; info berulang | P2 | S–M | ✅ sebagian, 11 Nov. Belum: fakta app nyata (versi, ukuran) |
-| H9 | Nama halaman dan teks UI tidak konsisten | P2 | S | ✅ sebagian, 11 Nov. Belum: dialog root terstruktur |
+| H7 | Halaman Settings terlalu panjang | P2 | M | ✅ 11 Nov: bar lompat, preset ringkas, ringkasan diagnostik; 2 914 → 2 049 px. Tiga kartu log menjadi satu bagian "Logs & Support" (394 px pada 1100×720); tinggi halaman tidak turun (2 049 → 2 075 px, karena judul bagian), tetapi log kini satu tempat |
+| H8 | My Apps: state hilang saat pindah tab; info berulang | P2 | S–M | ✅ 11 Nov. Fakta app nyata: versi, ukuran APK, tanggal update lewat command `app_info` (satu panggilan adb pasif); diuji di VM (LineageOS 20). Fakta "Engine" dihapus |
+| H9 | Nama halaman dan teks UI tidak konsisten | P2 | S | ✅ 11 Nov. Dialog root dan Factory Reset: satu kalimat + baris berlabel (Changes, Source, Access, Undo), dengan test |
 | H10 | Jendela sempit (tiling) memotong konten | P3 | M | ✅ 11 Nov. Probe: tidak ada elemen terpotong pada 480 px |
-| H11 | Keymapping: tanpa status Phantom | P3 | S–M | ⬜ |
+| H11 | Keymapping: tanpa status Phantom | P3 | S–M | ✅ 11 Nov. Command `phantom_status`; badge; Launch di-disable sampai terpasang; tiga kartu promosi menjadi daftar tiga baris |
 | H12 | Aksesibilitas kecil; teks tidak bisa disalin | P3 | S | ✅ 11 Nov |
 
 **Dikerjakan 11 Nov** di branch `improve/plan-0.1.7`. Semua suite lulus
 (`cargo test` 191 / 210 dengan `dev-commands`, `node --test` 62, Vitest 97,
 E2E 7/7; clippy, fmt, ESLint, Prettier bersih), dan biner rilis diuji di VM.
-Sisa: H11, bagian "Belum" di tabel, dan pengukuran di hardware asli.
+Sisa: pengukuran di hardware asli dan cek `document.hidden` di Hyprland.
+
+**Tambahan 11 Nov** (H11, sisa H7–H9, G2 langkah 4, R11): `cargo test` 194 /
+213 dengan `dev-commands`, `node --test` 66, Vitest 106, E2E 7/7; clippy, fmt,
+ESLint, Prettier bersih. Probe layout (Chromium): tidak ada elemen terpotong.
 
 **Urutan:** (1) 0.1.7: R12, G1, H6, R13, R14, H1, langkah (1) G2. (2) G2,
 G3 + H4, H2, H3, H5, R15. (3) H7, H8, H9, G4, G5. (4) Saat menyentuh area itu:
