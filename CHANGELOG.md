@@ -7,6 +7,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-11-11
+
 ### Added
 - **Keymapping shows whether Phantom is installed** (Installed, Terminal only, Not Installed). Launch stays disabled until it is, and Install is the main button while it is missing; before, Launch failed with a toast. The status is read again after any task.
 - **App version, APK size and update date** in the My Apps detail panel, read from Android (one adb call, no root) while the engine runs.
