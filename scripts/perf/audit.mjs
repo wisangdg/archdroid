@@ -116,7 +116,11 @@ try {
 }
 const allSizes = {};
 for (const [tab, r] of Object.entries(report)) {
-  console.log(`\n== ${tab}: ${r.total} text runs, ${r.fails.length} failing colour pairs`);
+  // Text on a gradient (the green buttons) is measured against the page
+  // colour behind the button, which is meaningless: list those apart.
+  const real = r.fails.filter((f) => !f.gradient);
+  console.log(`\n== ${tab}: ${r.total} text runs, ${real.length} failing colour pairs (${r.fails.length - real.length} on gradients, not judged)`);
+  r.fails = real;
   for (const [s, n] of Object.entries(r.sizes)) allSizes[s] = (allSizes[s] || 0) + n;
   for (const f of r.fails)
     console.log(
