@@ -164,8 +164,12 @@ window.__MOCK_INVOKE__ = async function(cmd, args) {
   if (cmd === "check_gapps_status") {
     return { status: window.__mockState.gappsStatus };
   }
+  if (cmd === "app_info") {
+    return { version: "1.0", updated: "2026-11-01 12:00:00", apk_bytes: 5000000 };
+  }
   if (cmd === "phantom_status") {
-    return { status: "not_installed" };
+    // Only the terminal client: Launch needs a terminal emulator (scenario 4).
+    return { status: "partial" };
   }
   if (cmd === "check_houdini_status") {
     return { status: window.__mockState.houdiniStatus };
@@ -531,8 +535,9 @@ async function runSmokeTests() {
       const keymapTab = tabs.find(t => t.textContent.includes("Keymapping"));
       if (keymapTab) keymapTab.click();
     `);
+    // Launch stays disabled until phantom_status has answered.
     await driver.waitFor(
-      'return !!document.querySelector(".keymap-actions button");'
+      'return Array.from(document.querySelectorAll(".keymap-actions button")).some(b => b.textContent.includes("Launch Keymapper") && !b.disabled);'
     );
     await driver.execute(`
       const launchBtn = Array.from(document.querySelectorAll(".keymap-actions button"))

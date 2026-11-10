@@ -142,6 +142,7 @@ window.__MOCK_INVOKE__ = async function (cmd, args) {
   if (cmd === "check_gapps_status") return { status: "installed" };
   if (cmd === "check_houdini_status") return { status: "not_installed" };
   if (cmd === "phantom_status") return { status: "installed" };
+  if (cmd === "app_info") return { version: "13", updated: "2026-09-27 20:28:18", apk_bytes: 6636491 };
   if (cmd === "check_multitouch_status") return { status: "partial" };
   if (cmd === "waydroid_prop_get") return s.online ? { status: "success", data: PROPS[args.key] ?? "" } : { status: "error", message: "session stopped" };
   if (cmd === "waydroid_prop_set") { if (!s.online) return { status: "error", code: "command_failed", message: "WayDroid session is stopped" }; PROPS[args.key] = args.value; return { status: "success" }; }

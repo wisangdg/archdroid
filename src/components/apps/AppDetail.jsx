@@ -1,4 +1,5 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import {
   Play,
   Square,
@@ -9,6 +10,36 @@ import {
   MousePointerClick,
 } from "lucide-react";
 import AppIcon from "./AppIcon";
+
+/** "53.5 MB": APK sizes, decimal units like the Android settings app. */
+export function formatBytes(bytes) {
+  if (bytes == null) return null;
+  if (bytes < 1e6) return `${Math.max(1, Math.round(bytes / 1e3))} KB`;
+  if (bytes < 1e9) return `${(bytes / 1e6).toFixed(1)} MB`;
+  return `${(bytes / 1e9).toFixed(2)} GB`;
+}
+
+/**
+ * Version, last update and APK size of `pkg` (backend `app_info`), read
+ * while Android is up. Facts of a previously selected app are never shown.
+ * Returns undefined while reading and null when nothing could be read.
+ */
+function useAppInfo(pkg, ready) {
+  const [info, setInfo] = useState({ pkg: null, data: null });
+  useEffect(() => {
+    if (!pkg || !ready) return undefined;
+    let live = true;
+    invoke("app_info", { package: pkg })
+      .then((data) => live && setInfo({ pkg, data }))
+      .catch(() => live && setInfo({ pkg, data: null }));
+    return () => {
+      live = false;
+    };
+  }, [pkg, ready]);
+  // undefined while reading, null when Android did not answer.
+  if (!ready) return null;
+  return info.pkg === pkg ? info.data : undefined;
+}
 
 /**
  * Right-hand panel of the Control Center: the selected app and every action
@@ -28,6 +59,8 @@ export default function AppDetail({
   savingApk = false,
   onUninstall,
 }) {
+  const info = useAppInfo(app?.package, engineOnline && !booting);
+
   if (!app) {
     return (
       <section className="app-detail app-detail-empty" aria-label="App details">
@@ -129,10 +162,35 @@ export default function AppDetail({
           <dt>Source</dt>
           <dd>{system ? "Preinstalled with Android" : "Installed by you"}</dd>
         </div>
-        <div className="app-fact">
-          <dt>Engine</dt>
-          <dd>{booting ? "Booting" : engineOnline ? "Running" : "Stopped"}</dd>
-        </div>
+        {info ? (
+          <>
+            <div className="app-fact">
+              <dt>Version</dt>
+              <dd>{info.version ?? "Unknown"}</dd>
+            </div>
+            <div className="app-fact">
+              <dt>APK size</dt>
+              <dd>{formatBytes(info.apk_bytes) ?? "Unknown"}</dd>
+            </div>
+            {info.updated && (
+              <div className="app-fact">
+                <dt>Installed or updated</dt>
+                <dd>{info.updated.split(" ")[0]}</dd>
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="app-fact">
+            <dt>Version and size</dt>
+            <dd>
+              {info === undefined
+                ? "Reading…"
+                : engineOnline && !booting
+                  ? "Android did not report them"
+                  : "Shown while Android runs"}
+            </dd>
+          </div>
+        )}
       </dl>
 
       {!system && (

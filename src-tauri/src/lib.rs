@@ -1295,6 +1295,15 @@ async fn waydroid_boot_state() -> CommandResult {
     .await
 }
 
+/// Version, last update and APK size for the My Apps detail panel.
+#[tauri::command]
+async fn app_info(package: String) -> std::result::Result<adb::AppInfo, CommandResult> {
+    tauri::async_runtime::spawn_blocking(move || adb::app_info(&package))
+        .await
+        .map_err(|e| CommandResult::from(AppError::Io(std::io::Error::other(e.to_string()))))?
+        .map_err(CommandResult::from)
+}
+
 /// Force-stop one Android app (the app detail's "Force stop"). Needs adb,
 /// because Waydroid only allows `shell` as root.
 #[tauri::command]
@@ -1664,6 +1673,7 @@ pub fn run() {
             install_touch_mode_access,
             install_phantom,
             phantom_status,
+            app_info,
             run_phantom,
             check_host_diagnostics,
             preview_package_install
