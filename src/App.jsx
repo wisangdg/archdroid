@@ -188,17 +188,39 @@ export default function App() {
     handleDrop,
   } = useApkInstall({ addToast, operationInFlight, loadApps });
 
+  // An app asked for before Android was ready. `waydroid app launch` must
+  // never run against a stopped session (it would become the session and the
+  // backend refuses it), so Launch starts the engine and waits for the boot.
+  const [pendingLaunch, setPendingLaunch] = useState(null);
+
   const handleLaunchApp = async (pkg) => {
+    if (status !== "online") {
+      setPendingLaunch(pkg);
+      if (isOperating) return;
+      addToast({
+        type: "info",
+        title: "Starting Engine First",
+        message: `${pkg} opens when Android has booted.`,
+        duration: 4000,
+      });
+      const started = await handleStart();
+      if (!started) setPendingLaunch(null);
+      return;
+    }
     if (booting) {
+      setPendingLaunch(pkg);
       addToast({
         type: "info",
         title: "Android Is Booting",
-        message:
-          "Wait until the top bar says Engine Running, then launch again.",
+        message: `${pkg} opens when Android has booted.`,
         duration: 3000,
       });
       return;
     }
+    await launchNow(pkg);
+  };
+
+  const launchNow = async (pkg) => {
     try {
       const res = await invoke("waydroid_launch_app", { package: pkg });
       if (res?.status === "success") {
@@ -224,6 +246,14 @@ export default function App() {
       });
     }
   };
+
+  useEffect(() => {
+    if (!androidReady || !pendingLaunch) return;
+    setPendingLaunch(null);
+    launchNow(pendingLaunch);
+    // launchNow is a plain function recreated each render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [androidReady, pendingLaunch]);
 
   const handleForceStopApp = async (pkg, name = pkg) => {
     try {

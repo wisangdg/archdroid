@@ -62,7 +62,7 @@ pub const NOT_INITIALIZED_LEGACY_MARKER: &str = "Cannot locate waydroid config";
 /// again" is deliberately absent: a later retry can succeed. These markers are
 /// only treated as failures when the exit code is already zero; a non-zero exit
 /// keeps the more useful `Exit` error.
-const FAILURE_MARKERS: [&str; 7] = [
+const FAILURE_MARKERS: [&str; 8] = [
     "container failed to start",
     "sending reply failed",
     "waydroid session is stopped",
@@ -70,7 +70,13 @@ const FAILURE_MARKERS: [&str; 7] = [
     "failed to access iplatform service",
     "service manager never appeared",
     "failed to uninstall package",
+    BROKEN_SESSION_MARKER,
 ];
+
+/// Printed (exit 0) by `app launch`/`show-full-ui` when the container still
+/// tracks a session whose session manager is gone: the command tries to start
+/// a second session, the container refuses, and nothing is launched.
+const BROKEN_SESSION_MARKER: &str = "already tracking a session";
 
 /// How long `session start` may take to fail before a still-running daemon
 /// counts as started. A failed LXC start takes ~10 s to surface (and the CLI
@@ -345,8 +351,35 @@ impl Waydroid {
         self.run_cancellable(&argv_app_remove(package), TIMEOUT_LONG, cancel)
     }
 
+    /// Launch an app in the **running** session.
+    ///
+    /// With the session stopped, `waydroid app launch` does not fail: it
+    /// becomes the session manager (`session_manager.start(.., background=
+    /// False)`) and never exits. Waiting for it held the single-flight slot for
+    /// the whole timeout and then killed the session it had started, after
+    /// which every launch "succeeded" without opening anything. So the session
+    /// state is checked first and the command is only run against a session
+    /// that exists; starting one is `session_start`'s job.
     pub fn app_launch(&self, package: &str) -> Result<String> {
+        if !self.status().is_ok_and(|status| session_running(&status)) {
+            return Err(AppError::session_not_running(
+                "Start the engine, wait for Android to boot, then launch the app.",
+            ));
+        }
         self.run(&argv_app_launch(package), TIMEOUT_NORMAL)
+            .map_err(|error| {
+                if error
+                    .to_string()
+                    .to_ascii_lowercase()
+                    .contains(BROKEN_SESSION_MARKER)
+                {
+                    AppError::command_failed(
+                        "The Waydroid session is broken: Android is running, but its session manager is gone, so nothing can be launched. Stop the engine and start it again.",
+                    )
+                } else {
+                    error
+                }
+            })
     }
 
     /// Existing callers expect the value without the trailing newline.
@@ -637,6 +670,59 @@ exit 0"#,
         );
         let tool = Waydroid::with_program(&stub);
         tool.prop_set("persist.archdroid.test", "280").unwrap();
+        let _ = std::fs::remove_dir_all(stub.parent().unwrap());
+    }
+
+    #[test]
+    fn app_launch_never_runs_against_a_stopped_session() {
+        // The stub records a launch; a stopped session must not get that far,
+        // because `waydroid app launch` would become the session and never exit.
+        let stub = stub_script(
+            "launch-stopped",
+            r#"case "$1 $2" in
+  "status ") printf 'Session:\tSTOPPED\n' ;;
+  "app launch") touch "$(dirname "$0")/launched"; sleep 30 ;;
+esac"#,
+        );
+        let tool = Waydroid::with_program(&stub);
+        let started = std::time::Instant::now();
+        let error = tool.app_launch("org.fdroid.fdroid").unwrap_err();
+        assert_eq!(error.code(), code::SESSION_NOT_RUNNING, "{error:?}");
+        assert!(started.elapsed() < Duration::from_secs(5));
+        assert!(!stub.parent().unwrap().join("launched").exists());
+        let _ = std::fs::remove_dir_all(stub.parent().unwrap());
+    }
+
+    #[test]
+    fn app_launch_reports_a_session_without_its_manager() {
+        // Waydroid 1.6.3, container up but session manager killed: exit 0.
+        let stub = stub_script(
+            "launch-broken",
+            r#"case "$1 $2" in
+  "status ") printf 'Session:\tRUNNING\nContainer:\tRUNNING\n' ;;
+  "app launch") echo "[06:47:15] Starting waydroid session" >&2
+                echo "[06:47:15] RuntimeError: Already tracking a session" >&2 ;;
+esac"#,
+        );
+        let tool = Waydroid::with_program(&stub);
+        let error = tool.app_launch("org.fdroid.fdroid").unwrap_err();
+        assert_eq!(error.code(), code::COMMAND_FAILED, "{error:?}");
+        assert!(error.to_string().contains("Stop the engine"), "{error}");
+        let _ = std::fs::remove_dir_all(stub.parent().unwrap());
+    }
+
+    #[test]
+    fn app_launch_runs_in_a_running_session() {
+        let stub = stub_script(
+            "launch-running",
+            r#"case "$1 $2" in
+  "status ") printf 'Session:\tRUNNING\nContainer:\tRUNNING\n' ;;
+  "app launch") touch "$(dirname "$0")/launched" ;;
+esac"#,
+        );
+        let tool = Waydroid::with_program(&stub);
+        tool.app_launch("org.fdroid.fdroid").unwrap();
+        assert!(stub.parent().unwrap().join("launched").exists());
         let _ = std::fs::remove_dir_all(stub.parent().unwrap());
     }
 
