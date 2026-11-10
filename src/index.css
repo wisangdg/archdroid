@@ -1164,7 +1164,7 @@ body {
   color: var(--text-secondary);
   font-size: 15px;
   line-height: 1.6;
-  margin-bottom: 22px;
+  margin-bottom: 12px;
 }
 
 .keymap-actions {
@@ -1172,40 +1172,18 @@ body {
   gap: 14px;
 }
 
-.keymap-features-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 18px;
+.keymap-facts {
+  margin: 0 0 20px;
+  padding-left: 18px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.7;
 }
 
-.keymap-feature-item {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 22px;
-}
-
-.feature-icon-badge {
-  width: 42px;
-  height: 42px;
-  border-radius: var(--radius-sm);
-  background: rgba(16, 185, 129, 0.1);
-  color: var(--accent-primary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.keymap-feature-item h4 {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.keymap-feature-item p {
+.keymap-hint {
+  margin-top: 12px;
   font-size: 13px;
   color: var(--text-muted);
-  line-height: 1.5;
 }
 
 /* Settings View */
@@ -3437,9 +3415,6 @@ pre,
   code {
     overflow-wrap: anywhere;
     word-break: break-all;
-  }
-  .keymap-features-grid {
-    grid-template-columns: 1fr;
   }
   .tool-card-footer {
     gap: 12px;

@@ -164,6 +164,9 @@ window.__MOCK_INVOKE__ = async function(cmd, args) {
   if (cmd === "check_gapps_status") {
     return { status: window.__mockState.gappsStatus };
   }
+  if (cmd === "phantom_status") {
+    return { status: "not_installed" };
+  }
   if (cmd === "check_houdini_status") {
     return { status: window.__mockState.houdiniStatus };
   }

@@ -1462,6 +1462,38 @@ fn watch_launch(
     Ok(())
 }
 
+/// Phantom's installer puts its binaries in `$HOME/.local/bin`, which is often
+/// not on the PATH a desktop launcher gives the app, so look there as well.
+fn find_phantom(name: &str) -> Option<std::path::PathBuf> {
+    resolve_program(name)
+        .or_else(|| trusted_program(name))
+        .or_else(|| {
+            dirs::home_dir()
+                .map(|h| h.join(".local/bin").join(name))
+                .filter(|p| p.is_file())
+        })
+}
+
+/// What the Keymapping page shows before anyone presses Launch: "installed"
+/// (GUI found), "partial" (only the terminal client) or "not_installed".
+fn phantom_state() -> CommandResult {
+    if find_phantom("phantom-gui").is_some() {
+        CommandResult::report("installed", "Phantom is installed.")
+    } else if find_phantom("phantom").is_some() {
+        CommandResult::report(
+            "partial",
+            "Only the Phantom terminal client is installed; Launch opens it in a terminal.",
+        )
+    } else {
+        CommandResult::report("not_installed", "Phantom is not installed.")
+    }
+}
+
+#[tauri::command]
+async fn phantom_status() -> CommandResult {
+    off_main_thread(phantom_state).await
+}
+
 #[tauri::command]
 async fn run_phantom() -> CommandResult {
     off_main_thread(run_phantom_sync).await
@@ -1469,15 +1501,7 @@ async fn run_phantom() -> CommandResult {
 
 fn run_phantom_sync() -> CommandResult {
     // 1. Prefer phantom-gui directly without a terminal wrapper
-    let gui_bin = resolve_program("phantom-gui")
-        .or_else(|| trusted_program("phantom-gui"))
-        .or_else(|| {
-            dirs::home_dir()
-                .map(|h| h.join(".local/bin/phantom-gui"))
-                .filter(|p| p.is_file())
-        });
-
-    if let Some(gui_path) = gui_bin {
+    if let Some(gui_path) = find_phantom("phantom-gui") {
         return match crate::hostenv::host_command(&gui_path).spawn() {
             Ok(child) => match watch_launch(child, LAUNCH_GRACE) {
                 Ok(()) => CommandResult::with_message("Launched Phantom Keymapper GUI."),
@@ -1493,15 +1517,7 @@ fn run_phantom_sync() -> CommandResult {
     }
 
     // 2. Fallback to CLI client inside terminal if phantom-gui is missing
-    let cli_bin = resolve_program("phantom")
-        .or_else(|| trusted_program("phantom"))
-        .or_else(|| {
-            dirs::home_dir()
-                .map(|h| h.join(".local/bin/phantom"))
-                .filter(|p| p.is_file())
-        });
-
-    if let Some(cli_path) = cli_bin {
+    if let Some(cli_path) = find_phantom("phantom") {
         let term = match find_terminal_emulator() {
             Some(term) => term,
             None => {
@@ -1647,6 +1663,7 @@ pub fn run() {
             touch_mode_set,
             install_touch_mode_access,
             install_phantom,
+            phantom_status,
             run_phantom,
             check_host_diagnostics,
             preview_package_install
