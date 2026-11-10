@@ -15,8 +15,9 @@
 ## Status pengerjaan
 
 > **Review 10 Nov 2026 (performa dan tampilan):** 26 item baru (R12–R18,
-> G0–G6, H1–H12) dengan bukti ukur ada di §13. Yang paling mendesak: R12
-> (Launch saat engine mati merusak sesi) dan G1 (titik status memakan CPU).
+> G0–G6, H1–H12) dengan bukti ukur ada di §13. Per 11 Nov, 25 sudah
+> dikerjakan (tiga di antaranya sebagian) di branch `improve/plan-0.1.7`;
+> status per item ada di tabel §13.
 
 PR #2 (`improve/plan-0.1.6`) di-merge 9 Nov 2026 dan dirilis sebagai 0.1.6.
 Setiap item satu commit atau lebih. Review 9 Nov atas PR itu menghasilkan
@@ -70,7 +71,7 @@ Detail R1–R10 di §12. Item yang selesai diberi ✅ dan tanggal.
 
 | # | Pekerjaan | Prio | Status |
 |---|---|---|---|
-| R12–R18, G0–G6, H1–H12 | Temuan review 10 Nov: bug, performa, tampilan | P1–P3 | ⬜ Rincian dan status per item di tabel §13. P1: R12, G1, H1 |
+| R12–R18, G0–G6, H1–H12 | Temuan review 10 Nov: bug, performa, tampilan | P1–P3 | ✅ 11 Nov kecuali H11 dan sisa H7–H9; status per item di tabel §13. Berikutnya: rilis 0.1.7 |
 | R1 | `.pyc` ikut ter-commit; komentar basi di `apk.rs` | P1 | ✅ 9 Nov |
 | R2 | Settings dibaca ulang setelah Android selesai boot, bukan saat sesi `RUNNING` | P1 | ✅ 9 Nov (`a8a1c73`) |
 | R3 | Launch saat booting juga dicegah di double-click dan menu konteks | P2 | ✅ 9 Nov (`a8a1c73`) |
@@ -728,32 +729,37 @@ thread; loop touch mode hanya bertanya ke Hyprland saat klik.
 
 | ID | Item | Prio | Effort | Status |
 |---|---|---|---|---|
-| R12 | Launch saat engine mati mengunci app 120 detik, lalu merusak sesi | P1 | M | ⬜ |
-| R13 | Display profile: tombol Restart hilang setelah Apply; "Saved & Active" padahal belum aktif | P2 | S | ⬜ |
-| R14 | "Apply Property" aktif saat engine mati (sisa R6) | P2 | S | ⬜ |
-| R15 | Install APK tanpa status sibuk, progress, atau Cancel | P2 | M | ⬜ |
-| R16 | Menu konteks: fokus kembali ke item pertama setiap re-render | P3 | S | ⬜ |
-| R17 | Status touch mode hanya dibaca saat app dibuka | P3 | S | ⬜ |
-| R18 | Save APK gagal di filesystem tanpa hard link | P3 | S | ⬜ |
-| G0 | Skrip ukur masuk repo | P2 | S | ⬜ |
-| G1 | Titik status berdenyut memakan CPU selama engine menyala | P1 | S | ⬜ |
-| G2 | Polling status lewat Python; setiap perintah adb membayar 2× `waydroid status` | P2 | M | ⬜ |
-| G3 | Output terminal: progress bar membanjiri log, stepper mundur, render per baris | P2 | M | ⬜ |
-| G4 | Settings dibaca berurutan | P3 | S | ⬜ |
-| G5 | `backdrop-filter` di semua panel | P3 | S | ⬜ |
-| G6 | Profil release (LTO, strip) | P3 | S | ⬜ |
-| H1 | Top bar tidak muat satu baris pada ukuran jendela default | P1 | S–M | ⬜ |
-| H2 | Font desain (Outfit, JetBrains Mono) tidak pernah terpakai | P2 | S | ⬜ |
-| H3 | Kontras teks redup dan ukuran teks kecil | P2 | S–M | ⬜ |
-| H4 | Terminal: baris terakhir tak terlihat, stepper terpotong, tanpa progress bar | P2 | M | ⬜ |
-| H5 | Toast menutupi kontrol engine, menumpuk, dan terlalu cepat hilang | P2 | S–M | ⬜ |
-| H6 | Dialog destruktif: fokus awal di tombol destruktif | P2 | S | ⬜ |
-| H7 | Halaman Settings terlalu panjang | P2 | M | ⬜ |
-| H8 | My Apps: state hilang saat pindah tab; info berulang | P2 | S–M | ⬜ |
-| H9 | Nama halaman dan teks UI tidak konsisten | P2 | S | ⬜ |
-| H10 | Jendela sempit (tiling) memotong konten | P3 | M | ⬜ |
+| R12 | Launch saat engine mati mengunci app 120 detik, lalu merusak sesi | P1 | M | ✅ 11 Nov. Uji VM: Launch dari engine mati membuka app, sesi utuh setelah 150 detik, app kedua terbuka |
+| R13 | Display profile: tombol Restart hilang setelah Apply; "Saved & Active" padahal belum aktif | P2 | S | ✅ 11 Nov |
+| R14 | "Apply Property" aktif saat engine mati (sisa R6) | P2 | S | ✅ 11 Nov |
+| R15 | Install APK tanpa status sibuk, progress, atau Cancel | P2 | M | ✅ 11 Nov (nama file + Cancel; tanpa persen) |
+| R16 | Menu konteks: fokus kembali ke item pertama setiap re-render | P3 | S | ✅ 11 Nov |
+| R17 | Status touch mode hanya dibaca saat app dibuka | P3 | S | ✅ 11 Nov |
+| R18 | Save APK gagal di filesystem tanpa hard link | P3 | S | ✅ 11 Nov (unit test; drive exFAT asli belum diuji) |
+| G0 | Skrip ukur masuk repo | P2 | S | ✅ 11 Nov: `scripts/perf/`, `scripts/test-vm/live/perf_probe.py` |
+| G1 | Titik status berdenyut memakan CPU selama engine menyala | P1 | S | ✅ 11 Nov. VM: idle engine menyala 92–99% → 0,4%. Hardware ber-GPU belum diukur |
+| G2 | Polling status lewat Python; setiap perintah adb membayar 2× `waydroid status` | P2 | M | ✅ 11 Nov. VM: idle 2,4% → 0,2%; `waydroid_status` 122 → 22 ms; `boot_state` 283 → 83 ms. Belum: jeda poll saat tidak fokus, cek `document.hidden` di Hyprland |
+| G3 | Output terminal: progress bar membanjiri log, stepper mundur, render per baris | P2 | M | ✅ 11 Nov. Probe: tahap tetap setelah 2100 baris progress |
+| G4 | Settings dibaca berurutan | P3 | S | ✅ 11 Nov. VM: 593 → 163 ms |
+| G5 | `backdrop-filter` di semua panel | P3 | S | ✅ 11 Nov (panel; overlay tetap blur) |
+| G6 | Profil release (LTO, strip) | P3 | S | ✅ 11 Nov. Biner 8,9 → 8,4 MB |
+| H1 | Top bar tidak muat satu baris pada ukuran jendela default | P1 | S–M | ✅ 11 Nov. 61–63 px di semua lebar dan keadaan engine (Chromium dan VM) |
+| H2 | Font desain (Outfit, JetBrains Mono) tidak pernah terpakai | P2 | S | ✅ 11 Nov (dibundel, OFL) |
+| H3 | Kontras teks redup dan ukuran teks kecil | P2 | S–M | ✅ 11 Nov. Audit: 0 pasangan < 4,5:1, tidak ada teks < 12 px |
+| H4 | Terminal: baris terakhir tak terlihat, stepper terpotong, tanpa progress bar | P2 | M | ✅ 11 Nov. VM: View Logs berakhir di baris terakhir |
+| H5 | Toast menutupi kontrol engine, menumpuk, dan terlalu cepat hilang | P2 | S–M | ✅ 11 Nov |
+| H6 | Dialog destruktif: fokus awal di tombol destruktif | P2 | S | ✅ 11 Nov. VM: fokus di Cancel |
+| H7 | Halaman Settings terlalu panjang | P2 | M | ✅ sebagian, 11 Nov: bar lompat, preset ringkas, ringkasan diagnostik; 2 914 → 2 049 px. Belum: tiga kartu log digabung |
+| H8 | My Apps: state hilang saat pindah tab; info berulang | P2 | S–M | ✅ sebagian, 11 Nov. Belum: fakta app nyata (versi, ukuran) |
+| H9 | Nama halaman dan teks UI tidak konsisten | P2 | S | ✅ sebagian, 11 Nov. Belum: dialog root terstruktur |
+| H10 | Jendela sempit (tiling) memotong konten | P3 | M | ✅ 11 Nov. Probe: tidak ada elemen terpotong pada 480 px |
 | H11 | Keymapping: tanpa status Phantom | P3 | S–M | ⬜ |
-| H12 | Aksesibilitas kecil; teks tidak bisa disalin | P3 | S | ⬜ |
+| H12 | Aksesibilitas kecil; teks tidak bisa disalin | P3 | S | ✅ 11 Nov |
+
+**Dikerjakan 11 Nov** di branch `improve/plan-0.1.7`. Semua suite lulus
+(`cargo test` 191 / 210 dengan `dev-commands`, `node --test` 62, Vitest 97,
+E2E 7/7; clippy, fmt, ESLint, Prettier bersih), dan biner rilis diuji di VM.
+Sisa: H11, bagian "Belum" di tabel, dan pengukuran di hardware asli.
 
 **Urutan:** (1) 0.1.7: R12, G1, H6, R13, R14, H1, langkah (1) G2. (2) G2,
 G3 + H4, H2, H3, H5, R15. (3) H7, H8, H9, G4, G5. (4) Saat menyentuh area itu:

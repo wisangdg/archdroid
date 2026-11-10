@@ -177,7 +177,8 @@ body {
 /* Top Bar */
 .topbar {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  white-space: nowrap;
   align-items: center;
   gap: 12px 20px;
   padding: 10px 20px;
@@ -225,7 +226,7 @@ body {
 
 .topbar-nav {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 4px;
 }
 
@@ -286,19 +287,8 @@ body {
   flex-shrink: 0;
 }
 
-.topbar {
-  flex-wrap: nowrap;
-  white-space: nowrap;
-}
-
-.topbar-nav,
-.topbar-right {
-  flex-wrap: nowrap;
-  white-space: nowrap;
-}
-
 /* Narrower than the default window: icons instead of words, one row. */
-@media (max-width: 1099px) {
+@media (max-width: 1199px) {
   .brand-version {
     display: none;
   }
@@ -311,7 +301,7 @@ body {
   }
 }
 
-@media (max-width: 1023px) {
+@media (max-width: 1079px) {
   .brand-text {
     display: none;
   }
@@ -349,7 +339,7 @@ body {
 .topbar-right {
   margin-left: auto;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 10px;
 }

@@ -572,11 +572,11 @@ async function runSmokeTests() {
       'return !!document.querySelector(".terminal-modal");'
     );
     await driver.waitFor(
-      'return !!document.querySelector(".btn-cancel-top");'
+      'return !!document.querySelector(".terminal-footer-actions .btn-danger");'
     );
     // Click Cancel
     await driver.execute(`
-      const cancelBtn = document.querySelector(".btn-cancel-top");
+      const cancelBtn = document.querySelector(".terminal-footer-actions .btn-danger");
       if (cancelBtn) cancelBtn.click();
     `);
     // Verify cancel text appears and cancel_task was invoked with active task_id

@@ -206,6 +206,39 @@ def phase_pulse_variants():
     js("document.getElementById('probe-css')?.remove()")
 
 
+
+def phase_launch_flow():
+    """Launch from the UI with the engine stopped: engine starts, app opens,
+    the session is still whole minutes later, and a second app opens too."""
+    top = "adb -s 192.168.240.112:5555 shell dumpsys activity activities 2>/dev/null | grep -m1 topResumedActivity | cut -c1-110"
+    print("== Launch from the UI with the engine stopped")
+    print("  before:", sh("waydroid status | head -1"))
+    direct = ajs(TIMED, "waydroid_launch_app", {"package": "com.android.settings"})
+    print("  backend asked directly:", direct)
+    t0 = time.time()
+    js("""const row = [...document.querySelectorAll('.app-row')].find(r => r.dataset.package === 'com.android.settings');
+          row.click();""")
+    time.sleep(1)
+    click("Launch", True)
+    print("  toast:", js("return [...document.querySelectorAll('.toast-title')].map(t => t.textContent)"))
+    for _ in range(40):
+        time.sleep(3)
+        if "com.android.settings" in sh(top):
+            break
+    print(f"  Settings resumed after {time.time() - t0:.0f}s:", sh(top), "| top bar:", js("return document.querySelector('.status-text')?.textContent"))
+    busy = ajs(TIMED, "waydroid_prop_get", {"key": "persist.waydroid.width"})
+    print("  another command right after:", busy)
+    time.sleep(150)
+    print("  150 s later:", sh("waydroid status | head -2 | tr '\\n' ' '"), "| session bus:", sh(". /tmp/session.env; busctl --user list 2>/dev/null | grep -c id.waydro.Session"),
+          "| toasts:", js("return [...document.querySelectorAll('.toast-title')].map(t => t.textContent)"))
+    js("""const row = [...document.querySelectorAll('.app-row')].find(r => r.dataset.package === 'com.android.calculator2');
+          row.click();""")
+    time.sleep(1)
+    click("Launch", True)
+    time.sleep(8)
+    print("  second app:", sh(top))
+
+
 def phase_start():
     print("== Start Engine from the UI")
     t0 = time.time()

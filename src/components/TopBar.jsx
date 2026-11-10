@@ -116,6 +116,7 @@ export default function TopBar({
                   title="Restart Waydroid session"
                 >
                   <RotateCw size={15} aria-hidden="true" />
+                  <span className="sr-only">Restart</span>
                 </button>
                 <button
                   type="button"
@@ -126,7 +127,11 @@ export default function TopBar({
                   title="Stop Waydroid session"
                 >
                   <Square size={12} fill="currentColor" aria-hidden="true" />
-                  <span>Stop</span>
+                  <span>
+                    {/* The full name stays in the text: scripts and screen
+                      readers look for it. */}
+                    Stop<span className="sr-only"> Engine</span>
+                  </span>
                 </button>
               </>
             ) : (
@@ -139,7 +144,11 @@ export default function TopBar({
                 title="Start Waydroid session"
               >
                 <Play size={14} fill="currentColor" aria-hidden="true" />
-                <span>Start</span>
+                <span>
+                  {/* The full name stays in the text: scripts and screen
+                      readers look for it. */}
+                  Start<span className="sr-only"> Engine</span>
+                </span>
               </button>
             ))}
         </div>

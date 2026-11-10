@@ -39,8 +39,8 @@ const d = await startDriver();
 const url = `http://127.0.0.1:${server.address().port}`;
 const rows = [];
 try {
-  for (const online of [true, false]) {
-    server.state = { ...server.state, online };
+  for (const [online, booting] of [[true, true], [true, false], [false, false]]) {
+    server.state = { ...server.state, online, booting };
     for (const [w, h] of SIZES) {
       await d.viewport(w, h);
       await d.navigate(url);
@@ -49,10 +49,10 @@ try {
       for (const tab of TABS) {
         await d.tab(tab);
         const m = await d.exec(MEASURE);
-        rows.push({ online, tab, ...m });
+        rows.push({ online: booting ? "boot" : online, tab, ...m });
         if (
           (w === 1100 || w === 860 || w === 640 || w === 1920) &&
-          (online || tab === "My Apps")
+          !booting && (online || tab === "My Apps")
         ) {
           await d.shot(`${w}x${h}-${online ? "on" : "off"}-${tab.replace(/ /g, "")}`);
         }
@@ -65,6 +65,6 @@ try {
 }
 for (const r of rows) {
   console.log(
-    `${r.online ? "on " : "off"} ${String(r.vw).padStart(4)}x${String(r.vh).padEnd(4)} ${r.tab.padEnd(13)} topbar=${String(r.topbarH).padStart(3)}px (${r.topbarShare}% of height) hScroll=${r.hScroll} content=${r.contentH}/${r.scrollH} ${r.overflowing.length ? "overflow: " + r.overflowing.join(" | ") : ""}`
+    `${r.online === "boot" ? "boot" : r.online ? "on  " : "off "} ${String(r.vw).padStart(4)}x${String(r.vh).padEnd(4)} ${r.tab.padEnd(13)} topbar=${String(r.topbarH).padStart(3)}px (${r.topbarShare}% of height) hScroll=${r.hScroll} content=${r.contentH}/${r.scrollH} ${r.overflowing.length ? "overflow: " + r.overflowing.join(" | ") : ""}`
   );
 }
