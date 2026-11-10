@@ -47,16 +47,16 @@ export function useDeviceConfig({ addToast }) {
   const loadConfigs = useCallback(async () => {
     try {
       const get = (key) => invoke("waydroid_prop_get", { key });
-      const mw = await get(PROP.multiWindow);
+      // Independent reads: together they take as long as the slowest one.
+      const [mw, inv, widthRes, heightRes, dpiRes] = await Promise.all([
+        get(PROP.multiWindow),
+        get(PROP.invertColors),
+        get(PROP.width),
+        get(PROP.height),
+        invoke("waydroid_density_get"),
+      ]);
       setMultiWindow(mw.status === "success" && mw.data === "true");
-      const inv = await get(PROP.invertColors);
       setInvertColors(inv.status === "success" && inv.data === "true");
-
-      const [widthRes, heightRes, dpiRes] = [
-        await get(PROP.width),
-        await get(PROP.height),
-        await invoke("waydroid_density_get"),
-      ];
       const value = (res) => (res.status === "success" ? res.data || "" : "");
       setDisplayRes({
         width: value(widthRes),

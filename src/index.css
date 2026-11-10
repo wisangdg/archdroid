@@ -575,10 +575,10 @@ body {
 }
 
 /* Glass Panels */
+/* No backdrop blur: panels sit on a static gradient, so it showed nothing and
+   cost a blur pass per panel while scrolling. Overlays keep theirs. */
 .glass-panel {
   background: var(--bg-surface);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
   border-radius: var(--radius-lg);
   padding: 24px 28px;
   border: 1px solid var(--border-subtle);
@@ -2582,8 +2582,8 @@ body {
 /* Presets Grid */
 .presets-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
   margin: 18px 0;
 }
 
@@ -3349,4 +3349,109 @@ pre,
 .confirm-modal-desc,
 .status-card-message {
   user-select: text;
+}
+
+/* Settings: jump bar, section anchors, diagnostics summary */
+.page-heading {
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.settings-jump {
+  position: sticky;
+  top: -24px;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 6px;
+  margin-top: -8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-sidebar);
+  border: 1px solid var(--border-subtle);
+  align-self: flex-start;
+}
+
+.settings-jump .segmented-btn:hover {
+  background: var(--bg-surface-hover);
+  color: var(--text-primary);
+}
+
+.settings-anchor {
+  display: block;
+  height: 0;
+  margin-bottom: -20px;
+  scroll-margin-top: 36px;
+}
+
+.diag-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  margin-top: 14px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.diag-copy {
+  margin-top: 8px;
+}
+
+.settings-card .btn {
+  white-space: nowrap;
+}
+
+/* Narrow windows. A tiling compositor ignores the window's minimum size, so a
+   third or a quarter of the screen is a normal width. */
+@media (max-width: 720px) {
+  .content-scrollable {
+    padding: 16px 16px 32px;
+  }
+  .page-heading {
+    padding: 16px 16px 12px;
+  }
+  .glass-panel {
+    padding: 18px 16px;
+  }
+  .prop-inputs-row,
+  .settings-card,
+  .tool-card-footer,
+  .keymap-hero-card,
+  .danger-card {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .prop-input-key,
+  .prop-input-val {
+    min-width: 0;
+    flex: none;
+  }
+  .keymap-hero-card {
+    gap: 18px;
+    padding: 22px 18px;
+  }
+  .keymap-hero-visual {
+    align-self: center;
+  }
+  .keymap-actions,
+  .tool-title-row,
+  .tool-card-header {
+    flex-wrap: wrap;
+  }
+  .tool-header-text,
+  .keymap-hero-content {
+    min-width: 0;
+  }
+  code {
+    overflow-wrap: anywhere;
+    word-break: break-all;
+  }
+  .keymap-features-grid {
+    grid-template-columns: 1fr;
+  }
+  .tool-card-footer {
+    gap: 12px;
+  }
 }

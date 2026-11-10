@@ -217,6 +217,7 @@ export default function ResolutionPresets({
               tabIndex={0}
               aria-pressed={isSelected}
               aria-label={`${preset.name} (${preset.width}x${preset.height})`}
+              title={`${preset.description} ${preset.ratio}.`}
             >
               <div className="preset-card-top">
                 <div className="preset-icon-wrapper">
@@ -254,14 +255,6 @@ export default function ResolutionPresets({
                     <span className="preset-custom-label">Your own size</span>
                   )}
                 </div>
-                <p className="preset-description">{preset.description}</p>
-              </div>
-
-              <div className="preset-card-footer">
-                <span className="preset-ratio-pill">{preset.ratio}</span>
-                <div className={`preset-radio ${isSelected ? "checked" : ""}`}>
-                  {isSelected && <div className="preset-radio-dot" />}
-                </div>
               </div>
             </div>
           );
@@ -276,8 +269,9 @@ export default function ResolutionPresets({
           </h5>
           <div className="custom-res-inputs">
             <div className="res-input-group">
-              <label>Width (px)</label>
+              <label htmlFor="res-width">Width (px)</label>
               <input
+                id="res-width"
                 type="number"
                 min="480"
                 max="7680"
@@ -292,8 +286,9 @@ export default function ResolutionPresets({
             <span className="res-times-symbol">×</span>
 
             <div className="res-input-group">
-              <label>Height (px)</label>
+              <label htmlFor="res-height">Height (px)</label>
               <input
+                id="res-height"
                 type="number"
                 min="480"
                 max="4320"
@@ -306,8 +301,9 @@ export default function ResolutionPresets({
             </div>
 
             <div className="res-input-group">
-              <label>Density (DPI)</label>
+              <label htmlFor="res-dpi">Density (DPI)</label>
               <input
+                id="res-dpi"
                 type="number"
                 min="120"
                 max="640"

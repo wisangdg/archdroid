@@ -12,6 +12,20 @@ import HostDiagnostics from "./HostDiagnostics";
 import AppLogPanel from "./AppLogPanel";
 import DiagnosticBundlePanel from "./DiagnosticBundlePanel";
 
+/** The page is long; these jump to its parts. */
+const SECTIONS = [
+  { id: "settings-display", label: "Display" },
+  { id: "settings-android", label: "Android" },
+  { id: "settings-diagnostics", label: "Diagnostics" },
+  { id: "settings-logs", label: "Logs & support" },
+  { id: "settings-reset", label: "Reset" },
+];
+
+const jumpTo = (id) =>
+  document
+    .getElementById(id)
+    ?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+
 export default function SettingsView({
   multiWindow,
   invertColors,
@@ -31,7 +45,21 @@ export default function SettingsView({
 }) {
   return (
     <div className="settings-view-container">
+      <nav className="settings-jump" aria-label="Settings sections">
+        {SECTIONS.map((section) => (
+          <button
+            key={section.id}
+            type="button"
+            className="segmented-btn"
+            onClick={() => jumpTo(section.id)}
+          >
+            {section.label}
+          </button>
+        ))}
+      </nav>
+
       {/* Display & Resolution Presets */}
+      <span id="settings-display" className="settings-anchor" />
       <ResolutionPresets
         currentWidth={currentWidth}
         currentHeight={currentHeight}
@@ -42,6 +70,7 @@ export default function SettingsView({
         disabled={busy}
       />
 
+      <span id="settings-android" className="settings-anchor" />
       {/* Shared Folder */}
       <div className="glass-panel settings-card">
         <div className="settings-card-content">
@@ -99,7 +128,9 @@ export default function SettingsView({
               className={`toggle-switch ${multiWindow ? "active" : ""}`}
               onClick={onToggleMultiWindow}
               disabled={busy || !engineRunning}
-              aria-label="Toggle Multi-Window Mode"
+              role="switch"
+              aria-checked={multiWindow}
+              aria-label="Multi-Window Mode"
             >
               <div className="toggle-switch-handle">
                 {multiWindow && <Check size={12} />}
@@ -121,7 +152,9 @@ export default function SettingsView({
               className={`toggle-switch ${invertColors ? "active" : ""}`}
               onClick={onToggleInvertColors}
               disabled={busy || !engineRunning}
-              aria-label="Toggle Invert Colors"
+              role="switch"
+              aria-checked={invertColors}
+              aria-label="Invert Colors"
             >
               <div className="toggle-switch-handle">
                 {invertColors && <Check size={12} />}
@@ -177,7 +210,10 @@ export default function SettingsView({
       </div>
 
       {/* Linux Host System Diagnostics Checkup */}
+      <span id="settings-diagnostics" className="settings-anchor" />
       <HostDiagnostics />
+
+      <span id="settings-logs" className="settings-anchor" />
 
       <AppLogPanel />
 
@@ -208,6 +244,7 @@ export default function SettingsView({
         </button>
       </div>
 
+      <span id="settings-reset" className="settings-anchor" />
       {/* Danger Zone */}
       <div className="glass-panel danger-card">
         <div className="danger-card-header">

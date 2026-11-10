@@ -713,8 +713,8 @@ describe("App state & workflow integration", () => {
 
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
-    const toggle = await screen.findByRole("button", {
-      name: "Toggle Multi-Window Mode",
+    const toggle = await screen.findByRole("switch", {
+      name: "Multi-Window Mode",
     });
     expect(toggle.disabled).toBe(true);
     expect(
