@@ -19,6 +19,7 @@ import { useEngineStatus } from "./hooks/useEngineStatus";
 import { useDeviceConfig } from "./hooks/useDeviceConfig";
 import { useApkInstall } from "./hooks/useApkInstall";
 import { TASKS } from "./lib/tasks";
+import { pollDue } from "./lib/pollGate";
 
 const APP_LIST_POLL_MS = 10000;
 export default function App() {
@@ -178,11 +179,20 @@ export default function App() {
   // mtime changed, so a poll is a directory listing.
   useEffect(() => {
     if (status !== "online") return undefined;
-    loadApps();
+    let lastRun = Date.now();
+    const poll = () => {
+      lastRun = Date.now();
+      loadApps();
+    };
+    poll();
     const interval = setInterval(() => {
-      if (!document.hidden) loadApps();
+      if (pollDue(lastRun, Date.now())) poll();
     }, APP_LIST_POLL_MS);
-    return () => clearInterval(interval);
+    window.addEventListener("focus", poll);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("focus", poll);
+    };
   }, [status, loadApps]);
 
   const {
