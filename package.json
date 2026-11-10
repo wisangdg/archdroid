@@ -32,14 +32,14 @@
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",
-    "@tauri-apps/plugin-dialog": "^2.7.2",
+    "@tauri-apps/plugin-dialog": "^2.7.3",
     "lucide-react": "^0.344.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
-    "@tauri-apps/cli": "^2.11.4",
+    "@tauri-apps/cli": "^2.11.5",
     "@testing-library/react": "^16.3.3",
     "@types/react": "^18.2.66",
     "@types/react-dom": "^18.2.22",
