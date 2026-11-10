@@ -7,6 +7,31 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Fixed
+- **Launch with the engine stopped broke the session.** `waydroid app launch` becomes the session itself when none is running and never returns; ArchDroid waited 120 s (every other action answered "busy"), reported "Launch Failed", and killed it. Android kept running without its session manager, the top bar said "Engine Running", and every later launch reported success without opening anything until the engine was restarted. Launch now starts the engine, waits for Android to boot, then opens the app; the backend never launches into a stopped session and names a broken one. Present since 0.1.0.
+- **High CPU use while the engine runs.** The pulsing status dot inside the blurred top bar made WebKitGTK repaint continuously: 92-99% of one core in a VM without GPU. The dot is static (only "Android Booting…" animates) and the bar is solid.
+- **Installer stepper fell back to "Root Access" during a slow download**, and the log lost its beginning: every progress-bar redraw was a new line (ten a second), which filled the 2000-line buffer. A progress bar is now one line that updates, with a progress bar in the status card.
+- **Terminal**: the last lines are visible when a task ends (View Logs stopped about 125 lines short); scrolling up to read is no longer undone by new output; the current stage stays in view; one Cancel button; the console starts closed for installers.
+- **Display profile**: Restart is offered after a new resolution was saved (it appeared before Apply and vanished after), "Saved & Active" is no longer shown for a resolution that needs a restart, and width/height are range-checked.
+- **Apply Property** is disabled until Android has booted, like the other Settings controls.
+- The context menu no longer moves the keyboard focus back to its first item every 10 s; the Touch Mode state is read again when Keymapping is opened; Save APK works on drives without hard links (exFAT/FAT).
+
+### Changed
+- **Top bar on one row** at every window width (it took two rows, 16% of the height, at the default size). Restart is an icon button; narrow windows show icons instead of labels.
+- **Fonts ship with the app** (Outfit, JetBrains Mono; SIL OFL 1.1). Before, they were only named, so every distro showed a different fallback font.
+- **Readable secondary text**: 4.8:1 contrast or more (was 3.2-4.0:1), nothing below 12 px.
+- **Toasts** appear bottom right instead of over the engine controls, at most three at once; errors stay 12 s or longer, pause under the pointer, and can be copied.
+- **Destructive dialogs** (Factory Reset, Uninstall) open with Cancel focused.
+- **Settings** is shorter: a jump bar, compact display presets, diagnostics as a summary plus what needs attention, Copy for "Fix" commands. Narrow (tiled) windows no longer clip content.
+- **My Apps** keeps its search, filter and selection when you visit another tab; the context menu has Force stop and Save APK; an APK install shows its file name with a Cancel button until it ends.
+- Page titles match their tabs ("Install Tools", "Settings", "Keymapping"); add-on states all read "Installed".
+- Commands, paths, log output and error text can be selected with the mouse.
+
+### Performance
+- The session state is read over D-Bus instead of starting `waydroid status` (Python) every 5 s and twice per adb command: idle use drops from 2.3% of a core, and adb-backed actions answer about 240 ms sooner.
+- Settings are read once Android has booted (not at start-up with the engine stopped), all five values at once.
+- Terminal output is rendered once per frame; panels have no backdrop blur; the release binary uses thin LTO and is stripped.
+
 ## [0.1.6] - 2026-11-09
 
 ### Changed

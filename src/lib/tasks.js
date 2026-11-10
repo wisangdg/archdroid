@@ -106,7 +106,7 @@ export const TASKS = {
     confirm: {
       title: "Factory Reset Waydroid?",
       description:
-        "WARNING: This will completely destroy all Waydroid container data, installed games, GApps modules, and configurations. Back up anything you need first (use Settings → Android Shared Storage to copy files out). You will need to re-initialize the emulator from scratch. This cannot be undone!",
+        "WARNING: This will completely destroy all Waydroid container data, installed games, GApps modules, and configurations. Back up anything you need first: Save APK (My Apps) keeps an app's installer, and Settings → Android Shared Storage lets you copy files out. App data cannot be saved. You will need to re-initialize the emulator from scratch. This cannot be undone!",
       confirmText: "Wipe Everything",
       confirmVariant: "danger",
       iconType: "danger",
