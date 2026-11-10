@@ -18,9 +18,9 @@
 > G0–G6, H1–H12) dengan bukti ukur ada di §13. Yang paling mendesak: R12
 > (Launch saat engine mati merusak sesi) dan G1 (titik status memakan CPU).
 
-Branch `improve/plan-0.1.6` (dari `feat/touch-mode`), PR #2 ke `main`, belum
-di-merge. Setiap item satu commit atau lebih. Direview 9 Nov 2026; temuannya
-menjadi R1–R10 di §12.
+PR #2 (`improve/plan-0.1.6`) di-merge 9 Nov 2026 dan dirilis sebagai 0.1.6.
+Setiap item satu commit atau lebih. Review 9 Nov atas PR itu menghasilkan
+R1–R10 (§12); review 10 Nov atas `main` menghasilkan §13.
 
 **Hasil uji saat review:** CI di GitHub hijau, termasuk smoke biner asli, dan
 workflow paket hijau (AppImage, `.deb`, `.rpm`, paket Arch). Lokal:
@@ -28,6 +28,12 @@ workflow paket hijau (AppImage, `.deb`, `.rpm`, paket Arch). Lokal:
 `node --test` 51 lulus dan 1 skip, Vitest 80, E2E 7/7; clippy, fmt, ESLint, dan
 Prettier bersih. `cargo audit` di CI menangkap 4 advisory pada `zip` 4.6.1, jadi
 crate itu diganti `zip` 9 (Rust minimum 1.88).
+
+**Hasil uji 10 Nov (`main`):** `cargo test` 183 lulus (202 dengan
+`dev-commands`; 4 `#[ignore]`), `node --test` 52, Vitest 84, E2E 7/7; clippy,
+fmt, ESLint, dan Prettier bersih. Tidak satu pun menangkap temuan §13: tidak
+ada test yang menjalankan Launch dengan sesi mati, mengisi terminal melewati
+2000 baris, atau mengukur layout dan CPU.
 
 ### Selesai
 
@@ -64,6 +70,7 @@ Detail R1–R10 di §12. Item yang selesai diberi ✅ dan tanggal.
 
 | # | Pekerjaan | Prio | Status |
 |---|---|---|---|
+| R12–R18, G0–G6, H1–H12 | Temuan review 10 Nov: bug, performa, tampilan | P1–P3 | ⬜ Rincian dan status per item di tabel §13. P1: R12, G1, H1 |
 | R1 | `.pyc` ikut ter-commit; komentar basi di `apk.rs` | P1 | ✅ 9 Nov |
 | R2 | Settings dibaca ulang setelah Android selesai boot, bukan saat sesi `RUNNING` | P1 | ✅ 9 Nov (`a8a1c73`) |
 | R3 | Launch saat booting juga dicegah di double-click dan menu konteks | P2 | ✅ 9 Nov (`a8a1c73`) |
@@ -82,7 +89,7 @@ Detail R1–R10 di §12. Item yang selesai diberi ✅ dan tanggal.
 | R10 | Save APK: tanpa file setengah jadi; tombol sibuk selama menyalin | P3 | ✅ 9 Nov (`9df44f1`, `14962f4`) |
 | E3 | Touch mode multi-monitor (catatan di bawah) | P3 | ⏳ uji bersama pengguna |
 | E5 opsi 2/3 | Backup data app (butuh root) | — | ❌ Diputuskan 9 Nov: tidak dikerjakan; cukup opsi 1 (Save APK) |
-| — | Optimasi daftar app besar dan virtualisasi log terminal (dari arsip gate) | P3 | hanya bila ada laporan lambat |
+| — | Optimasi daftar app besar dan virtualisasi log terminal (dari arsip gate) | P3 | Diukur 10 Nov: daftar 300 app tidak butuh virtualisasi (❌, lihat §9); log terminal menjadi G3 |
 
 **Catatan E3 (9 Nov):** dicoba dengan harness aman (jendela fullscreen milik
 harness menutup kedua monitor sebelum satu sentuhan pun dikirim). Hyprland 0.56
@@ -511,6 +518,12 @@ Kerjakan duluan. Setiap perbaikan dimulai dengan test yang gagal.
   mode sudah menutup kebutuhan saat ini; tunggu permintaan.
 - **Mengganti `CommandResult` dengan enum di wire:** kontraknya stabil dan
   teruji; manfaatnya kecil dibanding perubahan di semua komponen.
+- **Virtualisasi daftar app:** diukur 10 Nov dengan 300 app (payload 2 MB):
+  39 ms script per 30 detik saat idle, 78 ms untuk 10 ketikan di search.
+- **Title bar buatan sendiri** (menyatukan title bar jendela dengan top bar,
+  yang sama-sama menulis "ArchDroid"): hanya menghemat satu baris, sedangkan
+  tombol jendela dan drag harus dibuat ulang dan diuji di setiap desktop.
+- **Tema terang:** belum ada permintaan, dan token warna harus rapi dulu (H3).
 - **Memecah `index.css`:** pemindaian 9 Nov tidak menemukan kelas yang tidak
   dipakai (kelas dinamis seperti `toast-${type}` ikut dihitung); belum ada masalah
   nyata yang terselesaikan dengan memecahnya.
@@ -523,6 +536,9 @@ Kerjakan duluan. Setiap perbaikan dimulai dengan test yang gagal.
 yang tercatat di To-do. Sisa (R2–R6 selesai 9 Nov): B1 (merge PR #2 dan rilis) → B4
 dan verifikasi C3/C4 setelah merge → E3, F5. R7–R10 selesai 9 Nov. E1 terkirim (PR #60);
 E5 cukup opsi 1.
+
+**Per 10 Nov:** urutan untuk item baru ada di §13; yang pertama adalah 0.1.7
+dengan R12, G1, H6, R13, R14, H1, dan langkah (1) G2.
 
 1. **Menuju 0.1.6:** A1, A2, A3, A4, verifikasi A5, B2 langkah (1), B3, C1, F1,
    F2, lalu B1.
@@ -751,7 +767,8 @@ H10–H12, G6, R16–R18.
   `waydroid app launch` di slot eksklusif dengan batas 120 detik
   (`lib.rs:479-488`, `waydroid.rs:348-350`). Di Waydroid 1.6.3, perintah itu
   **menjadi sesi** bila sesi belum jalan (`app_manager.py:62-72`), jadi tidak
-  pernah selesai. Sudah begini sejak `580e851` (0.1.4).
+  pernah selesai. Ada sejak 0.1.0: sebelum `580e851` perintah itu ditunggu tanpa
+  batas; sejak commit itu dimatikan setelah 120 detik.
 - **Diukur di VM:** invoke baru kembali setelah 120 021 ms dengan `timeout`;
   selama itu perintah lain dijawab `busy`. Proses yang dimatikan adalah session
   manager: `waydroid status` tetap `RUNNING` dan top bar "Engine Running",
@@ -804,8 +821,10 @@ H10–H12, G6, R16–R18.
 - **R17:** `touch_mode_status` hanya dibaca saat mount `App`
   (`useTouchMode.js:23-25`); panel bisa tetap "On" setelah thread berhenti.
   Baca ulang saat tab Keymapping dibuka.
-- **R18:** `write_bundle` memakai `hard_link` (`apk.rs:189`), yang gagal di
-  exFAT/NTFS setelah seluruh salinan selesai. Fallback ke rename tanpa menimpa.
+- **R18:** `write_bundle` memakai `hard_link` (`apk.rs:189`). exFAT dan FAT32
+  tidak mengenal hard link, jadi di sana Save APK akan gagal setelah seluruh
+  salinan selesai (dari pembacaan kode; belum diuji). Fallback ke rename tanpa
+  menimpa.
 
 ### G — Performa
 
@@ -832,7 +851,7 @@ biaya render, fase VM), supaya DoD di bawah bisa diulang.
 - **Bukti:** poll 5 detik (`useEngineStatus.js:249-258`) memanggil
   `waydroid status`: 112–127 ms CPU per panggilan (host), jadi 2,3% satu core
   terus-menerus (VM, 60 detik). `with_device` membacanya dua kali per perintah
-  adb (`adb.rs:269`, `:303`): `waydroid_boot_state`, `waydroid_density_get`,
+  adb (`adb.rs:270`, `:306`): `waydroid_boot_state`, `waydroid_density_get`,
   dan cek add-on butuh 283 ms, padahal perintah adb-nya sendiri 20 ms. Saat
   startup dengan engine mati UI mengirim 11 command; 5 di antaranya
   (4 `prop get` + density, `useDeviceConfig.js:71-73`) pasti gagal dan menulis
@@ -886,7 +905,7 @@ biaya render, fase VM), supaya DoD di bawah bisa diulang.
 
 #### H1 — Top bar (P1, S–M)
 - **Bukti:** jendela default 1100×720, minimum 860×580
-  (`tauri.conf.json:15-18`). Tinggi top bar 61 px baru tercapai pada lebar
+  (`tauri.conf.json:17-20`). Tinggi top bar 61 px baru tercapai pada lebar
   ≥ 1280 px. Pada 1100 px dengan engine menyala: 113 px (dua baris, 15,7%
   tinggi jendela); pada 860×580: 19,5%. Saat engine mati, hanya tab Install
   Tools yang membuatnya dua baris, karena label tab aktif menebal
@@ -925,7 +944,7 @@ biaya render, fase VM), supaya DoD di bawah bisa diulang.
   (±125 baris) sebelum akhir log. Auto-scroll tanpa syarat, jadi output lama
   tidak bisa dibaca selama stream. Stepper 7 tahap hanya menampilkan 5 pada
   1100 px. Konsol detail selalu terbuka karena `terminalTaskType` awal "logs"
-  (`TerminalModal.jsx:57-61`). Dua tombol Cancel. Waydroid mencetak
+  (`useStreamingTask.js:23`, `TerminalModal.jsx:57-61`). Dua tombol Cancel. Waydroid mencetak
   `[Downloading] X MB/Y MB` tiap 2 detik, tetapi tidak ada progress bar.
 - **Kerjakan:** ikuti bawah hanya bila pengguna di bawah, plus tombol "ke
   baris terbaru"; tahap aktif selalu terlihat; satu Cancel; progress bar dari
@@ -934,7 +953,7 @@ biaya render, fase VM), supaya DoD di bawah bisa diulang.
 
 #### H5 — Toast (P2, S–M)
 - **Bukti:** posisi kanan-atas (`index.css:1779-1790`) menutupi kontrol engine;
-  tanpa batas (7 toast = 552 dari 720 px); semua jenis hilang setelah 4 detik
+  tanpa batas (7 toast menutupi sisi kanan sampai y = 552 dari 720 px); semua jenis hilang setelah 4 detik
   (`useToasts.js:8`), termasuk error ±200 karakter; `user-select: none`
   (`index.css:84`) membuat pesan error tidak bisa disalin.
 - **Kerjakan:** pindah ke kanan-bawah; maksimal 3, duplikat digabung; error
@@ -953,7 +972,8 @@ biaya render, fase VM), supaya DoD di bawah bisa diulang.
 - **Bukti:** 9 panel dalam satu scroll: 2 914 px pada 1100×720 (5,4 layar),
   3 427 px pada 860×580 (8,7 layar). Panel Display lebih dari satu layar,
   dengan kartu Custom sendirian di baris kedua. Tiga kartu tentang log. Konten
-  terpotong tepat di bawah subjudul halaman. "Create Bundle" patah dua baris.
+  terpotong tepat di bawah subjudul halaman. Paragraf "Advanced Properties
+  Manager" 16 px putih, beda dari panel lain. "Create Bundle" patah dua baris.
   Emoji "ℹ️" sebagai ikon.
 - **Kerjakan:** sub-navigasi (Display · Android · Diagnostics · Logs & Support
   · Reset); preset sebagai baris ringkas; satu bagian log; diagnostik berupa
@@ -975,8 +995,9 @@ biaya render, fase VM), supaya DoD di bawah bisa diulang.
 - **Bukti:** nav "Install Tools", "Settings", "Keymapping" berjudul halaman
   "Addons & Tool Injections", "Emulator Configuration", "Smart Keymapping"
   (`TopBar.jsx:14-19`, `PageHeading.jsx:3-18`). Status add-on: "Installed",
-  "Active", "Declared". Dialog root berupa satu paragraf panjang
-  (`tasks.js:30-35`).
+  "Active", "Declared". Istilah seperti "Addon Injection System", "Visual
+  Configuration Toggles", dan "Experience PC-grade controls". Dialog root
+  berupa satu paragraf panjang (`tasks.js:30-35`).
 - **Kerjakan:** satu nama per halaman; satu kata per status; dialog root
   terstruktur (apa yang berubah, sumber, hak akses, cara membatalkan).
 - **DoD:** test h1 = label nav.
