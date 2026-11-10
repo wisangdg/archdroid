@@ -12,6 +12,11 @@ export default function ContextMenu({
 }) {
   const menuRef = useRef(null);
   const previousActiveElement = useRef(null);
+  // The parent passes a new `onClose` on every render (the app list is polled
+  // every 10 s). Depending on it re-ran the effect below, which moved the
+  // keyboard focus back to the first item.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     previousActiveElement.current = document.activeElement;
@@ -26,14 +31,14 @@ export default function ContextMenu({
 
     const handleClickOutside = (e) => {
       if (menuRef.current && !menuRef.current.contains(e.target)) {
-        onClose();
+        onCloseRef.current();
       }
     };
 
     const handleKeyDown = (e) => {
       if (e.key === "Escape") {
         e.preventDefault();
-        onClose();
+        onCloseRef.current();
         return;
       }
 
@@ -59,7 +64,7 @@ export default function ContextMenu({
         e.preventDefault();
         items[items.length - 1].focus();
       } else if (e.key === "Tab") {
-        onClose();
+        onCloseRef.current();
       }
     };
 
@@ -75,7 +80,7 @@ export default function ContextMenu({
         previousActiveElement.current.focus();
       }
     };
-  }, [onClose]);
+  }, []);
 
   if (!position || !app) return null;
 

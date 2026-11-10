@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect } from "react";
 import {
   Gamepad2,
   Play,
@@ -17,6 +17,13 @@ export default function KeymapView({
   onToggleTouchMode,
   onEnableTouchAccess,
 }) {
+  // The backend thread can stop on its own (mouse unplugged, compositor
+  // gone); read the state whenever the page is opened, not only at start.
+  const refreshTouchMode = touchMode.refresh;
+  useEffect(() => {
+    refreshTouchMode?.();
+  }, [refreshTouchMode]);
+
   return (
     <div className="keymap-view-container">
       <TouchModePanel
