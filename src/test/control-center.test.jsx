@@ -23,6 +23,30 @@ function renderView(props = {}) {
 }
 
 describe("Control Center: My Apps", () => {
+  it("says that Launch starts the engine while it is stopped", () => {
+    renderView({ engineOnline: false });
+    expect(
+      screen.getByText("3 applications. Launching one starts the engine.")
+    ).toBeTruthy();
+  });
+
+  it("keeps search and selection in the state its parent holds", () => {
+    const onViewStateChange = vi.fn();
+    renderView({
+      viewState: {
+        searchQuery: "gallery",
+        categoryFilter: "all",
+        selectedPackage: null,
+      },
+      onViewStateChange,
+    });
+    expect(screen.getByLabelText("Search apps or packages").value).toBe(
+      "gallery"
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Clear search" }));
+    expect(onViewStateChange).toHaveBeenCalled();
+  });
+
   it("shows the first app in the detail panel and the app count", () => {
     renderView();
     expect(

@@ -491,7 +491,7 @@ async function runSmokeTests() {
       if (settingsTab) settingsTab.click();
     `);
     await driver.waitFor(
-      'return !!document.querySelector(".danger-card-header h3")?.textContent?.includes("Danger Zone: Factory Reset");'
+      'return !!document.querySelector(".danger-card-header h3")?.textContent?.includes("Factory Reset");'
     );
     console.log("  ✔ Navigated to Settings tab.");
 

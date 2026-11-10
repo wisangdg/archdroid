@@ -1,11 +1,13 @@
 import React, { useEffect, useRef } from "react";
-import { Play, Copy, Trash2 } from "lucide-react";
+import { Play, Copy, Trash2, Square, Download } from "lucide-react";
 
 export default function ContextMenu({
   position,
   app,
   onClose,
   onLaunch,
+  onForceStop,
+  onBackupApk,
   onCopyPackage,
   onUninstall,
   disabled = false,
@@ -88,7 +90,7 @@ export default function ContextMenu({
   const screenW = window.innerWidth;
   const screenH = window.innerHeight;
   const menuW = 210;
-  const menuH = 140;
+  const menuH = 140 + (onForceStop ? 36 : 0) + (onBackupApk ? 36 : 0);
 
   const left = Math.min(position.x, screenW - menuW - 10);
   const top = Math.min(position.y, screenH - menuH - 10);
@@ -122,6 +124,39 @@ export default function ContextMenu({
         <Play size={15} fill="currentColor" aria-hidden="true" />
         <span>Launch App</span>
       </button>
+
+      {/* The same actions as the detail panel. */}
+      {onForceStop && (
+        <button
+          type="button"
+          role="menuitem"
+          className="context-menu-item"
+          onClick={() => {
+            onForceStop(app.package, app.name);
+            onClose();
+          }}
+          disabled={disabled}
+        >
+          <Square size={14} aria-hidden="true" />
+          <span>Force stop</span>
+        </button>
+      )}
+
+      {onBackupApk && (
+        <button
+          type="button"
+          role="menuitem"
+          className="context-menu-item"
+          onClick={() => {
+            onBackupApk(app.package, app.name);
+            onClose();
+          }}
+          disabled={disabled}
+        >
+          <Download size={15} aria-hidden="true" />
+          <span>Save APK</span>
+        </button>
+      )}
 
       <button
         type="button"

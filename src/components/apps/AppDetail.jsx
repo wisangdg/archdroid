@@ -126,10 +126,6 @@ export default function AppDetail({
 
       <dl className="app-detail-facts">
         <div className="app-fact">
-          <dt>Package</dt>
-          <dd className="mono">{app.package}</dd>
-        </div>
-        <div className="app-fact">
           <dt>Source</dt>
           <dd>{system ? "Preinstalled with Android" : "Installed by you"}</dd>
         </div>

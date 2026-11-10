@@ -43,12 +43,12 @@ export default function KeymapView({
         </div>
 
         <div className="keymap-hero-content">
-          <h2>Phantom Keymapper for Linux</h2>
+          <h2>Phantom Keymapper</h2>
           <p>
-            Experience PC-grade controls for mobile games.{" "}
-            <strong>Phantom</strong> is an ultra-fast, native Wayland keymapper
-            designed specifically for Waydroid that translates keyboard strokes
-            and mouse movements directly into Android multi-touch gestures.
+            <strong>Phantom</strong> maps keyboard keys and mouse movement to
+            Android touch gestures, so games made for a touchscreen can be
+            played with WASD and the mouse. Install it once, then launch it next
+            to the game.
           </p>
 
           <div className="keymap-actions">

@@ -72,8 +72,8 @@ export default function SettingsView({
         <div className="section-title-wrap">
           <Sliders size={20} className="section-title-icon" />
           <div>
-            <h3>Visual Configuration Toggles</h3>
-            <p>Customize how Waydroid renders on your desktop</p>
+            <h3>Android Display Options</h3>
+            <p>How Android windows appear on your desktop</p>
           </div>
         </div>
 
@@ -133,11 +133,16 @@ export default function SettingsView({
 
       {/* Advanced System Properties */}
       <div className="glass-panel">
-        <h3>Advanced Properties Manager</h3>
-        <p>
-          Set custom Android system properties using{" "}
-          <code>waydroid prop set &lt;key&gt; &lt;val&gt;</code>.
-        </p>
+        <div className="section-title-wrap">
+          <Sliders size={20} className="section-title-icon" />
+          <div>
+            <h3>Android Properties</h3>
+            <p>
+              Set any Android system property with{" "}
+              <code>waydroid prop set &lt;key&gt; &lt;val&gt;</code>.
+            </p>
+          </div>
+        </div>
 
         <form onSubmit={onPropSet} className="prop-form">
           <div className="prop-inputs-row">
@@ -208,7 +213,7 @@ export default function SettingsView({
         <div className="danger-card-header">
           <AlertOctagon size={24} className="danger-icon" />
           <div>
-            <h3>Danger Zone: Factory Reset</h3>
+            <h3>Factory Reset</h3>
             <p>
               Completely wipe all Waydroid container data, downloaded games,
               GApps modules, and user configurations. This resets Waydroid to a

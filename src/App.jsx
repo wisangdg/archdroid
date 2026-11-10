@@ -4,7 +4,7 @@ import { PackagePlus } from "lucide-react";
 
 import TopBar from "./components/TopBar";
 import PageHeading from "./components/PageHeading";
-import MyAppsView from "./components/apps/MyAppsView";
+import MyAppsView, { INITIAL_VIEW_STATE } from "./components/apps/MyAppsView";
 import InstallToolsView from "./components/tools/InstallToolsView";
 import KeymapView from "./components/keymap/KeymapView";
 import SettingsView from "./components/settings/SettingsView";
@@ -24,6 +24,9 @@ const APP_LIST_POLL_MS = 10000;
 export default function App() {
   const [activeTab, setActiveTab] = useState("home");
   const [apps, setApps] = useState([]);
+  // Search, filter and selection of My Apps; kept here so they survive a
+  // visit to another tab.
+  const [appsView, setAppsView] = useState(INITIAL_VIEW_STATE);
   // Save APK copies the app out of Android; a big game takes a while.
   const [savingApk, setSavingApk] = useState(false);
   const [gappsStatus, setGappsStatus] = useState("unknown");
@@ -575,6 +578,8 @@ export default function App() {
                   onBackupApk={handleBackupApk}
                   savingApk={savingApk}
                   busy={installing}
+                  viewState={appsView}
+                  onViewStateChange={setAppsView}
                 />
               )}
 

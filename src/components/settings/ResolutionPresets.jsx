@@ -61,7 +61,7 @@ const PRESETS = [
     width: "",
     height: "",
     dpi: "",
-    ratio: "Bespoke",
+    ratio: "Custom",
     icon: Sliders,
     description: "Set your own custom pixel dimensions and pixel density.",
   },
@@ -251,9 +251,7 @@ export default function ResolutionPresets({
                       <span className="preset-dpi">{preset.dpi} DPI</span>
                     </>
                   ) : (
-                    <span className="preset-custom-label">
-                      Bespoke dimensions
-                    </span>
+                    <span className="preset-custom-label">Your own size</span>
                   )}
                 </div>
                 <p className="preset-description">{preset.description}</p>
