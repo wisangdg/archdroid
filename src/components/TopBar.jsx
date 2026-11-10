@@ -61,10 +61,15 @@ export default function TopBar({
               type="button"
               className={`menu-item ${active ? "active" : ""}`}
               aria-current={active ? "page" : undefined}
+              title={item.label}
               onClick={() => setActiveTab(item.id)}
             >
               <Icon size={16} aria-hidden="true" />
-              <span className="menu-label">{item.label}</span>
+              {/* data-label reserves the bold width, so the bar does not
+                  reflow when the active tab changes. */}
+              <span className="menu-label" data-label={item.label}>
+                {item.label}
+              </span>
               {item.id === "home" && appCount > 0 && (
                 <span className="menu-badge">{appCount}</span>
               )}
@@ -86,7 +91,7 @@ export default function TopBar({
 
         <div className={`engine-pill ${online ? "online" : "offline"}`}>
           <div
-            className={`status-badge ${online ? "status-online" : "status-offline"}`}
+            className={`status-badge ${online ? "status-online" : "status-offline"} ${online && booting ? "status-booting" : ""}`}
             role="status"
           >
             <span className="status-dot" aria-hidden="true"></span>
@@ -104,23 +109,24 @@ export default function TopBar({
               <>
                 <button
                   type="button"
-                  className="btn btn-ghost btn-sm"
+                  className="btn btn-ghost btn-sm btn-engine-icon"
                   onClick={onRestart}
                   disabled={locked}
+                  aria-label="Restart"
                   title="Restart Waydroid session"
                 >
-                  <RotateCw size={14} aria-hidden="true" />
-                  <span>Restart</span>
+                  <RotateCw size={15} aria-hidden="true" />
                 </button>
                 <button
                   type="button"
-                  className="btn btn-danger btn-sm"
+                  className="btn btn-outline-danger btn-sm"
                   onClick={onStop}
                   disabled={locked}
+                  aria-label="Stop Engine"
                   title="Stop Waydroid session"
                 >
-                  <Square size={13} fill="currentColor" aria-hidden="true" />
-                  <span>Stop Engine</span>
+                  <Square size={12} fill="currentColor" aria-hidden="true" />
+                  <span>Stop</span>
                 </button>
               </>
             ) : (
@@ -129,10 +135,11 @@ export default function TopBar({
                 className="btn btn-primary btn-sm"
                 onClick={onStart}
                 disabled={locked}
+                aria-label="Start Engine"
                 title="Start Waydroid session"
               >
                 <Play size={14} fill="currentColor" aria-hidden="true" />
-                <span>Start Engine</span>
+                <span>Start</span>
               </button>
             ))}
         </div>

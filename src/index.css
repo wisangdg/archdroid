@@ -1,9 +1,58 @@
-/* No remote font @import: the app must work offline and under
-   `font-src 'self'`. The stacks below fall back to locally installed fonts. */
+/* The two UI fonts ship with the app (SIL OFL 1.1, licences next to the
+   files), so every distro renders the same text widths. No remote @import:
+   the app must work offline and under `font-src 'self'`. */
+@font-face {
+  font-family: "Outfit";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("./assets/fonts/outfit-latin-ext-wght-normal.woff2")
+    format("woff2-variations");
+  unicode-range:
+    U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304,
+    U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB,
+    U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "Outfit";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("./assets/fonts/outfit-latin-wght-normal.woff2")
+    format("woff2-variations");
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212,
+    U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 800;
+  src: url("./assets/fonts/jetbrains-mono-latin-ext-wght-normal.woff2")
+    format("woff2-variations");
+  unicode-range:
+    U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304,
+    U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB,
+    U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 800;
+  src: url("./assets/fonts/jetbrains-mono-latin-wght-normal.woff2")
+    format("woff2-variations");
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212,
+    U+2215, U+FEFF, U+FFFD;
+}
 
 :root {
   --bg-base: #080b10;
-  --bg-sidebar: rgba(11, 15, 23, 0.88); /* top bar */
+  --bg-sidebar: #0b0f17; /* top bar: solid, no blur behind it */
   --bg-surface: rgba(18, 24, 38, 0.65);
   --bg-surface-hover: rgba(26, 34, 52, 0.75);
   --bg-card: rgba(22, 29, 45, 0.5);
@@ -133,8 +182,6 @@ body {
   gap: 12px 20px;
   padding: 10px 20px;
   background: var(--bg-sidebar);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
   border-bottom: 1px solid var(--border-subtle);
   flex-shrink: 0;
   z-index: 10;
@@ -209,6 +256,81 @@ body {
   background: var(--bg-surface-hover);
   border-color: var(--border-subtle);
   font-weight: 600;
+}
+
+/* The label's bold width is always reserved (see TopBar). */
+.menu-label {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.menu-label::after {
+  content: attr(data-label);
+  height: 0;
+  visibility: hidden;
+  overflow: hidden;
+  font-weight: 600;
+  pointer-events: none;
+  user-select: none;
+}
+
+.btn-engine-icon {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  gap: 0;
+}
+
+.btn-engine-icon svg {
+  flex-shrink: 0;
+}
+
+.topbar {
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+
+.topbar-nav,
+.topbar-right {
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+
+/* Narrower than the default window: icons instead of words, one row. */
+@media (max-width: 1099px) {
+  .brand-version {
+    display: none;
+  }
+  .topbar {
+    gap: 12px;
+    padding: 10px 14px;
+  }
+  .menu-item {
+    padding: 0 10px;
+  }
+}
+
+@media (max-width: 1023px) {
+  .brand-text {
+    display: none;
+  }
+  .menu-item:not(.active) .menu-label {
+    display: none;
+  }
+}
+
+@media (max-width: 699px) {
+  .menu-item .menu-label,
+  .menu-badge {
+    display: none;
+  }
+  .status-text {
+    display: none;
+  }
+  .topbar-right > .btn-icon {
+    display: none;
+  }
 }
 
 .menu-item.active svg {
@@ -294,6 +416,12 @@ body {
 
 .status-online .status-dot {
   box-shadow: 0 0 8px currentColor;
+}
+
+/* Only a state that ends by itself may animate: a running engine stays
+   running for hours, and an endless animation kept WebKitGTK repainting the
+   bar at 60 fps (a full core without GPU compositing). */
+.status-booting .status-dot {
   animation: pulse 2s infinite;
 }
 
@@ -1529,7 +1657,7 @@ body {
 .setup-preflight-item-value {
   display: block;
   margin-top: 3px;
-  font-family: "JetBrains Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-secondary);
   word-break: break-word;
@@ -1550,7 +1678,7 @@ body {
   background: rgba(0, 0, 0, 0.35);
   border: 1px solid var(--border-subtle);
   color: #a7f3d0;
-  font-family: "JetBrains Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   white-space: pre-wrap;
   word-break: break-word;
@@ -1679,7 +1807,7 @@ body {
   height: 400px;
   min-height: 96px;
   overflow-y: auto;
-  font-family: "JetBrains Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 13px;
   padding: 16px;
   color: #cbd5e1;
@@ -2338,7 +2466,7 @@ body {
   font-size: 13px;
   color: var(--text-secondary);
   line-height: 1.5;
-  font-family: "JetBrains Mono", monospace;
+  font-family: var(--font-mono);
   word-break: break-all;
 }
 
@@ -2436,7 +2564,7 @@ body {
 
 .current-res-badge strong {
   color: var(--accent-primary);
-  font-family: "JetBrains Mono", monospace;
+  font-family: var(--font-mono);
   font-weight: 600;
 }
 
@@ -2566,7 +2694,7 @@ body {
   font-size: 12px;
   font-weight: 600;
   color: var(--accent-primary);
-  font-family: "JetBrains Mono", monospace;
+  font-family: var(--font-mono);
 }
 
 .res-sep {
@@ -2672,7 +2800,7 @@ body {
   border-radius: var(--radius-sm);
   padding: 8px 12px;
   font-size: 13px;
-  font-family: "JetBrains Mono", monospace;
+  font-family: var(--font-mono);
   width: 130px;
   outline: none;
   transition: border-color var(--transition-fast);
@@ -2934,7 +3062,7 @@ body {
 
 .diag-item-value {
   font-size: 12px;
-  font-family: "JetBrains Mono", monospace;
+  font-family: var(--font-mono);
   color: var(--accent-primary);
   word-break: break-all;
 }
@@ -2974,7 +3102,7 @@ body {
 
 .diag-remediation code {
   display: block;
-  font-family: "JetBrains Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   line-height: 1.45;
   color: #a7f3d0;
@@ -3112,7 +3240,7 @@ body {
   color: var(--accent-primary);
   padding: 2px 6px;
   border-radius: 4px;
-  font-family: "JetBrains Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
 }
 
