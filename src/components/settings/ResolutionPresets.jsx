@@ -61,7 +61,7 @@ const PRESETS = [
     width: "",
     height: "",
     dpi: "",
-    ratio: "Bespoke",
+    ratio: "Custom",
     icon: Sliders,
     description: "Set your own custom pixel dimensions and pixel density.",
   },
@@ -90,6 +90,11 @@ export default function ResolutionPresets({
   const [customHeight, setCustomHeight] = useState(currentHeight || "1080");
   const [customDpi, setCustomDpi] = useState(currentDpi || "280");
   const [isApplying, setIsApplying] = useState(false);
+  // A saved width/height only takes effect when the session starts again.
+  const [restartPending, setRestartPending] = useState(false);
+  useEffect(() => {
+    if (!engineRunning) setRestartPending(false);
+  }, [engineRunning]);
 
   // Sync with current props on initial load or change
   useEffect(() => {
@@ -140,12 +145,16 @@ export default function ResolutionPresets({
 
   const handleApply = async () => {
     setIsApplying(true);
+    const sizeChanged =
+      customWidth.trim() !== currentWidth ||
+      customHeight.trim() !== currentHeight;
     try {
-      await onApplyResolution({
+      const applied = await onApplyResolution({
         width: customWidth.trim(),
         height: customHeight.trim(),
         dpi: customDpi.trim(),
       });
+      if (applied && sizeChanged) setRestartPending(true);
     } finally {
       setIsApplying(false);
     }
@@ -208,6 +217,7 @@ export default function ResolutionPresets({
               tabIndex={0}
               aria-pressed={isSelected}
               aria-label={`${preset.name} (${preset.width}x${preset.height})`}
+              title={`${preset.description} ${preset.ratio}.`}
             >
               <div className="preset-card-top">
                 <div className="preset-icon-wrapper">
@@ -242,18 +252,8 @@ export default function ResolutionPresets({
                       <span className="preset-dpi">{preset.dpi} DPI</span>
                     </>
                   ) : (
-                    <span className="preset-custom-label">
-                      Bespoke dimensions
-                    </span>
+                    <span className="preset-custom-label">Your own size</span>
                   )}
-                </div>
-                <p className="preset-description">{preset.description}</p>
-              </div>
-
-              <div className="preset-card-footer">
-                <span className="preset-ratio-pill">{preset.ratio}</span>
-                <div className={`preset-radio ${isSelected ? "checked" : ""}`}>
-                  {isSelected && <div className="preset-radio-dot" />}
                 </div>
               </div>
             </div>
@@ -269,8 +269,9 @@ export default function ResolutionPresets({
           </h5>
           <div className="custom-res-inputs">
             <div className="res-input-group">
-              <label>Width (px)</label>
+              <label htmlFor="res-width">Width (px)</label>
               <input
+                id="res-width"
                 type="number"
                 min="480"
                 max="7680"
@@ -285,8 +286,9 @@ export default function ResolutionPresets({
             <span className="res-times-symbol">×</span>
 
             <div className="res-input-group">
-              <label>Height (px)</label>
+              <label htmlFor="res-height">Height (px)</label>
               <input
+                id="res-height"
                 type="number"
                 min="480"
                 max="4320"
@@ -299,8 +301,9 @@ export default function ResolutionPresets({
             </div>
 
             <div className="res-input-group">
-              <label>Density (DPI)</label>
+              <label htmlFor="res-dpi">Density (DPI)</label>
               <input
+                id="res-dpi"
                 type="number"
                 min="120"
                 max="640"
@@ -339,15 +342,21 @@ export default function ResolutionPresets({
               profile.
             </p>
           )}
-          <p>
-            ℹ️ Changes to display resolution and DPI require a{" "}
-            <strong>restart of the Waydroid session</strong> to take visual
-            effect in Android.
-          </p>
+          {restartPending ? (
+            <p role="status">
+              <strong>Saved. Restart the engine</strong> to use the new
+              resolution.
+            </p>
+          ) : (
+            <p>
+              The DPI applies at once. A new resolution needs a{" "}
+              <strong>restart of the engine</strong>.
+            </p>
+          )}
         </div>
 
         <div className="res-actions-right">
-          {engineRunning && !isUnchanged && (
+          {engineRunning && restartPending && (
             <button
               type="button"
               className="btn btn-outline btn-sm"
@@ -378,7 +387,9 @@ export default function ResolutionPresets({
               {isApplying
                 ? "Applying..."
                 : isUnchanged
-                  ? "Saved & Active"
+                  ? restartPending
+                    ? "Saved"
+                    : "Saved & Active"
                   : `Apply ${customWidth} × ${customHeight}`}
             </span>
           </button>

@@ -18,6 +18,8 @@ export default function HostDiagnostics() {
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  // Seventeen cards are a wall; show what needs attention, the rest on demand.
+  const [showAll, setShowAll] = useState(false);
 
   const fetchDiagnostics = async () => {
     setLoading(true);
@@ -114,6 +116,27 @@ export default function HostDiagnostics() {
         </div>
       </div>
 
+      {report?.items && (
+        <div className="diag-summary" role="status">
+          <span>
+            {report.items.filter((item) => item.status === "ok").length} of{" "}
+            {report.items.length} checks passed
+            {report.items.every((item) => item.status === "ok")
+              ? "."
+              : "; the others are below."}
+          </span>
+          <button
+            type="button"
+            className="setup-preflight-toggle"
+            onClick={() => setShowAll((value) => !value)}
+          >
+            {showAll
+              ? "Show only what needs attention"
+              : `Show all ${report.items.length} checks`}
+          </button>
+        </div>
+      )}
+
       {/* Diagnostics Cards Grid */}
       <div className="diag-grid">
         {error ? (
@@ -125,7 +148,10 @@ export default function HostDiagnostics() {
             <span>Diagnostics scan failed: {error}</span>
           </div>
         ) : report && report.items ? (
-          report.items.map((item) => {
+          (showAll
+            ? report.items
+            : report.items.filter((item) => item.status !== "ok")
+          ).map((item) => {
             const Icon = getIcon(item.key);
             return (
               <div
@@ -147,6 +173,17 @@ export default function HostDiagnostics() {
                     <div className="diag-remediation">
                       <span className="diag-remediation-label">Fix</span>
                       <code>{item.remediation}</code>
+                      <button
+                        type="button"
+                        className="btn btn-outline btn-sm diag-copy"
+                        onClick={() =>
+                          navigator.clipboard
+                            ?.writeText(item.remediation)
+                            .catch(() => {})
+                        }
+                      >
+                        Copy
+                      </button>
                     </div>
                   )}
                 </div>

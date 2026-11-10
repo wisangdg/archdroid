@@ -140,6 +140,22 @@ describe("Accessibility (P1-3)", () => {
   });
 
   describe("Modal focus trap and restoration", () => {
+    it("a destructive ConfirmModal opens with Cancel focused", () => {
+      const { unmount } = render(
+        <ConfirmModal
+          isOpen={true}
+          title="Factory Reset Waydroid?"
+          description="This cannot be undone."
+          confirmText="Wipe Everything"
+          confirmVariant="danger"
+          onCancel={() => {}}
+          onConfirm={() => {}}
+        />
+      );
+      expect(document.activeElement).toBe(screen.getByText("Cancel"));
+      unmount();
+    });
+
     it("ConfirmModal has role dialog, traps Tab focus, and handles Escape", () => {
       const triggerBtn = document.createElement("button");
       triggerBtn.textContent = "Open Modal";
@@ -154,6 +170,7 @@ describe("Accessibility (P1-3)", () => {
           isOpen={true}
           title="Reset Confirmation"
           description="Are you sure you want to proceed?"
+          confirmVariant="primary"
           onCancel={handleCancel}
           onConfirm={handleConfirm}
         />

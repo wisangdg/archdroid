@@ -54,9 +54,9 @@ export default function InstallToolsView({
       <div className="info-banner">
         <HelpCircle size={20} className="info-icon" />
         <div className="info-text">
-          <strong>Addon Injection System</strong>: These tools inject custom
-          packages directly into the Waydroid Android root image. Administrator
-          (root) privileges will be requested via Polkit/Sudo.
+          <strong>Add-ons change the Android system image</strong>, so each one
+          asks for administrator rights (polkit or sudo) and shows what it will
+          do first.
         </div>
       </div>
 
@@ -145,7 +145,7 @@ export default function InstallToolsView({
               {houdiniStatus === "installed" ? (
                 <>
                   <CheckCircle2 size={17} />
-                  <span>Active</span>
+                  <span>Installed</span>
                 </>
               ) : (
                 <>
@@ -198,7 +198,7 @@ export default function InstallToolsView({
               {multitouchStatus === "installed" ? (
                 <>
                   <CheckCircle2 size={17} />
-                  <span>Declared</span>
+                  <span>Installed</span>
                 </>
               ) : (
                 <>

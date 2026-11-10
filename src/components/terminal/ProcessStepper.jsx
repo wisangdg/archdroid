@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useRef } from "react";
 import { Check, Loader2, AlertCircle } from "lucide-react";
 
 export default function ProcessStepper({
@@ -8,6 +8,12 @@ export default function ProcessStepper({
   isCancelled,
   isCompleted,
 }) {
+  // Seven stages do not fit the default window: keep the current one in view.
+  const activeRef = useRef(null);
+  useEffect(() => {
+    activeRef.current?.scrollIntoView?.({ inline: "center", block: "nearest" });
+  }, [activeStepIndex]);
+
   if (!steps || steps.length === 0) return null;
 
   return (
@@ -26,7 +32,10 @@ export default function ProcessStepper({
           return (
             <React.Fragment key={step.id}>
               {/* Step Node */}
-              <div className={`stepper-node stepper-node-${stepStatus}`}>
+              <div
+                ref={idx === activeStepIndex ? activeRef : undefined}
+                className={`stepper-node stepper-node-${stepStatus}`}
+              >
                 <div className="stepper-circle">
                   {stepStatus === "completed" ? (
                     <Check size={14} className="stepper-icon-check" />

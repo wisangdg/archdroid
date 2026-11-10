@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
 const PROP = {
@@ -47,16 +47,16 @@ export function useDeviceConfig({ addToast }) {
   const loadConfigs = useCallback(async () => {
     try {
       const get = (key) => invoke("waydroid_prop_get", { key });
-      const mw = await get(PROP.multiWindow);
+      // Independent reads: together they take as long as the slowest one.
+      const [mw, inv, widthRes, heightRes, dpiRes] = await Promise.all([
+        get(PROP.multiWindow),
+        get(PROP.invertColors),
+        get(PROP.width),
+        get(PROP.height),
+        invoke("waydroid_density_get"),
+      ]);
       setMultiWindow(mw.status === "success" && mw.data === "true");
-      const inv = await get(PROP.invertColors);
       setInvertColors(inv.status === "success" && inv.data === "true");
-
-      const [widthRes, heightRes, dpiRes] = [
-        await get(PROP.width),
-        await get(PROP.height),
-        await invoke("waydroid_density_get"),
-      ];
       const value = (res) => (res.status === "success" ? res.data || "" : "");
       setDisplayRes({
         width: value(widthRes),
@@ -68,9 +68,9 @@ export function useDeviceConfig({ addToast }) {
     }
   }, []);
 
-  useEffect(() => {
-    loadConfigs();
-  }, [loadConfigs]);
+  // No read on mount: with the engine stopped every one of these calls fails
+  // (and starts a Python process to find that out). App.jsx calls
+  // `loadConfigs` once Android has booted.
 
   const toggleConfig = async (key, currentValue, setter, label) => {
     const newValue = currentValue ? "false" : "true";
@@ -117,7 +117,18 @@ export function useDeviceConfig({ addToast }) {
       "Invert Colors"
     );
 
+  /** Applies the profile; resolves to whether it was written. */
   const handleApplyResolution = async ({ width, height, dpi }) => {
+    const outOfRange = (value) =>
+      value !== "" && !(Number(value) >= 320 && Number(value) <= 7680);
+    if (outOfRange(width) || outOfRange(height)) {
+      addToast({
+        type: "error",
+        title: "Display Config Failed",
+        message: "Width and height must be between 320 and 7680 pixels.",
+      });
+      return false;
+    }
     try {
       if (width) await setProp(PROP.width, width);
       if (height) await setProp(PROP.height, height);
@@ -129,6 +140,7 @@ export function useDeviceConfig({ addToast }) {
         message: `Applied ${width} × ${height} (${dpi} DPI). The DPI applies now; restart the Waydroid session for the resolution.`,
         duration: 5000,
       });
+      return true;
     } catch (err) {
       console.error("Failed to apply resolution:", err);
       addToast({
@@ -136,6 +148,7 @@ export function useDeviceConfig({ addToast }) {
         title: "Display Config Failed",
         message: err?.message || String(err),
       });
+      return false;
     }
   };
 

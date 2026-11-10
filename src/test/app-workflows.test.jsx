@@ -15,8 +15,15 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 let eventListeners = {};
 vi.mock("@tauri-apps/api/event", () => ({
+  // Like Tauri: every listener of an event is called, not only the last one.
   listen: vi.fn((event, cb) => {
-    eventListeners[event] = cb;
+    const previous = eventListeners[event];
+    eventListeners[event] = previous
+      ? (payload) => {
+          previous(payload);
+          cb(payload);
+        }
+      : cb;
     return Promise.resolve(() => {});
   }),
 }));
@@ -713,8 +720,8 @@ describe("App state & workflow integration", () => {
 
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
-    const toggle = await screen.findByRole("button", {
-      name: "Toggle Multi-Window Mode",
+    const toggle = await screen.findByRole("switch", {
+      name: "Multi-Window Mode",
     });
     expect(toggle.disabled).toBe(true);
     expect(
@@ -786,6 +793,59 @@ describe("App state & workflow integration", () => {
     fireEvent.click(await screen.findByText("Launch App"));
     expect(callsOf("waydroid_launch_app")).toBe(0);
   });
+
+  it("launches the app asked for during the boot once Android is up", async () => {
+    let booted = false;
+    bootingSession(() => booted);
+    render(<App />);
+    await screen.findByText("Android Booting…");
+    fireEvent.doubleClick((await screen.findAllByText("F-Droid"))[0]);
+    await screen.findByText("Android Is Booting");
+    expect(callsOf("waydroid_launch_app")).toBe(0);
+    booted = true;
+    await waitFor(() => expect(callsOf("waydroid_launch_app")).toBe(1), {
+      timeout: 6000,
+    });
+  }, 10000);
+
+  it("starts the engine before launching when it is stopped", async () => {
+    // `waydroid app launch` against a stopped session becomes the session and
+    // never returns, so it must not be sent until the session is up.
+    let running = false;
+    const order = [];
+    invoke.mockImplementation((cmd) => {
+      order.push(cmd);
+      if (cmd === "waydroid_status")
+        return Promise.resolve(
+          running ? RUNNING : { status: "success", data: "Session:\tSTOPPED\n" }
+        );
+      if (cmd === "waydroid_start") {
+        running = true;
+        return Promise.resolve({ status: "success" });
+      }
+      if (cmd === "get_waydroid_apps")
+        return Promise.resolve([
+          { name: "F-Droid", package: "org.fdroid.fdroid", icon: null },
+        ]);
+      if (cmd === "waydroid_boot_state")
+        return Promise.resolve({ status: "success", data: "booted" });
+      if (cmd === "waydroid_prop_get" || cmd === "waydroid_density_get")
+        return Promise.resolve({ status: "success", data: "" });
+      return Promise.resolve({ status: "success" });
+    });
+    render(<App />);
+    await screen.findByText("Engine Stopped");
+    fireEvent.doubleClick((await screen.findAllByText("F-Droid"))[0]);
+    await screen.findByText("Starting Engine First");
+    await waitFor(() => expect(callsOf("waydroid_launch_app")).toBe(1), {
+      timeout: 6000,
+    });
+    expect(order.indexOf("waydroid_start")).toBeGreaterThan(-1);
+    expect(order.indexOf("waydroid_start")).toBeLessThan(
+      order.indexOf("waydroid_launch_app")
+    );
+    expect(callsOf("waydroid_start")).toBe(1);
+  }, 10000);
 
   it("keeps the display profile from being applied while the engine is off", async () => {
     invoke.mockImplementation((cmd) => {

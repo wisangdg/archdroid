@@ -13,6 +13,7 @@ export default function ConfirmModal({
   isOpen,
   title,
   description,
+  details = null,
   confirmText = "Confirm",
   cancelText = "Cancel",
   confirmVariant = "danger",
@@ -90,6 +91,16 @@ export default function ConfirmModal({
             {title}
           </h3>
           <p className="confirm-modal-desc">{description}</p>
+          {details?.length > 0 && (
+            <dl className="confirm-modal-details">
+              {details.map(({ label, text }) => (
+                <div key={label} className="confirm-detail-row">
+                  <dt>{label}</dt>
+                  <dd>{text}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
           {packagePreview && (
             <div className="confirm-package-preview">
               <div className="confirm-package-header">
@@ -125,14 +136,20 @@ export default function ConfirmModal({
         </div>
 
         <div className="confirm-modal-actions">
-          <button type="button" className="btn btn-outline" onClick={onCancel}>
+          {/* Enter must not confirm a destructive action by accident. */}
+          <button
+            type="button"
+            className="btn btn-outline"
+            onClick={onCancel}
+            data-autofocus={confirmVariant === "danger" ? "true" : undefined}
+          >
             {cancelText}
           </button>
           <button
             type="button"
             className={`btn ${confirmVariant === "danger" ? "btn-danger" : "btn-primary"}`}
             onClick={onConfirm}
-            data-autofocus="true"
+            data-autofocus={confirmVariant === "danger" ? undefined : "true"}
           >
             {confirmText}
           </button>

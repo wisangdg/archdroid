@@ -108,7 +108,16 @@ function lastStepMarker(logs, steps) {
   return null;
 }
 
-export function detectStepProgress(taskType, logs = [], taskResult = null) {
+/**
+ * `currentStep` is the stage id the task announced last. It is tracked outside
+ * `logs`, which is capped: the marker line may no longer be in it.
+ */
+export function detectStepProgress(
+  taskType,
+  logs = [],
+  taskResult = null,
+  currentStep = null
+) {
   const steps = TASK_STEP_CONFIGS[taskType] || [];
   const logText = logs.join("\n");
 
@@ -174,9 +183,14 @@ export function detectStepProgress(taskType, logs = [], taskResult = null) {
     // waydroid_init in lib.rs). Before the first marker the task is still
     // elevating, which is the first stage.
     const marker = lastStepMarker(logs, steps);
-    if (marker) {
+    const known = steps.findIndex((step) => step.id === currentStep);
+    if (marker && marker.index >= known) {
       activeIndex = marker.index;
       currentMessage = marker.message;
+    } else if (known >= 0) {
+      activeIndex = known;
+      const shown = logs.filter(Boolean);
+      currentMessage = shown[shown.length - 1] || steps[known].description;
     }
   }
 

@@ -406,6 +406,57 @@ fn boot_state_from(probe: Result<String>) -> Result<&'static str> {
     }
 }
 
+/// Facts about one installed app for the My Apps detail panel. Each field is
+/// `None` when Android did not report it.
+#[derive(Debug, Default, PartialEq, Eq, serde::Serialize)]
+pub struct AppInfo {
+    pub version: Option<String>,
+    /// `lastUpdateTime` as Android prints it (`2026-11-01 12:00:00`).
+    pub updated: Option<String>,
+    /// Sum of the base and split APK sizes; app data is not counted.
+    pub apk_bytes: Option<u64>,
+}
+
+/// Parse the output of `app_info_line`: `versionName=`/`lastUpdateTime=`
+/// lines from `dumpsys package` (the first of each wins: an updated system app
+/// lists the update before the factory copy) and one byte count per APK.
+pub fn parse_app_info(output: &str) -> AppInfo {
+    let mut info = AppInfo::default();
+    let mut total: Option<u64> = None;
+    for line in output.lines().map(str::trim) {
+        if let Some(value) = line.strip_prefix("versionName=") {
+            info.version.get_or_insert_with(|| value.to_string());
+        } else if let Some(value) = line.strip_prefix("lastUpdateTime=") {
+            info.updated.get_or_insert_with(|| value.to_string());
+        } else if let Ok(bytes) = line.parse::<u64>() {
+            total = Some(total.unwrap_or(0) + bytes);
+        }
+    }
+    info.apk_bytes = total;
+    info.version = info.version.filter(|v| !v.is_empty() && v != "null");
+    info
+}
+
+/// One device shell line for `app_info`; the package is validated first, so
+/// it cannot carry shell syntax.
+fn app_info_line(package: &str) -> String {
+    format!(
+        "dumpsys package {package} | grep -E 'versionName=|lastUpdateTime='; \
+         for f in $(pm path {package}); do stat -c %s \"${{f#package:}}\"; done"
+    )
+}
+
+/// Version, last update and APK size of an installed app, in one passive adb
+/// call: a frozen container answers "not now" instead of being resumed.
+pub fn app_info(package: &str) -> Result<AppInfo> {
+    if !is_valid_package(package) {
+        return Err(AppError::invalid_input(format!(
+            "Invalid Android package name: {package:?}"
+        )));
+    }
+    shell_line(&app_info_line(package)).map(|output| parse_app_info(&output))
+}
+
 /// Android package names are letters, digits, `.` and `_`. Everything else is
 /// rejected before it can reach `am force-stop` or `adb uninstall` as an argv
 /// word, because adb joins the words into one device shell line.
@@ -919,5 +970,33 @@ mod tests {
         assert_eq!(error.code(), crate::error::code::COMMAND_FAILED);
         assert!(!path.exists());
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn app_info_takes_the_first_version_and_sums_the_apks() {
+        let output = "    versionName=2.1.0\n    lastUpdateTime=2026-11-01 12:00:00\n    versionName=1.0\n    lastUpdateTime=2008-12-31 16:00:00\n52428800\n1048576\n";
+        assert_eq!(
+            parse_app_info(output),
+            AppInfo {
+                version: Some("2.1.0".into()),
+                updated: Some("2026-11-01 12:00:00".into()),
+                apk_bytes: Some(53_477_376),
+            }
+        );
+    }
+
+    #[test]
+    fn app_info_leaves_missing_facts_empty() {
+        assert_eq!(parse_app_info(""), AppInfo::default());
+        let info = parse_app_info("versionName=null\nstat: permission denied\n");
+        assert_eq!(info.version, None);
+        assert_eq!(info.apk_bytes, None);
+    }
+
+    #[test]
+    fn app_info_rejects_a_package_with_shell_syntax() {
+        let error = app_info("a.b; reboot").unwrap_err();
+        assert_eq!(error.code(), crate::error::code::INVALID_INPUT);
+        assert!(app_info_line("com.example.app").contains("pm path com.example.app"));
     }
 }

@@ -1,17 +1,24 @@
 import React, { useEffect, useRef } from "react";
-import { Play, Copy, Trash2 } from "lucide-react";
+import { Play, Copy, Trash2, Square, Download } from "lucide-react";
 
 export default function ContextMenu({
   position,
   app,
   onClose,
   onLaunch,
+  onForceStop,
+  onBackupApk,
   onCopyPackage,
   onUninstall,
   disabled = false,
 }) {
   const menuRef = useRef(null);
   const previousActiveElement = useRef(null);
+  // The parent passes a new `onClose` on every render (the app list is polled
+  // every 10 s). Depending on it re-ran the effect below, which moved the
+  // keyboard focus back to the first item.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     previousActiveElement.current = document.activeElement;
@@ -26,14 +33,14 @@ export default function ContextMenu({
 
     const handleClickOutside = (e) => {
       if (menuRef.current && !menuRef.current.contains(e.target)) {
-        onClose();
+        onCloseRef.current();
       }
     };
 
     const handleKeyDown = (e) => {
       if (e.key === "Escape") {
         e.preventDefault();
-        onClose();
+        onCloseRef.current();
         return;
       }
 
@@ -59,7 +66,7 @@ export default function ContextMenu({
         e.preventDefault();
         items[items.length - 1].focus();
       } else if (e.key === "Tab") {
-        onClose();
+        onCloseRef.current();
       }
     };
 
@@ -75,7 +82,7 @@ export default function ContextMenu({
         previousActiveElement.current.focus();
       }
     };
-  }, [onClose]);
+  }, []);
 
   if (!position || !app) return null;
 
@@ -83,7 +90,7 @@ export default function ContextMenu({
   const screenW = window.innerWidth;
   const screenH = window.innerHeight;
   const menuW = 210;
-  const menuH = 140;
+  const menuH = 140 + (onForceStop ? 36 : 0) + (onBackupApk ? 36 : 0);
 
   const left = Math.min(position.x, screenW - menuW - 10);
   const top = Math.min(position.y, screenH - menuH - 10);
@@ -117,6 +124,39 @@ export default function ContextMenu({
         <Play size={15} fill="currentColor" aria-hidden="true" />
         <span>Launch App</span>
       </button>
+
+      {/* The same actions as the detail panel. */}
+      {onForceStop && (
+        <button
+          type="button"
+          role="menuitem"
+          className="context-menu-item"
+          onClick={() => {
+            onForceStop(app.package, app.name);
+            onClose();
+          }}
+          disabled={disabled}
+        >
+          <Square size={14} aria-hidden="true" />
+          <span>Force stop</span>
+        </button>
+      )}
+
+      {onBackupApk && (
+        <button
+          type="button"
+          role="menuitem"
+          className="context-menu-item"
+          onClick={() => {
+            onBackupApk(app.package, app.name);
+            onClose();
+          }}
+          disabled={disabled}
+        >
+          <Download size={15} aria-hidden="true" />
+          <span>Save APK</span>
+        </button>
+      )}
 
       <button
         type="button"

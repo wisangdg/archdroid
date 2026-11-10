@@ -1,23 +1,48 @@
 # Weekly update PRs. The workflows pin every action to a commit SHA; Dependabot
 # keeps those pins current and the same CI gates every update.
+#
+# `tauri build` refuses an npm @tauri-apps/* package whose version does not
+# match the tauri crate, so both sides must move in one PR. Dependabot cannot
+# group across ecosystems; instead the npm and cargo Tauri groups each only take
+# patch updates (which stay compatible), and minor/major Tauri moves are done
+# by hand in one commit. Other major updates (ESLint, React, lucide-react)
+# break the build or the lint plugins, so they are ignored here and taken by
+# hand too.
 version: 2
 updates:
   - package-ecosystem: npm
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@tauri-apps/*"
+        update-types: ["version-update:semver-minor"]
     groups:
+      tauri:
+        patterns: ["@tauri-apps/*"]
       npm-dev:
         dependency-type: development
+        exclude-patterns: ["@tauri-apps/*"]
       npm-runtime:
         dependency-type: production
+        exclude-patterns: ["@tauri-apps/*"]
   - package-ecosystem: cargo
     directory: /src-tauri
     schedule:
       interval: weekly
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "tauri*"
+        update-types: ["version-update:semver-minor"]
     groups:
+      tauri:
+        patterns: ["tauri*"]
       cargo:
         patterns: ["*"]
+        exclude-patterns: ["tauri*"]
   - package-ecosystem: github-actions
     directory: /
     schedule:

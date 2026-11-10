@@ -1,13 +1,32 @@
-import React from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import {
   Gamepad2,
   Play,
   Download,
-  Keyboard,
-  MousePointer,
-  ShieldCheck,
+  CheckCircle2,
+  AlertTriangle,
 } from "lucide-react";
 import TouchModePanel from "./TouchModePanel";
+
+const PHANTOM_BADGES = {
+  installed: (
+    <span className="badge-pill badge-success">
+      <CheckCircle2 size={14} /> Installed
+    </span>
+  ),
+  partial: (
+    <span
+      className="badge-pill badge-warning"
+      title="Only the terminal client was found; Launch opens it in a terminal."
+    >
+      <AlertTriangle size={14} /> Terminal only
+    </span>
+  ),
+  not_installed: (
+    <span className="badge-pill badge-neutral">Not Installed</span>
+  ),
+};
 
 export default function KeymapView({
   onRunPhantom,
@@ -17,6 +36,37 @@ export default function KeymapView({
   onToggleTouchMode,
   onEnableTouchAccess,
 }) {
+  // The backend thread can stop on its own (mouse unplugged, compositor
+  // gone); read the state whenever the page is opened, not only at start.
+  const refreshTouchMode = touchMode.refresh;
+  useEffect(() => {
+    refreshTouchMode?.();
+  }, [refreshTouchMode]);
+
+  // null while the first check runs, so Launch is not offered on a guess.
+  const [phantom, setPhantom] = useState(null);
+  const refreshPhantom = useCallback(async () => {
+    try {
+      const res = await invoke("phantom_status");
+      setPhantom(res?.status ?? "not_installed");
+    } catch (e) {
+      console.error("Phantom status error:", e);
+      setPhantom("not_installed");
+    }
+  }, []);
+
+  // Read on open and again when a task (the Phantom install among them) ends.
+  const wasInstalling = useRef(installing);
+  useEffect(() => {
+    if (wasInstalling.current && !installing) refreshPhantom();
+    wasInstalling.current = installing;
+  }, [installing, refreshPhantom]);
+  useEffect(() => {
+    refreshPhantom();
+  }, [refreshPhantom]);
+
+  const available = phantom === "installed" || phantom === "partial";
+
   return (
     <div className="keymap-view-container">
       <TouchModePanel
@@ -27,79 +77,63 @@ export default function KeymapView({
         onEnableAccess={onEnableTouchAccess}
       />
 
-      {/* Hero Showcase Card */}
       <div className="glass-panel keymap-hero-card">
         <div className="keymap-hero-visual">
           <div className="keymap-icon-ring">
-            <Gamepad2 size={64} className="icon-glow keymap-hero-icon" />
+            <Gamepad2 size={48} className="keymap-hero-icon" />
           </div>
         </div>
 
         <div className="keymap-hero-content">
-          <h2>Phantom Keymapper for Linux</h2>
+          <div className="tool-title-row">
+            <h2>Phantom Keymapper</h2>
+            {PHANTOM_BADGES[phantom] ?? (
+              <span className="badge-pill badge-neutral">Checking…</span>
+            )}
+          </div>
           <p>
-            Experience PC-grade controls for mobile games.{" "}
-            <strong>Phantom</strong> is an ultra-fast, native Wayland keymapper
-            designed specifically for Waydroid that translates keyboard strokes
-            and mouse movements directly into Android multi-touch gestures.
+            Phantom maps keyboard keys and mouse movement to Android touch
+            gestures, so games made for a touchscreen can be played with the
+            keyboard and mouse. Launch it next to the game.
           </p>
+          <ul className="keymap-facts">
+            <li>Keys to taps and joysticks; mouse look for shooters.</li>
+            <li>
+              Runs on the Linux side through uinput and does not change any APK.
+            </li>
+            <li>Games with strict anti-cheat may still detect or block it.</li>
+          </ul>
 
           <div className="keymap-actions">
             <button
-              className="btn btn-primary btn-glow"
+              className="btn btn-primary"
               onClick={onRunPhantom}
-              title="Launch Phantom Keymapper"
+              disabled={!available}
+              aria-describedby={available ? undefined : "phantom-launch-hint"}
             >
               <Play size={18} fill="currentColor" />
               <span>Launch Keymapper</span>
             </button>
             <button
-              className="btn btn-outline"
+              className={`btn ${phantom === "not_installed" ? "btn-primary" : "btn-outline"}`}
               onClick={onInstallPhantom}
               disabled={installing}
-              title="Clone/update Phantom from GitHub"
+              title="Build Phantom from its pinned source"
             >
               <Download size={18} />
-              <span>Install / Update Phantom</span>
+              <span>
+                {phantom === "not_installed"
+                  ? "Install Phantom"
+                  : "Update Phantom"}
+              </span>
             </button>
           </div>
-        </div>
-      </div>
-
-      {/* Feature Highlights Grid */}
-      <div className="keymap-features-grid">
-        <div className="glass-panel keymap-feature-item">
-          <div className="feature-icon-badge">
-            <Keyboard size={22} />
-          </div>
-          <h4>WASD & Custom Binds</h4>
-          <p>
-            Assign discrete touch coordinates or directional joysticks to any
-            keyboard keys.
-          </p>
-        </div>
-
-        <div className="glass-panel keymap-feature-item">
-          <div className="feature-icon-badge">
-            <MousePointer size={22} />
-          </div>
-          <h4>FPS Mouse Look & Aim</h4>
-          <p>
-            Lock cursor to enable 360-degree camera panning for shooter games
-            like Free Fire & PUBG.
-          </p>
-        </div>
-
-        <div className="glass-panel keymap-feature-item">
-          <div className="feature-icon-badge">
-            <ShieldCheck size={22} />
-          </div>
-          <h4>No APK Changes</h4>
-          <p>
-            Runs outside the Android container via native Linux uinput and never
-            modifies APK binaries. Games with strict anti-cheat may still detect
-            or block it.
-          </p>
+          {phantom === "not_installed" && (
+            <p id="phantom-launch-hint" className="keymap-hint">
+              Install Phantom first. It builds as your user (no root) and needs
+              about 1 GB of free space.
+            </p>
+          )}
         </div>
       </div>
     </div>

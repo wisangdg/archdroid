@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
-import { Search, X, PackagePlus, AlertCircle } from "lucide-react";
+import { Search, X, PackagePlus, AlertCircle, Loader2 } from "lucide-react";
 import AppRow from "./AppRow";
 import AppDetail from "./AppDetail";
 import ContextMenu from "./ContextMenu";
@@ -14,6 +14,12 @@ const SYSTEM_PREFIXES = [
 export function isSystemApp(pkg) {
   return SYSTEM_PREFIXES.some((prefix) => pkg.startsWith(prefix));
 }
+
+export const INITIAL_VIEW_STATE = {
+  searchQuery: "",
+  categoryFilter: "all",
+  selectedPackage: null,
+};
 
 const FILTERS = [
   { id: "all", label: "All" },
@@ -33,15 +39,29 @@ export default function MyAppsView({
   onForceStopApp,
   onOpenKeymap,
   onInstallApk,
+  installingApk = null,
+  onCancelInstall,
   onUninstallApp,
   onCopyPackage,
   onBackupApk,
   savingApk = false,
   busy = false,
+  viewState,
+  onViewStateChange,
 }) {
-  const [searchQuery, setSearchQuery] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState("all");
-  const [selectedPackage, setSelectedPackage] = useState(null);
+  // The page unmounts when another tab is opened. The app keeps this state
+  // (`viewState`), so the search, the filter and the selection are still
+  // there on the way back; standalone, the component holds it itself.
+  const [ownState, setOwnState] = useState(INITIAL_VIEW_STATE);
+  const view = viewState ?? ownState;
+  const setView = onViewStateChange ?? setOwnState;
+  const { searchQuery, categoryFilter, selectedPackage } = view;
+  const setSearchQuery = (value) =>
+    setView((prev) => ({ ...prev, searchQuery: value }));
+  const setCategoryFilter = (value) =>
+    setView((prev) => ({ ...prev, categoryFilter: value }));
+  const setSelectedPackage = (value) =>
+    setView((prev) => ({ ...prev, selectedPackage: value }));
   const [contextMenu, setContextMenu] = useState(null); // { position, app }
   const searchInputRef = useRef(null);
   const listRef = useRef(null);
@@ -98,29 +118,48 @@ export default function MyAppsView({
     row?.focus();
   };
 
-  const subtitle = `${apps.length} application${apps.length === 1 ? "" : "s"} ready to launch`;
+  const count = `${apps.length} application${apps.length === 1 ? "" : "s"}`;
+  const subtitle = engineOnline
+    ? `${count} ready to launch`
+    : `${count}. Launching one starts the engine.`;
 
   return (
     <div className="control-center">
       <section className="app-list-pane" aria-labelledby="app-list-title">
         <div className="app-list-head">
           <div className="app-list-titles">
-            <h2 id="app-list-title">
-              Applications <span className="app-list-count">{apps.length}</span>
-            </h2>
+            <h2 id="app-list-title">Applications</h2>
             <p className="app-list-subtitle">{subtitle}</p>
           </div>
           <button
             type="button"
             className="btn btn-primary btn-sm"
             onClick={onInstallApk}
-            disabled={busy}
+            disabled={busy || Boolean(installingApk)}
             title="Install an APK from your computer, or drop one on the window"
           >
             <PackagePlus size={16} aria-hidden="true" />
             <span>Install APK</span>
           </button>
         </div>
+
+        {installingApk && (
+          <div className="install-progress" role="status">
+            <Loader2 size={15} className="spinner" aria-hidden="true" />
+            <span className="install-progress-text">
+              Installing {installingApk}…
+            </span>
+            {onCancelInstall && (
+              <button
+                type="button"
+                className="btn btn-outline btn-sm"
+                onClick={onCancelInstall}
+              >
+                Cancel
+              </button>
+            )}
+          </div>
+        )}
 
         <div className="search-box">
           <Search size={16} className="search-icon" aria-hidden="true" />
@@ -245,6 +284,8 @@ export default function MyAppsView({
           app={contextMenu.app}
           onClose={() => setContextMenu(null)}
           onLaunch={onLaunchApp}
+          onForceStop={engineOnline ? onForceStopApp : undefined}
+          onBackupApk={engineOnline && !booting ? onBackupApk : undefined}
           onCopyPackage={onCopyPackage}
           onUninstall={onUninstallApp}
           disabled={busy}

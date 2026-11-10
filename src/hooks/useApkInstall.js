@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { listen } from "@tauri-apps/api/event";
 
 /** Single APKs and split-APK bundles; the backend installs bundles with adb. */
 export const APK_EXTENSIONS = ["apk", "apks", "xapk", "apkm"];
@@ -19,6 +20,30 @@ export const isInstallable = (path) =>
  */
 export function useApkInstall({ addToast, operationInFlight, loadApps }) {
   const [isDraggingOver, setIsDraggingOver] = useState(false);
+  // The file being installed. A big bundle takes minutes, so the page shows
+  // it for the whole time (with Cancel) instead of a toast that is gone in 4 s.
+  const [installingApk, setInstallingApk] = useState(null);
+  const installActive = useRef(false);
+  const installTaskId = useRef(null);
+
+  // The backend announces the install's task ID; Cancel needs it.
+  useEffect(() => {
+    const unlisten = listen("cmd-started", (event) => {
+      if (installActive.current) installTaskId.current = event.payload.task_id;
+    });
+    return () => {
+      unlisten.then((f) => f());
+    };
+  }, []);
+
+  const cancelInstall = useCallback(async () => {
+    if (!installTaskId.current) return;
+    try {
+      await invoke("cancel_task", { taskId: installTaskId.current });
+    } catch (e) {
+      console.error("Cancel install failed:", e);
+    }
+  }, []);
 
   const installApkFile = useCallback(
     async (filePath) => {
@@ -35,12 +60,18 @@ export function useApkInstall({ addToast, operationInFlight, loadApps }) {
         return;
       }
       const fileName = filePath.split("/").pop() || "APK";
-      try {
+      if (installActive.current) {
         addToast({
-          type: "info",
-          title: "Installing APK",
-          message: `Transferring and installing ${fileName}...`,
+          type: "warning",
+          title: "Operation In Progress",
+          message: "Wait for the current install to finish.",
         });
+        return;
+      }
+      installActive.current = true;
+      installTaskId.current = null;
+      setInstallingApk(fileName);
+      try {
         const res = await invoke("waydroid_install_apk", { path: filePath });
         if (res.status === "success") {
           addToast({
@@ -52,6 +83,12 @@ export function useApkInstall({ addToast, operationInFlight, loadApps }) {
           // Waydroid writes the new desktop entry asynchronously; reload once
           // more so the card appears without restarting the app.
           setTimeout(loadApps, 1000);
+        } else if (res.code === "cancelled") {
+          addToast({
+            type: "info",
+            title: "Install Cancelled",
+            message: `${fileName} was not installed.`,
+          });
         } else {
           addToast({
             type: "error",
@@ -66,6 +103,10 @@ export function useApkInstall({ addToast, operationInFlight, loadApps }) {
           title: "Install Error",
           message: String(e),
         });
+      } finally {
+        installActive.current = false;
+        installTaskId.current = null;
+        setInstallingApk(null);
       }
     },
     [addToast, loadApps, operationInFlight]
@@ -169,6 +210,8 @@ export function useApkInstall({ addToast, operationInFlight, loadApps }) {
 
   return {
     isDraggingOver,
+    installingApk,
+    cancelInstall,
     handleInstallApk,
     handleDragOver,
     handleDragLeave,

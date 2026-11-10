@@ -11,11 +11,23 @@
  *   packages and the same list is sent back as the approval.
  * - `confirm`: consent dialog shown first. Root tasks always have one, and
  *   Retry always goes back through it: the package plan may have changed.
+ *   `description` is one sentence; `details` are the labelled rows under it
+ *   (what changes, where it comes from, which access, how to undo it).
  */
 const ROOT_CONFIRM = {
   confirmText: "Proceed & Authorize Root",
   confirmVariant: "primary",
   iconType: "shield",
+};
+
+const ROOT_ACCESS = {
+  label: "Access",
+  text: "Administrator rights through polkit or sudo, for this action only.",
+};
+
+const UNDO_BY_RESET = {
+  label: "Undo",
+  text: "No separate uninstall; Factory Reset (Settings) removes it together with all Android data.",
 };
 
 export const TASKS = {
@@ -28,11 +40,19 @@ export const TASKS = {
       ...ROOT_CONFIRM,
       title: "Install Google Play Services (Root Required)",
       description:
-        "This installer modifies the Waydroid Android system image (/var/lib/waydroid/overlay/system) to inject Google Play Store and Services framework.\n\n" +
-        "• Source: waydroid_script (pinned commit 48dbfaf) • MindTheGapps / OpenGApps\n" +
-        "• Privilege: Requires Administrator (Root) access via Polkit or sudo\n" +
-        "• Consequence: Adds Google proprietary services to Android rootfs. Waydroid must be restarted after completion.\n\n" +
-        "Do you want to proceed with root installation?",
+        "Adds Google Play Store and Google Play Services to the Android system image.",
+      details: [
+        {
+          label: "Changes",
+          text: "Files in /var/lib/waydroid/overlay/system. Restart Waydroid afterwards.",
+        },
+        {
+          label: "Source",
+          text: "waydroid_script (pinned commit 48dbfaf), which downloads MindTheGapps or OpenGApps.",
+        },
+        ROOT_ACCESS,
+        UNDO_BY_RESET,
+      ],
     },
   },
   houdini: {
@@ -44,11 +64,19 @@ export const TASKS = {
       ...ROOT_CONFIRM,
       title: "Install ARM Translation Layer (Root Required)",
       description:
-        "This installer modifies the Waydroid Android system image (/var/lib/waydroid/overlay/system) and waydroid.cfg to inject Intel libhoudini ARM translation libraries.\n\n" +
-        "• Source: waydroid_script (pinned commit 48dbfaf) • Intel proprietary prebuilts\n" +
-        "• Privilege: Requires Administrator (Root) access via Polkit or sudo\n" +
-        "• Consequence: Injects binary translation bridge (binfmt_misc) to execute ARM/ARM64 games on x86_64 CPUs.\n\n" +
-        "Do you want to proceed with root installation?",
+        "Adds Intel libhoudini so apps built only for ARM can run on an x86_64 CPU.",
+      details: [
+        {
+          label: "Changes",
+          text: "Files in /var/lib/waydroid/overlay/system and settings in waydroid.cfg.",
+        },
+        {
+          label: "Source",
+          text: "waydroid_script (pinned commit 48dbfaf), with Intel's prebuilt libraries (proprietary).",
+        },
+        ROOT_ACCESS,
+        UNDO_BY_RESET,
+      ],
     },
   },
   multitouch: {
@@ -59,11 +87,22 @@ export const TASKS = {
       ...ROOT_CONFIRM,
       title: "Declare Touch Features (Root Required)",
       description:
-        "This operation writes Android touchscreen hardware capability declarations to the Waydroid vendor overlay (/var/lib/waydroid/overlay).\n\n" +
-        "• Source: ArchDroid internal hardware profile\n" +
-        "• Privilege: Requires Administrator (Root) access via Polkit or sudo\n" +
-        "• Consequence: Declares multitouch hardware features so Google Play Store permits downloading touch-dependent games. Requires restarting Waydroid.\n\n" +
-        "Do you want to proceed with root installation?",
+        "Makes Android declare a multitouch screen, so Google Play offers games that require one.",
+      details: [
+        {
+          label: "Changes",
+          text: "Writes one file: /var/lib/waydroid/overlay/vendor/etc/permissions/android.hardware.touchscreen.multitouch.xml. Restart Waydroid afterwards.",
+        },
+        {
+          label: "Source",
+          text: "Built into ArchDroid; nothing is downloaded.",
+        },
+        ROOT_ACCESS,
+        {
+          label: "Undo",
+          text: "Delete that file as root and restart Waydroid.",
+        },
+      ],
     },
   },
   "touch-access": {
@@ -74,12 +113,22 @@ export const TASKS = {
       ...ROOT_CONFIRM,
       title: "Enable Touch Mode Access (Root Required)",
       description:
-        "This installs a udev rule at /etc/udev/rules.d/70-archdroid-touch.rules.\n\n" +
-        "• Grants: the logged-in desktop user may read mice (never keyboards) and use /dev/uinput, which lets any program the user runs create virtual input devices, keyboards included (the same access Steam Input gets).\n" +
-        "• Why: touch mode turns your mouse clicks over Android windows into finger touches.\n" +
-        "• Privilege: Requires Administrator (Root) access via Polkit or sudo\n" +
-        '• Undo: delete that file and run "udevadm control --reload-rules".\n\n' +
-        "Do you want to proceed?",
+        "Lets touch mode turn your mouse clicks over Android windows into finger touches.",
+      details: [
+        {
+          label: "Changes",
+          text: "Installs the udev rule /etc/udev/rules.d/70-archdroid-touch.rules.",
+        },
+        {
+          label: "Grants",
+          text: "The logged-in desktop user may read mice (never keyboards) and use /dev/uinput, which lets any program the user runs create virtual input devices, keyboards included (the same access Steam Input gets).",
+        },
+        ROOT_ACCESS,
+        {
+          label: "Undo",
+          text: 'Delete that file and run "udevadm control --reload-rules".',
+        },
+      ],
     },
   },
   init: {
@@ -92,11 +141,22 @@ export const TASKS = {
       confirmText: "Initialize & Authorize Root",
       title: "Initialize Waydroid Container (Root Required)",
       description:
-        "Initializing Waydroid will download the official LineageOS container images (~1.2 GB) and configure the LXC Android container under /var/lib/waydroid.\n\n" +
-        "• Source: Official Waydroid / LineageOS system images\n" +
-        "• Privilege: Requires Administrator (Root) access via Polkit or sudo\n" +
-        "• Consequence: Sets up root container files and system partitions on disk.\n\n" +
-        "Do you want to proceed?",
+        "Downloads the Android system images (about 1.2 GB) and sets up the Waydroid container.",
+      details: [
+        {
+          label: "Changes",
+          text: "Creates the container and its system partitions under /var/lib/waydroid.",
+        },
+        {
+          label: "Source",
+          text: "The official Waydroid LineageOS images.",
+        },
+        ROOT_ACCESS,
+        {
+          label: "Undo",
+          text: "Factory Reset (Settings) deletes everything this creates.",
+        },
+      ],
     },
   },
   wipe: {
@@ -106,7 +166,22 @@ export const TASKS = {
     confirm: {
       title: "Factory Reset Waydroid?",
       description:
-        "WARNING: This will completely destroy all Waydroid container data, installed games, GApps modules, and configurations. Back up anything you need first (use Settings → Android Shared Storage to copy files out). You will need to re-initialize the emulator from scratch. This cannot be undone!",
+        "Deletes the whole Waydroid container: installed apps and their data, add-ons such as GApps, and settings.",
+      details: [
+        {
+          label: "Deletes",
+          text: "/var/lib/waydroid, ~/.local/share/waydroid and Waydroid's launcher entries.",
+        },
+        {
+          label: "Save first",
+          text: "Save APK (My Apps) keeps an app's installer; Settings → Android Shared Storage lets you copy files out. App data cannot be saved.",
+        },
+        {
+          label: "Afterwards",
+          text: "Initialize the emulator again from scratch.",
+        },
+        { label: "Undo", text: "Not possible." },
+      ],
       confirmText: "Wipe Everything",
       confirmVariant: "danger",
       iconType: "danger",

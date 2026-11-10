@@ -30,6 +30,25 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 describe("ConfirmModal component", () => {
+  it("lists the labelled details under the description", () => {
+    render(
+      <ConfirmModal
+        isOpen={true}
+        title="Declare Touch Features (Root Required)"
+        description="Makes Android declare a multitouch screen."
+        details={[
+          { label: "Changes", text: "Writes one file." },
+          { label: "Undo", text: "Delete that file." },
+        ]}
+        onCancel={vi.fn()}
+        onConfirm={vi.fn()}
+      />
+    );
+    const terms = screen.getAllByRole("term").map((el) => el.textContent);
+    expect(terms).toEqual(["Changes", "Undo"]);
+    expect(screen.getByText("Delete that file.")).toBeTruthy();
+  });
+
   it("renders wipe confirmation details and handles cancellation", () => {
     const handleCancel = vi.fn();
     const handleConfirm = vi.fn();

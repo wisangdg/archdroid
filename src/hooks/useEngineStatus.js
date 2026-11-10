@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { sessionRunning } from "../lib/waydroidStatus";
+import { pollDue } from "../lib/pollGate";
 
 const BOOT_POLL_MS = 2000;
 const BOOT_POLL_ATTEMPTS = 45; // ~90 s
@@ -117,6 +118,7 @@ export function useEngineStatus({ addToast, onOnline }) {
     [checkStatus]
   );
 
+  /** Starts the session; resolves to whether it reports online. */
   const handleStart = async () => {
     setIsOperating(true);
     addToast({
@@ -133,7 +135,7 @@ export function useEngineStatus({ addToast, onOnline }) {
           title: "Start Failed",
           message: `${res.message || "Failed to start Waydroid session."} A Diagnostic Bundle (Settings) includes the Waydroid log.`,
         });
-        return;
+        return false;
       }
       const online = await pollStatusUntil("online", 15);
       setIsOperating(false);
@@ -145,6 +147,7 @@ export function useEngineStatus({ addToast, onOnline }) {
             "The session is not reporting online yet. If it stays offline, create a Diagnostic Bundle in Settings: it includes the Waydroid log with the reason.",
         });
       }
+      return online;
     } catch (e) {
       console.error("Failed to start Waydroid:", e);
       addToast({
@@ -153,6 +156,7 @@ export function useEngineStatus({ addToast, onOnline }) {
         message: String(e),
       });
       setIsOperating(false);
+      return false;
     }
   };
 
@@ -247,14 +251,22 @@ export function useEngineStatus({ addToast, onOnline }) {
   };
 
   useEffect(() => {
-    checkStatus();
-    // Poll only the session state. A hidden window skips the tick;
+    let lastRun = Date.now();
+    const poll = () => {
+      lastRun = Date.now();
+      checkStatus();
+    };
+    poll();
+    // Poll only the session state, slower in the background (pollDue);
     // checkStatus never overlaps itself.
     const interval = setInterval(() => {
-      if (document.hidden) return;
-      checkStatus();
+      if (pollDue(lastRun, Date.now())) poll();
     }, 5000);
-    return () => clearInterval(interval);
+    window.addEventListener("focus", poll);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("focus", poll);
+    };
   }, [checkStatus]);
 
   useEffect(() => {

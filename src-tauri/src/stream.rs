@@ -146,6 +146,9 @@ struct StreamStarted {
 struct StreamOutput {
     task_id: String,
     line: String,
+    /// The line ended in a bare carriage return: one redraw of a progress bar.
+    /// The UI shows it in place of the previous redraw instead of adding a line.
+    progress: bool,
 }
 
 /// Final payload for `cmd-finished`. The UI branches on `code`, so it never
@@ -240,13 +243,32 @@ pub(crate) fn emit_started(app: &AppHandle, task_id: &str) {
 }
 
 fn emit_output(app: &AppHandle, task_id: &str, line: impl Into<String>) {
+    emit_line(app, task_id, line, false);
+}
+
+fn emit_line(app: &AppHandle, task_id: &str, line: impl Into<String>, progress: bool) {
     let _ = app.emit(
         "cmd-output",
         StreamOutput {
             task_id: task_id.to_string(),
             line: line.into(),
+            progress,
         },
     );
+}
+
+/// Progress bars redraw up to ten times a second (tqdm); a slow download used
+/// to fill the terminal with thousands of lines. Redraws closer together than
+/// this are dropped; the bar's last state ends in a newline and always arrives.
+const PROGRESS_INTERVAL: Duration = Duration::from_millis(250);
+
+/// Whether a progress redraw seen at `now` is forwarded.
+fn progress_due(last: &mut Option<Instant>, now: Instant) -> bool {
+    if last.is_some_and(|last| now.duration_since(last) < PROGRESS_INTERVAL) {
+        return false;
+    }
+    *last = Some(now);
+    true
 }
 
 /// Emit a completed line and remember the beginning of the output.
@@ -313,32 +335,55 @@ fn spawn_line_reader(
 ) -> thread::JoinHandle<()> {
     let task_id = task_id.to_string();
     thread::spawn(move || {
-        read_lines(reader, |mut line| {
-            flush_line(&app, &task_id, &mut line, &captured, &tail)
+        let mut last_progress = None;
+        read_lines(reader, |mut line, progress| {
+            if !progress {
+                flush_line(&app, &task_id, &mut line, &captured, &tail);
+            } else if !line.trim().is_empty() && progress_due(&mut last_progress, Instant::now()) {
+                // A redraw is display only: not part of the captured output
+                // or of the failure tail.
+                emit_line(&app, &task_id, line, true);
+            }
         });
     })
 }
 
-/// Split a byte stream on `\n` and `\r`, decoding each line as UTF-8 only once
-/// it is complete: progress bars (tqdm, pip) draw with multi-byte characters
-/// such as `█`, which byte-by-byte decoding would turn into mojibake.
-fn read_lines(reader: impl Read, mut on_line: impl FnMut(String)) {
+/// Split a byte stream into lines, decoding each as UTF-8 only once it is
+/// complete: progress bars (tqdm, pip) draw with multi-byte characters such as
+/// `█`, which byte-by-byte decoding would turn into mojibake.
+///
+/// `on_line(line, progress)`: `progress` is true for a line that ended in a
+/// carriage return alone, which is how a progress bar redraws itself. `\r\n`
+/// is an ordinary line end.
+fn read_lines(reader: impl Read, mut on_line: impl FnMut(String, bool)) {
     let mut reader = BufReader::new(reader);
     let mut line = Vec::new();
     let mut byte = [0; 1];
+    let mut after_cr = false;
     loop {
         match reader.read(&mut byte) {
             Ok(0) | Err(_) => break,
             Ok(_) => {}
         }
-        if byte[0] == b'\n' || byte[0] == b'\r' {
-            on_line(String::from_utf8_lossy(&line).into_owned());
+        if after_cr {
+            after_cr = false;
+            let progress = byte[0] != b'\n';
+            on_line(String::from_utf8_lossy(&line).into_owned(), progress);
             line.clear();
-        } else {
-            line.push(byte[0]);
+            if !progress {
+                continue;
+            }
+        }
+        match byte[0] {
+            b'\n' => {
+                on_line(String::from_utf8_lossy(&line).into_owned(), false);
+                line.clear();
+            }
+            b'\r' => after_cr = true,
+            other => line.push(other),
         }
     }
-    on_line(String::from_utf8_lossy(&line).into_owned());
+    on_line(String::from_utf8_lossy(&line).into_owned(), false);
 }
 
 /// Why a child is no longer being waited for.
@@ -1055,11 +1100,45 @@ mod tests {
     fn read_lines_keeps_utf8_progress_bars_intact() {
         let input = " 42%|████▏     | 82.5M\r 43%|████▎     | 84.1M\nlast";
         let mut lines = Vec::new();
-        read_lines(input.as_bytes(), |line| lines.push(line));
+        read_lines(input.as_bytes(), |line, _| lines.push(line));
         assert_eq!(
             lines,
             [" 42%|████▏     | 82.5M", " 43%|████▎     | 84.1M", "last"]
         );
+    }
+
+    #[test]
+    fn read_lines_marks_only_bare_carriage_returns_as_progress() {
+        let input = "start\n 1%|a\r 2%|b\r100%|c\ncrlf line\r\nend\r";
+        let mut lines = Vec::new();
+        read_lines(input.as_bytes(), |line, progress| {
+            lines.push((line, progress))
+        });
+        let expected = [
+            ("start", false),
+            (" 1%|a", true),
+            (" 2%|b", true),
+            ("100%|c", false),
+            ("crlf line", false),
+            // A trailing CR at the end of the stream is just the last line.
+            ("end", false),
+        ];
+        assert_eq!(
+            lines,
+            expected.map(|(line, progress)| (line.to_string(), progress))
+        );
+    }
+
+    #[test]
+    fn progress_redraws_are_rate_limited() {
+        let start = Instant::now();
+        let mut last = None;
+        let at = |ms| start + Duration::from_millis(ms);
+        // tqdm: ten redraws a second for 2 s -> at most one per interval.
+        let forwarded = (0..20)
+            .filter(|i| progress_due(&mut last, at(i * 100)))
+            .count();
+        assert_eq!(forwarded, 7, "0, 300, 600, ... 1800 ms");
     }
 
     #[test]
@@ -1664,10 +1743,12 @@ wait
         let value = serde_json::to_value(StreamOutput {
             task_id: "task-9".to_string(),
             line: "installing".to_string(),
+            progress: false,
         })
         .unwrap();
         assert_eq!(value["task_id"], "task-9");
         assert_eq!(value["line"], "installing");
+        assert_eq!(value["progress"], false);
     }
 
     #[test]

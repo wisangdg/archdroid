@@ -1,6 +1,6 @@
 [package]
 name = "archdroid"
-version = "0.1.6"
+version = "0.1.7"
 description = "Android emulator manager (Waydroid) for Linux"
 authors = ["Wisang Drillian Geni <gwisang45@gmail.com>"]
 license = "MIT"
@@ -36,3 +36,10 @@ base64 = "0.22.1"
 evdev = "0.13.2"
 libc = "0.2"
 zip = { version = "9", default-features = false, features = ["deflate"] }
+
+# Smaller release binary. No `panic = "abort"`: `off_main_thread` turns a
+# panicking command into an error result, which needs unwinding.
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"

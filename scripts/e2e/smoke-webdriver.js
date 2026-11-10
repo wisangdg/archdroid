@@ -164,6 +164,13 @@ window.__MOCK_INVOKE__ = async function(cmd, args) {
   if (cmd === "check_gapps_status") {
     return { status: window.__mockState.gappsStatus };
   }
+  if (cmd === "app_info") {
+    return { version: "1.0", updated: "2026-11-01 12:00:00", apk_bytes: 5000000 };
+  }
+  if (cmd === "phantom_status") {
+    // Only the terminal client: Launch needs a terminal emulator (scenario 4).
+    return { status: "partial" };
+  }
   if (cmd === "check_houdini_status") {
     return { status: window.__mockState.houdiniStatus };
   }
@@ -491,7 +498,7 @@ async function runSmokeTests() {
       if (settingsTab) settingsTab.click();
     `);
     await driver.waitFor(
-      'return !!document.querySelector(".danger-card-header h3")?.textContent?.includes("Danger Zone: Factory Reset");'
+      'return !!document.querySelector(".danger-card-header h3")?.textContent?.includes("Factory Reset");'
     );
     console.log("  ✔ Navigated to Settings tab.");
 
@@ -528,8 +535,9 @@ async function runSmokeTests() {
       const keymapTab = tabs.find(t => t.textContent.includes("Keymapping"));
       if (keymapTab) keymapTab.click();
     `);
+    // Launch stays disabled until phantom_status has answered.
     await driver.waitFor(
-      'return !!document.querySelector(".keymap-actions button");'
+      'return Array.from(document.querySelectorAll(".keymap-actions button")).some(b => b.textContent.includes("Launch Keymapper") && !b.disabled);'
     );
     await driver.execute(`
       const launchBtn = Array.from(document.querySelectorAll(".keymap-actions button"))
@@ -572,11 +580,11 @@ async function runSmokeTests() {
       'return !!document.querySelector(".terminal-modal");'
     );
     await driver.waitFor(
-      'return !!document.querySelector(".btn-cancel-top");'
+      'return !!document.querySelector(".terminal-footer-actions .btn-danger");'
     );
     // Click Cancel
     await driver.execute(`
-      const cancelBtn = document.querySelector(".btn-cancel-top");
+      const cancelBtn = document.querySelector(".terminal-footer-actions .btn-danger");
       if (cancelBtn) cancelBtn.click();
     `);
     // Verify cancel text appears and cancel_task was invoked with active task_id

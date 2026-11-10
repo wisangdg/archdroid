@@ -186,9 +186,36 @@ fn write_bundle(target: &Path, apks: &[PathBuf]) -> Result<()> {
     let mut part = target.as_os_str().to_owned();
     part.push(".part");
     let part = PathBuf::from(part);
-    let result = write_zip(&part, apks).and_then(|()| Ok(std::fs::hard_link(&part, target)?));
+    let result = write_zip(&part, apks).and_then(|()| {
+        Ok(publish(&part, target, |from, to| {
+            std::fs::hard_link(from, to)
+        })?)
+    });
     let _ = std::fs::remove_file(&part);
     result
+}
+
+/// Give the finished `.part` file its final name without replacing anything.
+///
+/// A hard link does that atomically. exFAT and FAT have no hard links (the
+/// kernel answers EPERM), and Downloads can live on such a drive: there the
+/// file is renamed instead, after checking again that the name is free.
+fn publish(
+    part: &Path,
+    target: &Path,
+    link: impl Fn(&Path, &Path) -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    match link(part, target) {
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::Unsupported
+            ) && !target.exists() =>
+        {
+            std::fs::rename(part, target)
+        }
+        other => other,
+    }
 }
 
 fn write_zip(path: &Path, apks: &[PathBuf]) -> Result<()> {
@@ -408,6 +435,27 @@ mod tests {
     }
 
     const SPLIT: &[u8] = b"PK\x03\x04AndroidManifest.xml";
+
+    #[test]
+    fn a_drive_without_hard_links_gets_a_rename_and_keeps_existing_files() {
+        let dir = scratch("publish");
+        let no_links = |_: &Path, _: &Path| -> std::io::Result<()> {
+            Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
+        };
+
+        let part = dir.join("app.apks.part");
+        std::fs::write(&part, b"bundle").unwrap();
+        let target = dir.join("app.apks");
+        publish(&part, &target, no_links).unwrap();
+        assert_eq!(std::fs::read(&target).unwrap(), b"bundle");
+        assert!(!part.exists());
+
+        // The name is taken: nothing is replaced.
+        std::fs::write(&part, b"second").unwrap();
+        assert!(publish(&part, &target, no_links).is_err());
+        assert_eq!(std::fs::read(&target).unwrap(), b"bundle");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn apk_check_rejects_text_and_manifestless_zips() {

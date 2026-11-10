@@ -1,9 +1,58 @@
-/* No remote font @import: the app must work offline and under
-   `font-src 'self'`. The stacks below fall back to locally installed fonts. */
+/* The two UI fonts ship with the app (SIL OFL 1.1, licences next to the
+   files), so every distro renders the same text widths. No remote @import:
+   the app must work offline and under `font-src 'self'`. */
+@font-face {
+  font-family: "Outfit";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("./assets/fonts/outfit-latin-ext-wght-normal.woff2")
+    format("woff2-variations");
+  unicode-range:
+    U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304,
+    U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB,
+    U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "Outfit";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("./assets/fonts/outfit-latin-wght-normal.woff2")
+    format("woff2-variations");
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212,
+    U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 800;
+  src: url("./assets/fonts/jetbrains-mono-latin-ext-wght-normal.woff2")
+    format("woff2-variations");
+  unicode-range:
+    U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304,
+    U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB,
+    U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 800;
+  src: url("./assets/fonts/jetbrains-mono-latin-wght-normal.woff2")
+    format("woff2-variations");
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212,
+    U+2215, U+FEFF, U+FFFD;
+}
 
 :root {
   --bg-base: #080b10;
-  --bg-sidebar: rgba(11, 15, 23, 0.88); /* top bar */
+  --bg-sidebar: #0b0f17; /* top bar: solid, no blur behind it */
   --bg-surface: rgba(18, 24, 38, 0.65);
   --bg-surface-hover: rgba(26, 34, 52, 0.75);
   --bg-card: rgba(22, 29, 45, 0.5);
@@ -11,7 +60,7 @@
 
   --text-primary: #f8fafc;
   --text-secondary: #94a3b8;
-  --text-muted: #64748b;
+  --text-muted: #8492a6; /* 4.8:1 or more on every surface */
 
   --accent-primary: #10b981;
   --accent-secondary: #059669;
@@ -128,13 +177,12 @@ body {
 /* Top Bar */
 .topbar {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  white-space: nowrap;
   align-items: center;
   gap: 12px 20px;
   padding: 10px 20px;
   background: var(--bg-sidebar);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
   border-bottom: 1px solid var(--border-subtle);
   flex-shrink: 0;
   z-index: 10;
@@ -172,13 +220,13 @@ body {
 
 .brand-version {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-secondary);
 }
 
 .topbar-nav {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 4px;
 }
 
@@ -211,12 +259,76 @@ body {
   font-weight: 600;
 }
 
+/* The label's bold width is always reserved (see TopBar). */
+.menu-label {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.menu-label::after {
+  content: attr(data-label);
+  height: 0;
+  visibility: hidden;
+  overflow: hidden;
+  font-weight: 600;
+  pointer-events: none;
+  user-select: none;
+}
+
+.btn-engine-icon {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  gap: 0;
+}
+
+.btn-engine-icon svg {
+  flex-shrink: 0;
+}
+
+/* Narrower than the default window: icons instead of words, one row. */
+@media (max-width: 1199px) {
+  .brand-version {
+    display: none;
+  }
+  .topbar {
+    gap: 12px;
+    padding: 10px 14px;
+  }
+  .menu-item {
+    padding: 0 10px;
+  }
+}
+
+@media (max-width: 1079px) {
+  .brand-text {
+    display: none;
+  }
+  .menu-item:not(.active) .menu-label {
+    display: none;
+  }
+}
+
+@media (max-width: 699px) {
+  .menu-item .menu-label,
+  .menu-badge {
+    display: none;
+  }
+  .status-text {
+    display: none;
+  }
+  .topbar-right > .btn-icon {
+    display: none;
+  }
+}
+
 .menu-item.active svg {
   color: var(--accent-primary);
 }
 
 .menu-badge {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   padding: 1px 7px;
   border-radius: var(--radius-full);
@@ -227,7 +339,7 @@ body {
 .topbar-right {
   margin-left: auto;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 10px;
 }
@@ -294,6 +406,12 @@ body {
 
 .status-online .status-dot {
   box-shadow: 0 0 8px currentColor;
+}
+
+/* Only a state that ends by itself may animate: a running engine stays
+   running for hours, and an endless animation kept WebKitGTK repainting the
+   bar at 60 fps (a full core without GPU compositing). */
+.status-booting .status-dot {
   animation: pulse 2s infinite;
 }
 
@@ -447,10 +565,10 @@ body {
 }
 
 /* Glass Panels */
+/* No backdrop blur: panels sit on a static gradient, so it showed nothing and
+   cost a blur pass per panel while scrolling. Overlays keep theirs. */
 .glass-panel {
   background: var(--bg-surface);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
   border-radius: var(--radius-lg);
   padding: 24px 28px;
   border: 1px solid var(--border-subtle);
@@ -599,7 +717,7 @@ body {
 }
 
 .segmented-count {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-secondary);
 }
 
@@ -667,12 +785,12 @@ body {
 }
 
 .app-row-package {
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .app-tag {
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   padding: 3px 8px;
   border-radius: var(--radius-full);
@@ -1046,7 +1164,7 @@ body {
   color: var(--text-secondary);
   font-size: 15px;
   line-height: 1.6;
-  margin-bottom: 22px;
+  margin-bottom: 12px;
 }
 
 .keymap-actions {
@@ -1054,40 +1172,18 @@ body {
   gap: 14px;
 }
 
-.keymap-features-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 18px;
+.keymap-facts {
+  margin: 0 0 20px;
+  padding-left: 18px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.7;
 }
 
-.keymap-feature-item {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 22px;
-}
-
-.feature-icon-badge {
-  width: 42px;
-  height: 42px;
-  border-radius: var(--radius-sm);
-  background: rgba(16, 185, 129, 0.1);
-  color: var(--accent-primary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.keymap-feature-item h4 {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.keymap-feature-item p {
+.keymap-hint {
+  margin-top: 12px;
   font-size: 13px;
   color: var(--text-muted);
-  line-height: 1.5;
 }
 
 /* Settings View */
@@ -1119,6 +1215,43 @@ body {
 .app-log-view {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  max-height: 240px;
+  overflow: auto;
+}
+
+/* Settings: Logs & Support, one panel with a row per log */
+.log-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px 20px;
+  padding: 16px 0;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.log-row-text {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+
+.log-row-text h4 {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.log-row-text p {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.log-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .settings-card-icon {
@@ -1445,7 +1578,7 @@ body {
 
 .setup-preflight-heading p {
   margin: 3px 0 0;
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.45;
   color: var(--text-muted);
 }
@@ -1529,15 +1662,15 @@ body {
 .setup-preflight-item-value {
   display: block;
   margin-top: 3px;
-  font-family: "JetBrains Mono", monospace;
-  font-size: 11px;
+  font-family: var(--font-mono);
+  font-size: 12px;
   color: var(--text-secondary);
   word-break: break-word;
 }
 
 .setup-preflight-item-detail {
   margin: 4px 0 0;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.45;
   color: var(--text-muted);
 }
@@ -1550,8 +1683,8 @@ body {
   background: rgba(0, 0, 0, 0.35);
   border: 1px solid var(--border-subtle);
   color: #a7f3d0;
-  font-family: "JetBrains Mono", monospace;
-  font-size: 11px;
+  font-family: var(--font-mono);
+  font-size: 12px;
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -1562,7 +1695,7 @@ body {
   background: none;
   border: none;
   color: var(--accent-primary);
-  font-size: 11.5px;
+  font-size: 12px;
   cursor: pointer;
 }
 
@@ -1679,7 +1812,7 @@ body {
   height: 400px;
   min-height: 96px;
   overflow-y: auto;
-  font-family: "JetBrains Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 13px;
   padding: 16px;
   color: #cbd5e1;
@@ -1776,9 +1909,10 @@ body {
    ======================================================== */
 
 /* Toast System */
+/* Bottom right: the top right holds the engine controls. */
 .toast-container {
   position: fixed;
-  top: 24px;
+  bottom: 24px;
   right: 28px;
   z-index: 999;
   display: flex;
@@ -1867,10 +2001,11 @@ body {
 }
 
 .toast-message {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-secondary);
   line-height: 1.45;
   word-break: break-word;
+  user-select: text;
 }
 
 .toast-close-btn {
@@ -1967,6 +2102,39 @@ body {
   white-space: pre-line;
 }
 
+.confirm-modal-details {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  user-select: text;
+}
+
+.confirm-detail-row {
+  display: grid;
+  grid-template-columns: 88px 1fr;
+  gap: 12px;
+}
+
+.confirm-detail-row dt {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.confirm-detail-row dd {
+  margin: 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 480px) {
+  .confirm-detail-row {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+}
+
 .confirm-package-preview {
   margin-top: 4px;
   padding: 12px 14px;
@@ -2056,7 +2224,7 @@ body {
 }
 
 .context-menu-app-name {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--text-muted);
   text-transform: uppercase;
@@ -2256,7 +2424,7 @@ body {
 }
 
 .stepper-desc {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
   white-space: nowrap;
 }
@@ -2338,7 +2506,7 @@ body {
   font-size: 13px;
   color: var(--text-secondary);
   line-height: 1.5;
-  font-family: "JetBrains Mono", monospace;
+  font-family: var(--font-mono);
   word-break: break-all;
 }
 
@@ -2383,7 +2551,7 @@ body {
 }
 
 .console-lines-badge {
-  font-size: 11px;
+  font-size: 12px;
   padding: 1px 6px;
   border-radius: var(--radius-full);
   background: rgba(0, 0, 0, 0.35);
@@ -2436,7 +2604,7 @@ body {
 
 .current-res-badge strong {
   color: var(--accent-primary);
-  font-family: "JetBrains Mono", monospace;
+  font-family: var(--font-mono);
   font-weight: 600;
 }
 
@@ -2445,15 +2613,15 @@ body {
   color: var(--accent-primary);
   padding: 1px 7px;
   border-radius: var(--radius-xs);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
 }
 
 /* Presets Grid */
 .presets-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
   margin: 18px 0;
 }
 
@@ -2521,7 +2689,7 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   background: linear-gradient(
     135deg,
@@ -2538,7 +2706,7 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   background: rgba(56, 189, 248, 0.15);
   color: #38bdf8;
@@ -2566,7 +2734,7 @@ body {
   font-size: 12px;
   font-weight: 600;
   color: var(--accent-primary);
-  font-family: "JetBrains Mono", monospace;
+  font-family: var(--font-mono);
 }
 
 .res-sep {
@@ -2575,7 +2743,7 @@ body {
 
 .preset-dpi {
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .preset-custom-label {
@@ -2584,7 +2752,7 @@ body {
 }
 
 .preset-description {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
   line-height: 1.45;
   margin-top: 5px;
@@ -2600,7 +2768,7 @@ body {
 }
 
 .preset-ratio-pill {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--text-muted);
   background: rgba(255, 255, 255, 0.04);
   padding: 2px 7px;
@@ -2660,7 +2828,7 @@ body {
 }
 
 .res-input-group label {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   color: var(--text-muted);
 }
@@ -2672,7 +2840,7 @@ body {
   border-radius: var(--radius-sm);
   padding: 8px 12px;
   font-size: 13px;
-  font-family: "JetBrains Mono", monospace;
+  font-family: var(--font-mono);
   width: 130px;
   outline: none;
   transition: border-color var(--transition-fast);
@@ -2698,7 +2866,7 @@ body {
 }
 
 .quick-dpi-label {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
   margin-right: 4px;
 }
@@ -2709,7 +2877,7 @@ body {
   color: var(--text-secondary);
   border-radius: var(--radius-full);
   padding: 3px 10px;
-  font-size: 11px;
+  font-size: 12px;
   font-family: inherit;
   cursor: pointer;
   transition: all var(--transition-fast);
@@ -2889,7 +3057,7 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   padding: 3px 8px;
   border-radius: var(--radius-full);
@@ -2934,7 +3102,7 @@ body {
 
 .diag-item-value {
   font-size: 12px;
-  font-family: "JetBrains Mono", monospace;
+  font-family: var(--font-mono);
   color: var(--accent-primary);
   word-break: break-all;
 }
@@ -2948,7 +3116,7 @@ body {
 }
 
 .diag-item-detail {
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--text-muted);
   line-height: 1.45;
   margin: 4px 0 0 0;
@@ -2965,7 +3133,7 @@ body {
 .diag-remediation-label {
   display: block;
   margin-bottom: 3px;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -2974,8 +3142,8 @@ body {
 
 .diag-remediation code {
   display: block;
-  font-family: "JetBrains Mono", monospace;
-  font-size: 11px;
+  font-family: var(--font-mono);
+  font-size: 12px;
   line-height: 1.45;
   color: #a7f3d0;
   white-space: pre-wrap;
@@ -3112,7 +3280,7 @@ body {
   color: var(--accent-primary);
   padding: 2px 6px;
   border-radius: 4px;
-  font-family: "JetBrains Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
 }
 
@@ -3126,7 +3294,7 @@ body {
 }
 
 .dropzone-pill {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   color: var(--text-muted);
   background: rgba(255, 255, 255, 0.04);
@@ -3185,4 +3353,160 @@ body {
 
 .touch-mode-error {
   color: var(--warning-primary);
+}
+
+/* Download progress in the stepper's status card */
+.status-card-progress {
+  width: 100%;
+  height: 6px;
+  margin-top: 10px;
+  border: 0;
+  border-radius: var(--radius-full);
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.08);
+  accent-color: var(--accent-primary);
+}
+
+.status-card-progress::-webkit-progress-bar {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.status-card-progress::-webkit-progress-value {
+  background: var(--accent-primary);
+}
+
+/* Content people copy: commands, paths, log output, error text */
+code,
+pre,
+.terminal-console-body,
+.app-detail-package,
+.app-fact dd,
+.diag-item-value,
+.diag-item-detail,
+.setup-preflight-fix,
+.confirm-modal-desc,
+.status-card-message {
+  user-select: text;
+}
+
+/* Settings: jump bar, section anchors, diagnostics summary */
+.page-heading {
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.settings-jump {
+  position: sticky;
+  top: -24px;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 6px;
+  margin-top: -8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-sidebar);
+  border: 1px solid var(--border-subtle);
+  align-self: flex-start;
+}
+
+.settings-jump .segmented-btn:hover {
+  background: var(--bg-surface-hover);
+  color: var(--text-primary);
+}
+
+.settings-anchor {
+  display: block;
+  height: 0;
+  margin-bottom: -20px;
+  scroll-margin-top: 36px;
+}
+
+.diag-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  margin-top: 14px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.diag-copy {
+  margin-top: 8px;
+}
+
+.settings-card .btn {
+  white-space: nowrap;
+}
+
+/* Narrow windows. A tiling compositor ignores the window's minimum size, so a
+   third or a quarter of the screen is a normal width. */
+@media (max-width: 720px) {
+  .content-scrollable {
+    padding: 16px 16px 32px;
+  }
+  .page-heading {
+    padding: 16px 16px 12px;
+  }
+  .glass-panel {
+    padding: 18px 16px;
+  }
+  .prop-inputs-row,
+  .settings-card,
+  .tool-card-footer,
+  .keymap-hero-card,
+  .danger-card {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .prop-input-key,
+  .prop-input-val {
+    min-width: 0;
+    flex: none;
+  }
+  .keymap-hero-card {
+    gap: 18px;
+    padding: 22px 18px;
+  }
+  .keymap-hero-visual {
+    align-self: center;
+  }
+  .keymap-actions,
+  .tool-title-row,
+  .tool-card-header {
+    flex-wrap: wrap;
+  }
+  .tool-header-text,
+  .keymap-hero-content {
+    min-width: 0;
+  }
+  code {
+    overflow-wrap: anywhere;
+    word-break: break-all;
+  }
+  .tool-card-footer {
+    gap: 12px;
+  }
+}
+
+/* An APK install in progress (My Apps) */
+.install-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-accent);
+  background: var(--accent-glow-subtle);
+  font-size: 13px;
+}
+
+.install-progress-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

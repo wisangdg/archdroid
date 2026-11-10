@@ -62,7 +62,7 @@ pub const NOT_INITIALIZED_LEGACY_MARKER: &str = "Cannot locate waydroid config";
 /// again" is deliberately absent: a later retry can succeed. These markers are
 /// only treated as failures when the exit code is already zero; a non-zero exit
 /// keeps the more useful `Exit` error.
-const FAILURE_MARKERS: [&str; 7] = [
+const FAILURE_MARKERS: [&str; 8] = [
     "container failed to start",
     "sending reply failed",
     "waydroid session is stopped",
@@ -70,7 +70,13 @@ const FAILURE_MARKERS: [&str; 7] = [
     "failed to access iplatform service",
     "service manager never appeared",
     "failed to uninstall package",
+    BROKEN_SESSION_MARKER,
 ];
+
+/// Printed (exit 0) by `app launch`/`show-full-ui` when the container still
+/// tracks a session whose session manager is gone: the command tries to start
+/// a second session, the container refuses, and nothing is launched.
+const BROKEN_SESSION_MARKER: &str = "already tracking a session";
 
 /// How long `session start` may take to fail before a still-running daemon
 /// counts as started. A failed LXC start takes ~10 s to surface (and the CLI
@@ -200,6 +206,69 @@ pub fn argv_shell(command: &[&str]) -> Vec<String> {
 
 pub struct Waydroid {
     program: PathBuf,
+    /// Read the session state from the container service over D-Bus instead of
+    /// starting `waydroid status`. Off for the unit tests' stub programs.
+    fast_status: bool,
+}
+
+/// `waydroid status` is a Python start (about 120 ms of CPU) around one D-Bus
+/// call. The UI asks every 5 s and every adb command asks twice, so the same
+/// call is made directly: `busctl` answers in a few milliseconds.
+const SESSION_CALL: [&str; 7] = [
+    "--system",
+    "--json=short",
+    "call",
+    "id.waydro.Container",
+    "/ContainerManager",
+    "id.waydro.ContainerManager",
+    "GetSession",
+];
+const WAYDROID_CONFIG: &str = "/var/lib/waydroid/waydroid.cfg";
+const DHCP_LEASES: &str = "/var/lib/misc/dnsmasq.waydroid0.leases";
+
+/// The container's address from dnsmasq's lease file, as `waydroid status`
+/// reads it: the first IPv4 address followed by whitespace.
+pub(crate) fn lease_ip(leases: &str) -> Option<String> {
+    leases
+        .split_whitespace()
+        .find(|word| {
+            let parts: Vec<&str> = word.split('.').collect();
+            parts.len() == 4 && parts.iter().all(|part| part.parse::<u8>().is_ok())
+        })
+        .map(str::to_string)
+}
+
+/// Turn the `GetSession` reply (`busctl --json=short`) into the text
+/// `waydroid status` prints, so every parser above keeps working. `None` when
+/// the reply is not the expected shape; the caller then asks the CLI.
+pub(crate) fn status_from_session(reply: &str, ip: Option<&str>) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(reply.trim()).ok()?;
+    let session = value.get("data")?.as_array()?.first()?.as_object()?;
+    if session.is_empty() {
+        return Some("Session:\tSTOPPED\n".to_string());
+    }
+    let state = session.get("state")?.as_str()?;
+    let mut text = format!("Session:\tRUNNING\nContainer:\t{state}\n");
+    if let Some(ip) = ip {
+        text.push_str(&format!("IP address:\t{ip}\n"));
+    }
+    Some(text)
+}
+
+/// The session state without the CLI, or `None` when it has to be asked:
+/// Waydroid is not initialised (the CLI words that case), there is no
+/// `busctl`, or the container service did not answer.
+fn fast_status() -> Option<String> {
+    if !Path::new(WAYDROID_CONFIG).exists() {
+        return None;
+    }
+    let busctl = crate::resolve_program("busctl")?;
+    let args: Vec<String> = SESSION_CALL.iter().map(|arg| (*arg).to_string()).collect();
+    let reply = run_program(&busctl, &args, 5, None).ok()?;
+    let ip = std::fs::read_to_string(DHCP_LEASES)
+        .ok()
+        .and_then(|leases| lease_ip(&leases));
+    status_from_session(&reply, ip.as_deref())
 }
 
 impl Waydroid {
@@ -207,7 +276,10 @@ impl Waydroid {
     pub fn detect() -> Result<Self> {
         let program =
             crate::resolve_program(BINARY).ok_or_else(|| AppError::not_found(BINARY, HINT))?;
-        Ok(Self { program })
+        Ok(Self {
+            program,
+            fast_status: true,
+        })
     }
 
     /// Use an explicit program path. `#[cfg(test)]` because only the unit tests
@@ -216,6 +288,7 @@ impl Waydroid {
     pub fn with_program(program: impl Into<PathBuf>) -> Self {
         Self {
             program: program.into(),
+            fast_status: false,
         }
     }
 
@@ -244,6 +317,11 @@ impl Waydroid {
 
     /// Raw `waydroid status` output, which is what the UI already parses.
     pub fn status(&self) -> Result<String> {
+        if self.fast_status {
+            if let Some(status) = fast_status() {
+                return Ok(status);
+            }
+        }
         self.run(&argv_status(), TIMEOUT_QUICK)
     }
 
@@ -345,8 +423,35 @@ impl Waydroid {
         self.run_cancellable(&argv_app_remove(package), TIMEOUT_LONG, cancel)
     }
 
+    /// Launch an app in the **running** session.
+    ///
+    /// With the session stopped, `waydroid app launch` does not fail: it
+    /// becomes the session manager (`session_manager.start(.., background=
+    /// False)`) and never exits. Waiting for it held the single-flight slot for
+    /// the whole timeout and then killed the session it had started, after
+    /// which every launch "succeeded" without opening anything. So the session
+    /// state is checked first and the command is only run against a session
+    /// that exists; starting one is `session_start`'s job.
     pub fn app_launch(&self, package: &str) -> Result<String> {
+        if !self.status().is_ok_and(|status| session_running(&status)) {
+            return Err(AppError::session_not_running(
+                "Start the engine, wait for Android to boot, then launch the app.",
+            ));
+        }
         self.run(&argv_app_launch(package), TIMEOUT_NORMAL)
+            .map_err(|error| {
+                if error
+                    .to_string()
+                    .to_ascii_lowercase()
+                    .contains(BROKEN_SESSION_MARKER)
+                {
+                    AppError::command_failed(
+                        "The Waydroid session is broken: Android is running, but its session manager is gone, so nothing can be launched. Stop the engine and start it again.",
+                    )
+                } else {
+                    error
+                }
+            })
     }
 
     /// Existing callers expect the value without the trailing newline.
@@ -463,7 +568,9 @@ pub(crate) fn run_program(
     match &outcome {
         // The UI polls `status` every 5 s; at info level it would push
         // everything else out of the log tail a Diagnostic Bundle includes.
-        Ok(_) if args == ["status"] => log::debug!("{program} {:?} ok in {elapsed}ms", args),
+        Ok(_) if args == ["status"] || args.last().is_some_and(|arg| arg == "GetSession") => {
+            log::debug!("{program} {:?} ok in {elapsed}ms", args)
+        }
         Ok(_) => log::info!("{program} {:?} ok in {elapsed}ms", args),
         Err(failure) => log::warn!("{program} {:?} failed in {elapsed}ms: {failure}", args),
     }
@@ -637,6 +744,94 @@ exit 0"#,
         );
         let tool = Waydroid::with_program(&stub);
         tool.prop_set("persist.archdroid.test", "280").unwrap();
+        let _ = std::fs::remove_dir_all(stub.parent().unwrap());
+    }
+
+    #[test]
+    fn the_dbus_session_reply_reads_like_waydroid_status() {
+        let stopped = status_from_session(r#"{"type":"a{ss}","data":[{}]}"#, None).unwrap();
+        assert!(!session_running(&stopped));
+
+        let reply = r#"{"type":"a{ss}","data":[{"user_name":"u","user_id":"1000","state":"FROZEN","wayland_display":"wayland-1"}]}"#;
+        let running = status_from_session(reply, Some("192.168.240.112")).unwrap();
+        assert!(session_running(&running));
+        assert!(container_frozen(&running));
+        assert_eq!(device_ip(&running).as_deref(), Some("192.168.240.112"));
+
+        // Android has no address yet: running, but nothing for adb to target.
+        let booting = status_from_session(&reply.replace("FROZEN", "RUNNING"), None).unwrap();
+        assert!(container_running(&booting));
+        assert_eq!(device_ip(&booting), None);
+
+        // Anything unexpected is left to the CLI.
+        for odd in [
+            "",
+            "not json",
+            r#"{"data":[]}"#,
+            r#"{"data":[{"user_name":"u"}]}"#,
+        ] {
+            assert_eq!(status_from_session(odd, None), None, "{odd}");
+        }
+    }
+
+    #[test]
+    fn the_lease_file_gives_the_container_address() {
+        let leases = "1794300000 00:16:3e:f9:d3:03 192.168.240.112 * 01:00:16:3e:f9:d3:03\n";
+        assert_eq!(lease_ip(leases).as_deref(), Some("192.168.240.112"));
+        assert_eq!(lease_ip(""), None);
+        assert_eq!(lease_ip("1794300000 00:16:3e:f9:d3:03"), None);
+    }
+
+    #[test]
+    fn app_launch_never_runs_against_a_stopped_session() {
+        // The stub records a launch; a stopped session must not get that far,
+        // because `waydroid app launch` would become the session and never exit.
+        let stub = stub_script(
+            "launch-stopped",
+            r#"case "$1 $2" in
+  "status ") printf 'Session:\tSTOPPED\n' ;;
+  "app launch") touch "$(dirname "$0")/launched"; sleep 30 ;;
+esac"#,
+        );
+        let tool = Waydroid::with_program(&stub);
+        let started = std::time::Instant::now();
+        let error = tool.app_launch("org.fdroid.fdroid").unwrap_err();
+        assert_eq!(error.code(), code::SESSION_NOT_RUNNING, "{error:?}");
+        assert!(started.elapsed() < Duration::from_secs(5));
+        assert!(!stub.parent().unwrap().join("launched").exists());
+        let _ = std::fs::remove_dir_all(stub.parent().unwrap());
+    }
+
+    #[test]
+    fn app_launch_reports_a_session_without_its_manager() {
+        // Waydroid 1.6.3, container up but session manager killed: exit 0.
+        let stub = stub_script(
+            "launch-broken",
+            r#"case "$1 $2" in
+  "status ") printf 'Session:\tRUNNING\nContainer:\tRUNNING\n' ;;
+  "app launch") echo "[06:47:15] Starting waydroid session" >&2
+                echo "[06:47:15] RuntimeError: Already tracking a session" >&2 ;;
+esac"#,
+        );
+        let tool = Waydroid::with_program(&stub);
+        let error = tool.app_launch("org.fdroid.fdroid").unwrap_err();
+        assert_eq!(error.code(), code::COMMAND_FAILED, "{error:?}");
+        assert!(error.to_string().contains("Stop the engine"), "{error}");
+        let _ = std::fs::remove_dir_all(stub.parent().unwrap());
+    }
+
+    #[test]
+    fn app_launch_runs_in_a_running_session() {
+        let stub = stub_script(
+            "launch-running",
+            r#"case "$1 $2" in
+  "status ") printf 'Session:\tRUNNING\nContainer:\tRUNNING\n' ;;
+  "app launch") touch "$(dirname "$0")/launched" ;;
+esac"#,
+        );
+        let tool = Waydroid::with_program(&stub);
+        tool.app_launch("org.fdroid.fdroid").unwrap();
+        assert!(stub.parent().unwrap().join("launched").exists());
         let _ = std::fs::remove_dir_all(stub.parent().unwrap());
     }
 

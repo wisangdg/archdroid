@@ -3,17 +3,18 @@ import React from "react";
 const HEADINGS = {
   home: { title: "My Applications" },
   setup: { title: "Waydroid Setup" },
+  // The h1 is the tab's own name: one name per page.
   keymap: {
-    title: "Smart Keymapping",
-    subtitle: "Hardware keyboard & mouse touch simulation via Phantom",
+    title: "Keymapping",
+    subtitle: "Touch mode and the Phantom keymapper",
   },
   install: {
-    title: "Addons & Tool Injections",
-    subtitle: "Google Play Services & ARM Translation (libhoudini)",
+    title: "Install Tools",
+    subtitle: "Google Play, ARM translation and Play Store compatibility",
   },
   settings: {
-    title: "Emulator Configuration",
-    subtitle: "Display settings, system properties & diagnostics",
+    title: "Settings",
+    subtitle: "Display, Android properties, diagnostics and logs",
   },
 };
 
