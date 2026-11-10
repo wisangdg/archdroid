@@ -158,7 +158,7 @@ export default function SettingsView({
             <button
               type="submit"
               className="btn btn-primary btn-apply"
-              disabled={busy}
+              disabled={busy || !engineRunning}
             >
               Apply Property
             </button>

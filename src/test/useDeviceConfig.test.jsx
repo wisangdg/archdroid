@@ -22,6 +22,10 @@ function setup({
   });
   const addToast = vi.fn();
   const hook = renderHook(() => useDeviceConfig({ addToast }));
+  // The app reads the settings once Android has booted, not on mount.
+  act(() => {
+    hook.result.current.loadConfigs();
+  });
   return { ...hook, addToast };
 }
 

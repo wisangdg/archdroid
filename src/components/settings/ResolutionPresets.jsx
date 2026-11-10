@@ -90,6 +90,11 @@ export default function ResolutionPresets({
   const [customHeight, setCustomHeight] = useState(currentHeight || "1080");
   const [customDpi, setCustomDpi] = useState(currentDpi || "280");
   const [isApplying, setIsApplying] = useState(false);
+  // A saved width/height only takes effect when the session starts again.
+  const [restartPending, setRestartPending] = useState(false);
+  useEffect(() => {
+    if (!engineRunning) setRestartPending(false);
+  }, [engineRunning]);
 
   // Sync with current props on initial load or change
   useEffect(() => {
@@ -140,12 +145,16 @@ export default function ResolutionPresets({
 
   const handleApply = async () => {
     setIsApplying(true);
+    const sizeChanged =
+      customWidth.trim() !== currentWidth ||
+      customHeight.trim() !== currentHeight;
     try {
-      await onApplyResolution({
+      const applied = await onApplyResolution({
         width: customWidth.trim(),
         height: customHeight.trim(),
         dpi: customDpi.trim(),
       });
+      if (applied && sizeChanged) setRestartPending(true);
     } finally {
       setIsApplying(false);
     }
@@ -339,15 +348,21 @@ export default function ResolutionPresets({
               profile.
             </p>
           )}
-          <p>
-            ℹ️ Changes to display resolution and DPI require a{" "}
-            <strong>restart of the Waydroid session</strong> to take visual
-            effect in Android.
-          </p>
+          {restartPending ? (
+            <p role="status">
+              <strong>Saved. Restart the engine</strong> to use the new
+              resolution.
+            </p>
+          ) : (
+            <p>
+              The DPI applies at once. A new resolution needs a{" "}
+              <strong>restart of the engine</strong>.
+            </p>
+          )}
         </div>
 
         <div className="res-actions-right">
-          {engineRunning && !isUnchanged && (
+          {engineRunning && restartPending && (
             <button
               type="button"
               className="btn btn-outline btn-sm"
@@ -378,7 +393,9 @@ export default function ResolutionPresets({
               {isApplying
                 ? "Applying..."
                 : isUnchanged
-                  ? "Saved & Active"
+                  ? restartPending
+                    ? "Saved"
+                    : "Saved & Active"
                   : `Apply ${customWidth} × ${customHeight}`}
             </span>
           </button>

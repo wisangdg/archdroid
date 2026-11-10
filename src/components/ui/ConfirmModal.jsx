@@ -125,14 +125,20 @@ export default function ConfirmModal({
         </div>
 
         <div className="confirm-modal-actions">
-          <button type="button" className="btn btn-outline" onClick={onCancel}>
+          {/* Enter must not confirm a destructive action by accident. */}
+          <button
+            type="button"
+            className="btn btn-outline"
+            onClick={onCancel}
+            data-autofocus={confirmVariant === "danger" ? "true" : undefined}
+          >
             {cancelText}
           </button>
           <button
             type="button"
             className={`btn ${confirmVariant === "danger" ? "btn-danger" : "btn-primary"}`}
             onClick={onConfirm}
-            data-autofocus="true"
+            data-autofocus={confirmVariant === "danger" ? undefined : "true"}
           >
             {confirmText}
           </button>
