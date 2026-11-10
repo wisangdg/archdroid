@@ -206,6 +206,69 @@ pub fn argv_shell(command: &[&str]) -> Vec<String> {
 
 pub struct Waydroid {
     program: PathBuf,
+    /// Read the session state from the container service over D-Bus instead of
+    /// starting `waydroid status`. Off for the unit tests' stub programs.
+    fast_status: bool,
+}
+
+/// `waydroid status` is a Python start (about 120 ms of CPU) around one D-Bus
+/// call. The UI asks every 5 s and every adb command asks twice, so the same
+/// call is made directly: `busctl` answers in a few milliseconds.
+const SESSION_CALL: [&str; 7] = [
+    "--system",
+    "--json=short",
+    "call",
+    "id.waydro.Container",
+    "/ContainerManager",
+    "id.waydro.ContainerManager",
+    "GetSession",
+];
+const WAYDROID_CONFIG: &str = "/var/lib/waydroid/waydroid.cfg";
+const DHCP_LEASES: &str = "/var/lib/misc/dnsmasq.waydroid0.leases";
+
+/// The container's address from dnsmasq's lease file, as `waydroid status`
+/// reads it: the first IPv4 address followed by whitespace.
+pub(crate) fn lease_ip(leases: &str) -> Option<String> {
+    leases
+        .split_whitespace()
+        .find(|word| {
+            let parts: Vec<&str> = word.split('.').collect();
+            parts.len() == 4 && parts.iter().all(|part| part.parse::<u8>().is_ok())
+        })
+        .map(str::to_string)
+}
+
+/// Turn the `GetSession` reply (`busctl --json=short`) into the text
+/// `waydroid status` prints, so every parser above keeps working. `None` when
+/// the reply is not the expected shape; the caller then asks the CLI.
+pub(crate) fn status_from_session(reply: &str, ip: Option<&str>) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(reply.trim()).ok()?;
+    let session = value.get("data")?.as_array()?.first()?.as_object()?;
+    if session.is_empty() {
+        return Some("Session:\tSTOPPED\n".to_string());
+    }
+    let state = session.get("state")?.as_str()?;
+    let mut text = format!("Session:\tRUNNING\nContainer:\t{state}\n");
+    if let Some(ip) = ip {
+        text.push_str(&format!("IP address:\t{ip}\n"));
+    }
+    Some(text)
+}
+
+/// The session state without the CLI, or `None` when it has to be asked:
+/// Waydroid is not initialised (the CLI words that case), there is no
+/// `busctl`, or the container service did not answer.
+fn fast_status() -> Option<String> {
+    if !Path::new(WAYDROID_CONFIG).exists() {
+        return None;
+    }
+    let busctl = crate::resolve_program("busctl")?;
+    let args: Vec<String> = SESSION_CALL.iter().map(|arg| (*arg).to_string()).collect();
+    let reply = run_program(&busctl, &args, 5, None).ok()?;
+    let ip = std::fs::read_to_string(DHCP_LEASES)
+        .ok()
+        .and_then(|leases| lease_ip(&leases));
+    status_from_session(&reply, ip.as_deref())
 }
 
 impl Waydroid {
@@ -213,7 +276,10 @@ impl Waydroid {
     pub fn detect() -> Result<Self> {
         let program =
             crate::resolve_program(BINARY).ok_or_else(|| AppError::not_found(BINARY, HINT))?;
-        Ok(Self { program })
+        Ok(Self {
+            program,
+            fast_status: true,
+        })
     }
 
     /// Use an explicit program path. `#[cfg(test)]` because only the unit tests
@@ -222,6 +288,7 @@ impl Waydroid {
     pub fn with_program(program: impl Into<PathBuf>) -> Self {
         Self {
             program: program.into(),
+            fast_status: false,
         }
     }
 
@@ -250,6 +317,11 @@ impl Waydroid {
 
     /// Raw `waydroid status` output, which is what the UI already parses.
     pub fn status(&self) -> Result<String> {
+        if self.fast_status {
+            if let Some(status) = fast_status() {
+                return Ok(status);
+            }
+        }
         self.run(&argv_status(), TIMEOUT_QUICK)
     }
 
@@ -496,7 +568,9 @@ pub(crate) fn run_program(
     match &outcome {
         // The UI polls `status` every 5 s; at info level it would push
         // everything else out of the log tail a Diagnostic Bundle includes.
-        Ok(_) if args == ["status"] => log::debug!("{program} {:?} ok in {elapsed}ms", args),
+        Ok(_) if args == ["status"] || args.last().is_some_and(|arg| arg == "GetSession") => {
+            log::debug!("{program} {:?} ok in {elapsed}ms", args)
+        }
         Ok(_) => log::info!("{program} {:?} ok in {elapsed}ms", args),
         Err(failure) => log::warn!("{program} {:?} failed in {elapsed}ms: {failure}", args),
     }
@@ -671,6 +745,41 @@ exit 0"#,
         let tool = Waydroid::with_program(&stub);
         tool.prop_set("persist.archdroid.test", "280").unwrap();
         let _ = std::fs::remove_dir_all(stub.parent().unwrap());
+    }
+
+    #[test]
+    fn the_dbus_session_reply_reads_like_waydroid_status() {
+        let stopped = status_from_session(r#"{"type":"a{ss}","data":[{}]}"#, None).unwrap();
+        assert!(!session_running(&stopped));
+
+        let reply = r#"{"type":"a{ss}","data":[{"user_name":"u","user_id":"1000","state":"FROZEN","wayland_display":"wayland-1"}]}"#;
+        let running = status_from_session(reply, Some("192.168.240.112")).unwrap();
+        assert!(session_running(&running));
+        assert!(container_frozen(&running));
+        assert_eq!(device_ip(&running).as_deref(), Some("192.168.240.112"));
+
+        // Android has no address yet: running, but nothing for adb to target.
+        let booting = status_from_session(&reply.replace("FROZEN", "RUNNING"), None).unwrap();
+        assert!(container_running(&booting));
+        assert_eq!(device_ip(&booting), None);
+
+        // Anything unexpected is left to the CLI.
+        for odd in [
+            "",
+            "not json",
+            r#"{"data":[]}"#,
+            r#"{"data":[{"user_name":"u"}]}"#,
+        ] {
+            assert_eq!(status_from_session(odd, None), None, "{odd}");
+        }
+    }
+
+    #[test]
+    fn the_lease_file_gives_the_container_address() {
+        let leases = "1794300000 00:16:3e:f9:d3:03 192.168.240.112 * 01:00:16:3e:f9:d3:03\n";
+        assert_eq!(lease_ip(leases).as_deref(), Some("192.168.240.112"));
+        assert_eq!(lease_ip(""), None);
+        assert_eq!(lease_ip("1794300000 00:16:3e:f9:d3:03"), None);
     }
 
     #[test]
