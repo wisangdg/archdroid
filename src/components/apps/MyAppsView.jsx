@@ -41,6 +41,7 @@ export default function MyAppsView({
   onInstallApk,
   installingApk = null,
   onCancelInstall,
+  cancellingInstall = false,
   onUninstallApp,
   onCopyPackage,
   onBackupApk,
@@ -154,8 +155,10 @@ export default function MyAppsView({
                 type="button"
                 className="btn btn-outline btn-sm"
                 onClick={onCancelInstall}
+                disabled={cancellingInstall}
+                aria-busy={cancellingInstall}
               >
-                Cancel
+                {cancellingInstall ? "Cancelling…" : "Cancel"}
               </button>
             )}
           </div>

@@ -98,6 +98,44 @@ describe("useEngineStatus", () => {
     );
   });
 
+  it("says starting while a start is in flight and ignores a second start", async () => {
+    let release;
+    const { result } = setup([STOPPED], {});
+    invoke.mockImplementation(async (cmd) => {
+      if (cmd === "waydroid_start") {
+        await new Promise((resolve) => (release = resolve));
+        return { status: "success" };
+      }
+      if (cmd === "waydroid_status") return STOPPED;
+      return { status: "success" };
+    });
+    await waitFor(() => expect(result.current.phase).toBe("stopped"));
+    let first;
+    act(() => {
+      first = result.current.handleStart();
+    });
+    expect(result.current.phase).toBe("starting");
+    expect(result.current.operation).toBe("start");
+    await act(async () => {
+      expect(await result.current.handleStop()).toBeUndefined();
+      expect(await result.current.handleStart()).toBe(false);
+    });
+    expect(
+      invoke.mock.calls.filter(([cmd]) => cmd === "waydroid_start")
+    ).toHaveLength(1);
+    expect(invoke).not.toHaveBeenCalledWith("waydroid_stop");
+    release();
+    await act(() => first);
+    expect(result.current.operation).toBe(null);
+  }, 15000);
+
+  it("shows an unreadable status as unreachable, not stopped", async () => {
+    const { result } = setup([
+      { status: "error", code: "command_failed", message: "ImportError" },
+    ]);
+    await waitFor(() => expect(result.current.phase).toBe("unreachable"));
+  });
+
   it("waits until the session reports online after a successful start", async () => {
     // first reply is the mount probe; later ones are the post-start polls
     const { result, addToast } = setup([STOPPED, STOPPED, RUNNING]);

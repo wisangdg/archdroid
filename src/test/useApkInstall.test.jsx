@@ -162,4 +162,35 @@ describe("useApkInstall", () => {
       expect.objectContaining({ title: "Install Cancelled" })
     );
   });
+
+  it("sends a Cancel pressed before the task ID arrived once it does", async () => {
+    let finish;
+    invoke.mockImplementation((cmd) =>
+      cmd === "waydroid_install_apk"
+        ? new Promise((resolve) => (finish = resolve))
+        : Promise.resolve({ status: "success" })
+    );
+    open.mockResolvedValue("/home/u/Downloads/game.apk");
+    const { result } = renderHook(() =>
+      useApkInstall({
+        addToast: vi.fn(),
+        operationInFlight: { current: false },
+        loadApps: vi.fn(),
+      })
+    );
+    act(() => {
+      result.current.handleInstallApk();
+    });
+    await waitFor(() => expect(result.current.installingApk).toBe("game.apk"));
+    await act(() => result.current.cancelInstall());
+    // No ID yet: nothing to send, but the button already says so.
+    expect(result.current.cancellingInstall).toBe(true);
+    expect(invoke).not.toHaveBeenCalledWith("cancel_task", expect.anything());
+    act(() => startedListener({ payload: { task_id: "task-9" } }));
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("cancel_task", { taskId: "task-9" })
+    );
+    await act(async () => finish({ status: "error", code: "cancelled" }));
+    expect(result.current.cancellingInstall).toBe(false);
+  });
 });

@@ -575,6 +575,8 @@ describe("App state & workflow integration", () => {
         screen.getByText("Another privileged operation is currently in flight.")
       ).toBeTruthy();
     });
+    // Refused before it started: no output will come, so no terminal either.
+    expect(document.querySelector(".terminal-modal")).toBeNull();
   });
 
   it("Force stop in the app detail stops the selected app", async () => {
@@ -792,6 +794,22 @@ describe("App state & workflow integration", () => {
     fireEvent.contextMenu(row);
     fireEvent.click(await screen.findByText("Launch App"));
     expect(callsOf("waydroid_launch_app")).toBe(0);
+  });
+
+  it("neither launches nor queues an app while the engine is stopping", async () => {
+    bootingSession(() => true);
+    const base = invoke.getMockImplementation();
+    invoke.mockImplementation((cmd, args) =>
+      cmd === "waydroid_stop" ? new Promise(() => {}) : base(cmd, args)
+    );
+    render(<App />);
+    await screen.findByText("Engine Running");
+    fireEvent.click(screen.getByRole("button", { name: "Stop Engine" }));
+    await screen.findByText("Stopping Engine…");
+    fireEvent.doubleClick((await screen.findAllByText("F-Droid"))[0]);
+    await screen.findByText("Engine Is Stopping");
+    expect(callsOf("waydroid_launch_app")).toBe(0);
+    expect(callsOf("waydroid_start")).toBe(0);
   });
 
   it("launches the app asked for during the boot once Android is up", async () => {

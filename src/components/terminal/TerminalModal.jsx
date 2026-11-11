@@ -21,7 +21,11 @@ import {
   ArrowDownToLine,
 } from "lucide-react";
 import ProcessStepper from "./ProcessStepper";
-import { detectStepProgress } from "./stepConfigs";
+import {
+  detectStepProgress,
+  terminalOutcome,
+  TERMINAL_OUTCOMES,
+} from "./stepConfigs";
 import { useFocusTrap } from "../../lib/useFocusTrap";
 import { progressPercent } from "../../lib/taskEvents";
 
@@ -100,6 +104,8 @@ export default function TerminalModal({
   }, [taskType, logs, taskResult, currentStep]);
 
   const percent = installing ? progressPercent(logs[logs.length - 1]) : null;
+  const outcome = terminalOutcome(progress, installing);
+  const view = TERMINAL_OUTCOMES[outcome];
 
   // If viewing logs or if process failed/cancelled, ensure console is visible
   useEffect(() => {
@@ -152,49 +158,21 @@ export default function TerminalModal({
         aria-modal="true"
         aria-labelledby="terminal-modal-title"
         className={`glass-panel terminal-modal ${hasStepper ? "with-stepper" : ""}`}
+        data-task-type={taskType}
+        data-task-outcome={outcome}
       >
         {/* Modal Header */}
         <div className="terminal-header">
           <div className="terminal-title-wrap">
-            <div
-              className={`terminal-icon-badge ${
-                progress.isCancelled
-                  ? "badge-cancelled"
-                  : progress.isFailed
-                    ? "badge-failed"
-                    : progress.isCompleted
-                      ? "badge-done"
-                      : "badge-running"
-              }`}
-            >
-              {installing ? (
-                <Loader2 size={18} className="spinner" aria-hidden="true" />
-              ) : progress.isCancelled ? (
-                <Ban size={18} aria-hidden="true" />
-              ) : progress.isFailed ? (
-                <AlertTriangle size={18} aria-hidden="true" />
-              ) : progress.isCompleted ? (
-                <Check size={18} aria-hidden="true" />
-              ) : (
-                <Terminal size={18} aria-hidden="true" />
-              )}
+            <div className={`terminal-icon-badge ${view.badge}`}>
+              <OutcomeIcon outcome={outcome} />
             </div>
 
             <div>
               <h3 id="terminal-modal-title" className="terminal-title">
                 {title}
               </h3>
-              <span className="terminal-status-text">
-                {installing
-                  ? "Running…"
-                  : progress.isCancelled
-                    ? "Operation cancelled"
-                    : progress.isFailed
-                      ? "Process encountered errors"
-                      : progress.isCompleted
-                        ? "Finished successfully"
-                        : "Task Complete"}
-              </span>
+              <span className="terminal-status-text">{view.status}</span>
             </div>
           </div>
 
@@ -258,26 +236,13 @@ export default function TerminalModal({
             />
 
             {/* Current Active Status Card */}
-            <div
-              className={`stepper-status-card ${
-                progress.isFailed
-                  ? "status-failed"
-                  : progress.isCompleted
-                    ? "status-completed"
-                    : "status-active"
-              }`}
-            >
+            <div className={`stepper-status-card ${view.card}`}>
               <div className="status-card-header">
                 <span className="status-card-phase">
-                  {progress.isCancelled
-                    ? "Operation Cancelled"
-                    : progress.isFailed
-                      ? "Execution Failed"
-                      : progress.isCompleted
-                        ? "All Stages Completed"
-                        : `Stage ${progress.activeStepIndex + 1} of ${progress.steps.length}: ${
-                            progress.steps[progress.activeStepIndex]?.label
-                          }`}
+                  {view.phase ??
+                    `Stage ${progress.activeStepIndex + 1} of ${progress.steps.length}: ${
+                      progress.steps[progress.activeStepIndex]?.label
+                    }`}
                 </span>
                 {installing && (
                   <span className="status-live-indicator">
@@ -298,9 +263,9 @@ export default function TerminalModal({
                 />
               )}
 
-              {(progress.isFailed || progress.isCancelled) && (
+              {(outcome === "failed" || outcome === "cancelled") && (
                 <div className="status-failure-advice">
-                  {progress.isCancelled ? (
+                  {outcome === "cancelled" ? (
                     <>
                       <strong>Operation Cancelled:</strong> The process was
                       stopped by user request. Stages marked complete stay
@@ -421,7 +386,7 @@ export default function TerminalModal({
               </button>
             )}
 
-            {progress.isFailed && onRetry && !installing && (
+            {outcome === "failed" && onRetry && (
               <button className="btn btn-outline btn-sm" onClick={onRetry}>
                 <RotateCw size={14} />
                 <span>Retry</span>
@@ -429,12 +394,31 @@ export default function TerminalModal({
             )}
             {!installing && (
               <button className="btn btn-primary btn-sm" onClick={onClose}>
-                {progress.isCompleted ? "Done" : "Close"}
+                {outcome === "succeeded" ? "Done" : "Close"}
               </button>
             )}
           </div>
         </div>
       </div>
     </div>
+  );
+}
+
+const OUTCOME_ICONS = {
+  running: Loader2,
+  succeeded: Check,
+  failed: AlertTriangle,
+  cancelled: Ban,
+  ended: Terminal,
+};
+
+function OutcomeIcon({ outcome }) {
+  const Icon = OUTCOME_ICONS[outcome];
+  return (
+    <Icon
+      size={18}
+      className={outcome === "running" ? "spinner" : undefined}
+      aria-hidden="true"
+    />
   );
 }
