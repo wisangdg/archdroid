@@ -17,7 +17,7 @@ ArchDroid is a desktop app for [Waydroid](https://waydroid.net/). Set up Android
 - 🎮 **App library and launcher.** A Control Center: your installed Android apps in a list with icons, instant search (`Ctrl+F`) and All/User/System filters, next to the selected app with Launch, Force stop, Keymapping, Copy package ID, and Uninstall. Double-click a row to launch; right-click for the menu. The engine state and Start/Stop stay in the top bar on every page.
 - 📦 **Drag-and-drop APK install.** Drop an `.apk`, or a split APK bundle (`.apks`, `.xapk`, `.apkm`; needs adb), from your file manager onto the window, or use the file picker.
 - 🧩 **Google Play and ARM translation.** Add Google Play Services (MindTheGapps / OpenGApps) and Intel libhoudini so ARM-only games run on x86_64 CPUs.
-- ⌨️ **Keyboard and mouse controls.** Build and launch the [Phantom](https://github.com/oliviermugishak/phantom) keymapper from the app: WASD, custom binds, and mouse look for shooters.
+- ⌨️ **Keyboard and mouse controls.** One-click install and launch of the [Phantom](https://github.com/oliviermugishak/phantom) keymapper (its verified release build, no SDK or compiler needed): WASD, custom binds, and mouse look for shooters.
 - 👆 **Touch mode (Hyprland).** A left click or drag over an Android window acts like a finger, as in other Android emulators. Some games and in-app web pages ignore Waydroid's mouse input entirely; Plants vs Zombies 2's birth-date picker is one.
 - 🖥️ **Display presets.** Tablet Full HD, Standard 720p, Mobile Phone (portrait), Desktop 2K / QHD, or your own resolution and DPI.
 - 🩺 **Host diagnostics.** 17 checks (binder, GPU, Wayland, KVM, polkit, disk, network, and more), each with the command that fixes it.
@@ -173,7 +173,7 @@ ArchDroid collects no telemetry and uploads nothing on its own. What it stores a
 
 - **Hash-pinned Python dependencies.** The add-on helper's Python packages are locked and verified by SHA-256 (`--require-hashes --only-binary=:all:`).
 - **SHA-256 pinned add-on archives.** ArchDroid downloads the GApps and libhoudini archives itself and stops unless the SHA-256 matches the pin, before the upstream helper (which only checks MD5) can use them.
-- **Pinned upstream code.** `waydroid_script` and Phantom are pinned to specific commits.
+- **Pinned upstream code.** `waydroid_script` is pinned to a commit; Phantom to a release whose SHA-256 is checked before anything is installed.
 - **Isolated root environment.** Privileged scripts run in `mktemp -d` (mode `0700`), with `SUDO_USER` unset and the cache in `$ARCHDROID_WORK/cache`.
 - **Package approval.** The backend refuses packages outside the approved plan (`approval_required` / `invalid_input`).
 - **Fail-fast preflight.** On unsupported distros with missing dependencies, the operation stops before root is requested.
@@ -311,7 +311,7 @@ Packages (`.deb`, `.rpm`, `.AppImage`) are written to `src-tauri/target/release/
 - **ArchDroid**: [MIT](LICENSE), Copyright (c) 2026 wisangdg.
 - **Waydroid**: [waydroid.net](https://waydroid.net) (GPL-3.0).
 - **waydroid_script**: [casualsnek/waydroid_script](https://github.com/casualsnek/waydroid_script) (GPL-3.0), pinned commit `48dbfaf`. Downloaded when you install an add-on; not bundled in ArchDroid.
-- **Phantom Keymapper**: [oliviermugishak/phantom](https://github.com/oliviermugishak/phantom) (MIT), pinned commit `1a6b7ed`.
+- **Phantom Keymapper**: [oliviermugishak/phantom](https://github.com/oliviermugishak/phantom) (MIT), release v1.1.0 (SHA-256 pinned).
 - Third-party details and license audit: [`docs/THIRD-PARTY.md`](docs/THIRD-PARTY.md).
 
 > [!NOTE]

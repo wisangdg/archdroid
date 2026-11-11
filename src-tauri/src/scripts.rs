@@ -25,8 +25,15 @@ echo "[SYSTEM] Wipe complete! Please restart ArchDroid."
 /// can change behind our back.
 const WAYDROID_SCRIPT_URL: &str = "https://github.com/casualsnek/waydroid_script.git";
 const WAYDROID_SCRIPT_REV: &str = "48dbfaf34a6ddbe78688c530f9ba1c26522aafb2";
-const PHANTOM_URL: &str = "https://github.com/oliviermugishak/phantom.git";
-const PHANTOM_REV: &str = "1a6b7edb423462c1bc546031ed86d9bf2cc1cffd";
+
+/// Phantom's own release build (MIT). The tarball holds the prebuilt
+/// `phantom`/`phantom-gui` binaries (glibc 2.35, like ArchDroid's own `.deb`)
+/// and `phantom-server.jar`, so installing needs no Rust toolchain, JDK or
+/// Android SDK. The SHA-256 is the one in the release's `SHA256SUMS`; v1.1.0 is
+/// the code ArchDroid pinned before (`1a6b7ed` only changed a packaging test).
+const PHANTOM_VERSION: &str = "1.1.0";
+const PHANTOM_URL: &str = "https://github.com/oliviermugishak/phantom/releases/download/v1.1.0/phantom-v1.1.0-linux-x86_64.tar.gz";
+const PHANTOM_SHA256: &str = "dad785fa052468adac7578a32bb27ea772e6930577e24ab8ffb20dbe02f6a4e2";
 
 /// Python dependencies for the pinned `waydroid_script` revision. The lockfile
 /// is embedded at compile time, so the upstream checkout cannot replace it, and
@@ -264,28 +271,74 @@ echo "[SUCCESS] ARM Translation installation complete!"
     )
 }
 
+/// Download the pinned Phantom release, verify it, and install it the way
+/// Phantom's `install.sh` lays files out (under `$HOME/.local` and the XDG
+/// dirs, without its sudo wrapper). Runs as the desktop user; an existing
+/// config and existing profiles are kept.
 pub(crate) fn phantom_install_script() -> String {
     format!(
         r#"set -euo pipefail
-if ! command -v git > /dev/null; then
-    echo "[ERROR] git is required to download the pinned Phantom source." >&2
-    exit 1
-fi
 work="$(mktemp -d "${{TMPDIR:-/tmp}}/archdroid-phantom.XXXXXXXXXX")"
 trap 'rm -rf "$work"' EXIT HUP INT TERM
-repo="$work/phantom"
-{checkout}
-export INSTALL_SYSTEM_WRAPPER=0
-export PREFIX="$HOME/.local"
-echo "[STEP] build"
-echo "[SYSTEM] Running Phantom installer as the desktop user..."
-if ! bash "$repo/install.sh"; then
-    echo "[ERROR] Phantom installation failed!" >&2
+echo "[STEP] download"
+echo "[SYSTEM] Downloading Phantom {version} and verifying its SHA-256..."
+if ! python3 - {url} "$work/phantom.tar.gz" {sha256} <<'PYEOF'
+import hashlib, sys, urllib.request
+url, dest, want = sys.argv[1:4]
+digest = hashlib.sha256()
+with urllib.request.urlopen(url, timeout=60) as resp, open(dest, "wb") as out:
+    while True:
+        chunk = resp.read(1 << 20)
+        if not chunk:
+            break
+        digest.update(chunk)
+        out.write(chunk)
+got = digest.hexdigest()
+if got != want:
+    print(f"[ERROR] SHA-256 mismatch: expected {{want}}, got {{got}}", file=sys.stderr)
+    sys.exit(1)
+PYEOF
+then
+    echo "[ERROR] Could not download a verified Phantom {version}." >&2
     exit 1
 fi
-echo "[SUCCESS] Phantom Keymapper installed successfully!"
+echo "[STEP] install"
+echo "[SYSTEM] Installing Phantom as the desktop user..."
+tar -xzf "$work/phantom.tar.gz" -C "$work"
+src="$work/phantom-v{version}-linux-x86_64"
+bin_dir="$HOME/.local/bin"
+data_home="${{XDG_DATA_HOME:-$HOME/.local/share}}"
+config_dir="${{XDG_CONFIG_HOME:-$HOME/.config}}/phantom"
+jar="$data_home/phantom/android/phantom-server.jar"
+install -d "$bin_dir" "$(dirname "$jar")" "$config_dir/profiles"
+install -m755 "$src/bin/phantom" "$bin_dir/phantom"
+install -m755 "$src/bin/phantom-gui" "$bin_dir/phantom-gui"
+rm -f "$bin_dir/phantom-studio"
+install -m644 "$src/lib/phantom/phantom-server.jar" "$jar"
+for profile in "$src"/share/phantom/profiles/*.json; do
+    target="$config_dir/profiles/$(basename "$profile")"
+    [ -e "$target" ] || install -m644 "$profile" "$target"
+done
+config="$config_dir/config.toml"
+jar_sed="$(printf '%s' "$jar" | sed 's/[\\|&]/\\&/g')"
+if [ ! -e "$config" ]; then
+    sed "s|/absolute/path/to/phantom-server.jar|$jar_sed|g" \
+        "$src/share/phantom/config.example.toml" > "$config"
+elif grep -Eq '^[[:space:]]*server_jar[[:space:]]*=[[:space:]]*"(/absolute/path/to/phantom-server.jar|[^"]*/contrib/android-server/build/phantom-server.jar)"' "$config"; then
+    # Still the example path or a source build's jar: point it at this one.
+    sed -i -E "s|^([[:space:]]*server_jar[[:space:]]*=[[:space:]]*\").*(\".*)$|\1$jar_sed\2|" "$config"
+fi
+install -d "$data_home/applications" "$data_home/icons/hicolor/scalable/apps"
+sed -e "s|^Exec=phantom-gui$|Exec=$bin_dir/phantom-gui|" \
+    -e "s|^TryExec=phantom-gui$|TryExec=$bin_dir/phantom-gui|" \
+    "$src/share/applications/phantom-gui.desktop" > "$data_home/applications/phantom-gui.desktop"
+install -m644 "$src/share/icons/hicolor/scalable/apps/phantom.svg" \
+    "$data_home/icons/hicolor/scalable/apps/phantom.svg"
+echo "[SUCCESS] Phantom Keymapper {version} installed to $bin_dir."
 "#,
-        checkout = pinned_git_checkout("\"$repo\"", PHANTOM_URL, PHANTOM_REV),
+        version = PHANTOM_VERSION,
+        url = sh_quote(PHANTOM_URL),
+        sha256 = sh_quote(PHANTOM_SHA256),
     )
 }
 
@@ -319,10 +372,12 @@ mod tests {
         }
 
         let phantom = phantom_install_script();
-        assert!(phantom.contains(PHANTOM_REV));
-        assert!(phantom.contains("INSTALL_SYSTEM_WRAPPER=0"));
+        assert!(phantom.contains(PHANTOM_SHA256));
         assert!(phantom.contains("mktemp -d"));
-        assert!(!phantom.contains("git pull"));
+        // A prebuilt release: no toolchain, no SDK, and never root.
+        for forbidden in ["cargo", "d8", "android.jar", "sudo", "pkexec", "git "] {
+            assert!(!phantom.contains(forbidden), "{forbidden}");
+        }
     }
 
     #[test]
@@ -479,6 +534,64 @@ mod tests {
         assert_eq!(std::fs::read(&dest).unwrap(), b"pinned archive body");
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Live: `cargo test live_phantom_install -- --ignored` downloads the
+    /// pinned release and installs it into a scratch HOME (never the real
+    /// one), then checks the layout Phantom and ArchDroid expect. Nothing that
+    /// was downloaded is executed.
+    #[test]
+    #[ignore = "downloads the Phantom release from GitHub"]
+    fn live_phantom_install() {
+        let home = std::env::temp_dir().join(format!("archdroid-phantom-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).unwrap();
+        let run = || {
+            Command::new("bash")
+                .args(["-c", &phantom_install_script()])
+                .env("HOME", &home)
+                .env_remove("XDG_DATA_HOME")
+                .env_remove("XDG_CONFIG_HOME")
+                .output()
+                .expect("failed to run bash")
+        };
+        let output = run();
+        assert!(
+            output.status.success(),
+            "install failed: {}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        for (path, mode) in [
+            (".local/bin/phantom", 0o755),
+            (".local/bin/phantom-gui", 0o755),
+            (".local/share/phantom/android/phantom-server.jar", 0o644),
+        ] {
+            use std::os::unix::fs::PermissionsExt;
+            let meta = std::fs::metadata(home.join(path)).expect(path);
+            assert_eq!(meta.permissions().mode() & 0o777, mode, "{path}");
+        }
+        let jar = home.join(".local/share/phantom/android/phantom-server.jar");
+        let config = std::fs::read_to_string(home.join(".config/phantom/config.toml")).unwrap();
+        assert!(
+            config.contains(&format!("server_jar = \"{}\"", jar.display())),
+            "{config}"
+        );
+        let desktop =
+            std::fs::read_to_string(home.join(".local/share/applications/phantom-gui.desktop"))
+                .unwrap();
+        assert!(desktop.contains(&format!("Exec={}/.local/bin/phantom-gui", home.display())));
+        assert!(home.join(".config/phantom/profiles/pubg.json").is_file());
+
+        // Updating keeps what the user changed.
+        let edited = format!("{config}\n# mine\n");
+        std::fs::write(home.join(".config/phantom/config.toml"), &edited).unwrap();
+        assert!(run().status.success());
+        assert_eq!(
+            std::fs::read_to_string(home.join(".config/phantom/config.toml")).unwrap(),
+            edited
+        );
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     #[test]
@@ -696,7 +809,7 @@ mod tests {
             steps(&houdini_install_script(pm, &[])),
             ["deps", "repo", "env", "download", "inject"]
         );
-        assert_eq!(steps(&phantom_install_script()), ["repo", "build"]);
+        assert_eq!(steps(&phantom_install_script()), ["download", "install"]);
         assert_eq!(steps(wipe_script()), ["stop", "wipe"]);
     }
 }

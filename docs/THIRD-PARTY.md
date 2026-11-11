@@ -6,16 +6,17 @@ their source and license remain with the upstream projects.
 | Project | Upstream | Pinned revision | License | Privilege |
 |---|---|---|---|---|
 | waydroid_script | https://github.com/casualsnek/waydroid_script | `48dbfaf34a6ddbe78688c530f9ba1c26522aafb2` | GPL-3.0 | root (mounts and edits the Waydroid image) |
-| Phantom | https://github.com/oliviermugishak/phantom | `1a6b7edb423462c1bc546031ed86d9bf2cc1cffd` | MIT | desktop user |
+| Phantom | https://github.com/oliviermugishak/phantom | release `v1.1.0`, sha256 `dad785fa…a4e2` | MIT | desktop user |
 
 ## How the installers are run
 
 - `waydroid_script` is fetched into a fresh `mktemp -d` private directory, not a
   predictable `/tmp/waydroid_script` checkout. The commit is fetched by object id
   and `git rev-parse HEAD` is verified before the installer runs.
-- Phantom is also fetched by pinned commit, but into a user-owned temporary
-  directory and run as the desktop user with `INSTALL_SYSTEM_WRAPPER=0`. It
-  installs under `$HOME/.local` and does not request root.
+- Phantom is installed from its prebuilt release tarball, downloaded into a
+  user-owned temporary directory and rejected unless its SHA-256 matches. Its
+  `install.sh` is not run; ArchDroid copies the files itself as the desktop
+  user, under `$HOME/.local`, without root.
 - Root scripts receive a fixed `PATH`, a private `HOME`/`TMPDIR` under
   `$ARCHDROID_WORK`, private `XDG_CACHE_HOME`/`XDG_DATA_HOME`/`XDG_CONFIG_HOME`
   under `$ARCHDROID_WORK`, and null Git/Python/pip user config. Sensitive desktop
@@ -80,9 +81,16 @@ source tree that will run with the corresponding privilege.
   - No arbitrary scripts (`.sh`, `.py`) are retrieved from unverified URLs or
     executed dynamically.
 
-### 2. `phantom` (`1a6b7edb423462c1bc546031ed86d9bf2cc1cffd`)
+### 2. `phantom` (release `v1.1.0`)
 
-- **Invocation by ArchDroid:** `bash "$repo/install.sh"`.
+- **Source:** `phantom-v1.1.0-linux-x86_64.tar.gz` from the GitHub release,
+  sha256 `dad785fa052468adac7578a32bb27ea772e6930577e24ab8ffb20dbe02f6a4e2`
+  (the value in the release's `SHA256SUMS`). Prebuilt for glibc 2.35, x86_64.
+  The previously pinned commit `1a6b7ed` differs from `v1.1.0` only in a
+  packaging test.
+- **Invocation by ArchDroid:** `phantom_install_script` in `scripts.rs`
+  downloads, verifies and copies the files; nothing from the tarball runs
+  during installation.
 - **Privilege:** Unprivileged desktop user. Does not request root, polkit, or sudo.
 - **Target paths modified:**
   - User binaries: `$HOME/.local/bin/phantom`, `$HOME/.local/bin/phantom-gui` (mode `0755`).
@@ -91,11 +99,15 @@ source tree that will run with the corresponding privilege.
   - Desktop integration: `$HOME/.local/share/applications/phantom-gui.desktop`,
     `$HOME/.local/share/icons/hicolor/scalable/apps/phantom.svg`.
   - Legacy cleanup: removes `$HOME/.local/bin/phantom-studio` if present.
-  - Sudo-visible wrapper (`/usr/local/bin/phantom`): skipped via
-    `export INSTALL_SYSTEM_WRAPPER=0`.
-- **Network and compilation:**
-  - Compiled locally via `cargo build --release` from the pinned checkout.
-  - No unverified remote scripts are downloaded or executed.
+  - An existing `config.toml` and existing profiles are kept; only a
+    `server_jar` that still points at the example path or a source build is
+    updated.
+  - No sudo-visible wrapper (`/usr/local/bin/phantom`), udev rule or systemd unit.
+- **Network and compilation:** one HTTPS download; no compiler, JDK or Android
+  SDK, and no unverified remote scripts.
+- **Updating:** change the URL and SHA-256 in `scripts.rs` together, from the
+  new release's `SHA256SUMS`, and run
+  `cargo test live_phantom_install -- --ignored`.
 
 ## Python dependencies
 

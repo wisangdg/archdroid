@@ -7,6 +7,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Changed
+- **Install Phantom is one click on any machine.** It installs Phantom's verified release build (v1.1.0, SHA-256 pinned) instead of compiling it, so the Rust toolchain, a JDK and the Android SDK (`d8`, `android.jar`) are no longer needed; it takes seconds instead of about five minutes and 1 GB. Existing Phantom config and profiles are kept.
+
 ## [0.1.7] - 2026-11-11
 
 ### Added

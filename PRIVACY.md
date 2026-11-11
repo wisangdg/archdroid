@@ -14,7 +14,7 @@ ArchDroid keeps everything on your machine. This page lists what it stores local
      - The official Android images (SourceForge / Waydroid OTA server), downloaded by `waydroid init`.
      - Distro packages through your package manager (`pacman`, `apt`, `dnf`, `zypper`).
      - For GApps/Houdini: the commit-pinned `waydroid_script` from GitHub, its hash-pinned Python packages (PyPI), and the GApps (MindTheGapps, GitHub) or libhoudini (GitHub) archive, which ArchDroid downloads itself and accepts only with the pinned SHA-256.
-     - The commit-pinned Phantom source from GitHub; its upstream installer may download its own build dependencies.
+     - The Phantom v1.1.0 release tarball from GitHub, checked against its pinned SHA-256.
 
 The app window itself cannot reach the network: its Content Security Policy only allows the app's own IPC.
 
