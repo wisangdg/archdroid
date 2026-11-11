@@ -37,6 +37,7 @@ Live tests against a real Waydroid, polkit, and the installers run in a disposab
 ## Frontend rules (`src/`)
 
 - Branch on `CommandResult.code`, never on message text.
+- Branch on the named UI state (`phase`, `outcome`, `kind`), not on combinations of booleans; [docs/STATE-MACHINES.md](docs/STATE-MACHINES.md) lists each machine, its states, and the `data-*` attribute that exposes it.
 - Show success only after the backend confirmed it (`status === "success"` or `cmd-finished`).
 - No HTML from strings (`dangerouslySetInnerHTML`, `innerHTML`) and no remote content; the CSP and `src/lib/webview-security.test.js` enforce this.
 - Keyboard and screen-reader use must keep working (`src/test/accessibility.test.jsx`).
