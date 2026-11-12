@@ -7,6 +7,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-11-12
+
 ### Fixed
 - **A task refused as busy left the terminal open** on "Awaiting elevated process stream…" with no way to tell why (for example Install GApps while an APK was installing). It now closes and says another operation runs; installer buttons are disabled while an APK installs.
 - **Launch during Stop or Restart.** During a restart the app was launched into the stopping session; during a stop the request was kept and fired on the next start, maybe minutes later. Launch now waits for the restart's boot, is refused while stopping, and a queued launch is dropped once the engine ends up stopped.
