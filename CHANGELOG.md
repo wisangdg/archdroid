@@ -7,8 +7,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Fixed
+- **A task refused as busy left the terminal open** on "Awaiting elevated process stream…" with no way to tell why (for example Install GApps while an APK was installing). It now closes and says another operation runs; installer buttons are disabled while an APK installs.
+- **Launch during Stop or Restart.** During a restart the app was launched into the stopping session; during a stop the request was kept and fired on the next start, maybe minutes later. Launch now waits for the restart's boot, is refused while stopping, and a queued launch is dropped once the engine ends up stopped.
+- **APK install Cancel pressed in the first moment did nothing** (the task ID had not arrived yet). It is now sent as soon as it does, the button says "Cancelling…", and Cancel stops the rest of a multi-file drop.
+- A cancelled task kept the "in progress" styling in the terminal's stage card.
+
 ### Changed
 - **Install Phantom is one click on any machine.** It installs Phantom's verified release build (v1.1.0, SHA-256 pinned) instead of compiling it, so the Rust toolchain, a JDK and the Android SDK (`d8`, `android.jar`) are no longer needed; it takes seconds instead of about five minutes and 1 GB. Existing Phantom config and profiles are kept.
+- **The top bar says what the engine is doing**: "Starting Engine…", "Stopping Engine…", "Restarting Engine…" (amber) instead of "Engine Stopped" or "Engine Running" while it changes, and "Waydroid Not Responding" when the status cannot be read instead of "Engine Stopped".
+- The engine phase and the terminal outcome are exposed as `data-engine-phase` and `data-task-outcome` for tests and scripts; [docs/STATE-MACHINES.md](docs/STATE-MACHINES.md) maps every UI state machine.
 
 ## [0.1.7] - 2026-11-11
 

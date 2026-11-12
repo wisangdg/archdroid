@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { sessionRunning } from "../lib/waydroidStatus";
 import { pollDue } from "../lib/pollGate";
+import { enginePhase } from "../lib/enginePhase";
 
 const BOOT_POLL_MS = 2000;
 const BOOT_POLL_ATTEMPTS = 45; // ~90 s
@@ -10,13 +11,22 @@ const BOOT_POLL_ATTEMPTS = 45; // ~90 s
  * Waydroid session state: polling, and the Start/Stop/Restart handlers that
  * wait for the session to actually reach the target state. `onOnline` runs when
  * the session transitions to online so the caller can refresh live probes.
+ *
+ * `phase` (src/lib/enginePhase.js) is the one value views should branch on;
+ * `status`, `booting` and `isOperating` stay for the views that need a single
+ * fact. Only one of Start/Stop/Restart runs at a time: a second call while one
+ * is in flight is ignored (and resolves to false).
  */
 export function useEngineStatus({ addToast, onOnline }) {
   const [status, setStatus] = useState("offline");
   // `null` until the first status reply, so a first run does not flash the
   // (empty) app library before the setup screen.
   const [isInitialized, setIsInitialized] = useState(null);
-  const [isOperating, setIsOperating] = useState(false);
+  // The Start/Stop/Restart in flight ("start" | "stop" | "restart"), or null.
+  const [operation, setOperation] = useState(null);
+  const operationRef = useRef(null);
+  // `waydroid status` itself failed, so whether the session runs is unknown.
+  const [unreachable, setUnreachable] = useState(false);
   // The session runs but Android has not finished booting yet.
   const [booting, setBooting] = useState(false);
   const bootWatchRef = useRef(0);
@@ -34,12 +44,13 @@ export function useEngineStatus({ addToast, onOnline }) {
   // ImportError. Say so once per distinct error.
   const reportStatusError = useCallback((message) => {
     const text = message || "unknown error";
+    setUnreachable(true);
     if (lastStatusErrorRef.current === text) return;
     lastStatusErrorRef.current = text;
     addToastRef.current?.({
       type: "warning",
       title: "Waydroid Not Responding",
-      message: `ArchDroid could not read the Waydroid status, so the engine is shown as stopped: ${text} A Diagnostic Bundle (Settings) includes the full error.`,
+      message: `ArchDroid could not read the Waydroid status, so it cannot tell whether the engine runs: ${text} A Diagnostic Bundle (Settings) includes the full error.`,
     });
   }, []);
 
@@ -72,6 +83,7 @@ export function useEngineStatus({ addToast, onOnline }) {
       if (sessionRunning(res)) {
         setStatus("online");
         setIsInitialized(true);
+        setUnreachable(false);
         lastStatusErrorRef.current = null;
         if (prevStatusRef.current !== "online") {
           onOnlineRef.current?.();
@@ -87,6 +99,7 @@ export function useEngineStatus({ addToast, onOnline }) {
         if (res.status === "error" && !missing) {
           reportStatusError(res.message);
         } else {
+          setUnreachable(false);
           lastStatusErrorRef.current = null;
         }
       }
@@ -118,9 +131,21 @@ export function useEngineStatus({ addToast, onOnline }) {
     [checkStatus]
   );
 
+  /** Claims the operation slot; false when another operation holds it. */
+  const begin = (name) => {
+    if (operationRef.current) return false;
+    operationRef.current = name;
+    setOperation(name);
+    return true;
+  };
+  const end = () => {
+    operationRef.current = null;
+    setOperation(null);
+  };
+
   /** Starts the session; resolves to whether it reports online. */
   const handleStart = async () => {
-    setIsOperating(true);
+    if (!begin("start")) return false;
     addToast({
       type: "info",
       title: "Starting Engine",
@@ -129,7 +154,7 @@ export function useEngineStatus({ addToast, onOnline }) {
     try {
       const res = await invoke("waydroid_start");
       if (res?.status === "error") {
-        setIsOperating(false);
+        end();
         addToast({
           type: "error",
           title: "Start Failed",
@@ -138,7 +163,7 @@ export function useEngineStatus({ addToast, onOnline }) {
         return false;
       }
       const online = await pollStatusUntil("online", 15);
-      setIsOperating(false);
+      end();
       if (!online) {
         addToast({
           type: "warning",
@@ -155,13 +180,13 @@ export function useEngineStatus({ addToast, onOnline }) {
         title: "Start Failed",
         message: String(e),
       });
-      setIsOperating(false);
+      end();
       return false;
     }
   };
 
   const handleStop = async () => {
-    setIsOperating(true);
+    if (!begin("stop")) return;
     addToast({
       type: "info",
       title: "Stopping Engine",
@@ -170,7 +195,7 @@ export function useEngineStatus({ addToast, onOnline }) {
     try {
       const res = await invoke("waydroid_stop");
       if (res?.status === "error") {
-        setIsOperating(false);
+        end();
         addToast({
           type: "error",
           title: "Stop Failed",
@@ -179,7 +204,7 @@ export function useEngineStatus({ addToast, onOnline }) {
         return;
       }
       await pollStatusUntil("offline", 10);
-      setIsOperating(false);
+      end();
     } catch (e) {
       console.error("Failed to stop Waydroid:", e);
       addToast({
@@ -187,12 +212,12 @@ export function useEngineStatus({ addToast, onOnline }) {
         title: "Stop Failed",
         message: String(e),
       });
-      setIsOperating(false);
+      end();
     }
   };
 
   const handleRestart = async () => {
-    setIsOperating(true);
+    if (!begin("restart")) return;
     addToast({
       type: "info",
       title: "Restarting Engine",
@@ -201,7 +226,7 @@ export function useEngineStatus({ addToast, onOnline }) {
     try {
       const stopRes = await invoke("waydroid_stop");
       if (stopRes?.status === "error") {
-        setIsOperating(false);
+        end();
         addToast({
           type: "error",
           title: "Restart Failed",
@@ -215,7 +240,7 @@ export function useEngineStatus({ addToast, onOnline }) {
 
       const startRes = await invoke("waydroid_start");
       if (startRes?.status === "error") {
-        setIsOperating(false);
+        end();
         addToast({
           type: "error",
           title: "Restart Failed",
@@ -224,7 +249,7 @@ export function useEngineStatus({ addToast, onOnline }) {
         return;
       }
       const online = await pollStatusUntil("online", 15);
-      setIsOperating(false);
+      end();
       if (online) {
         addToast({
           type: "success",
@@ -246,7 +271,7 @@ export function useEngineStatus({ addToast, onOnline }) {
         title: "Restart Failed",
         message: String(e),
       });
-      setIsOperating(false);
+      end();
     }
   };
 
@@ -274,9 +299,17 @@ export function useEngineStatus({ addToast, onOnline }) {
   }, [status]);
 
   return {
+    phase: enginePhase({
+      status,
+      isInitialized,
+      operation,
+      booting,
+      unreachable,
+    }),
     status,
     isInitialized,
-    isOperating,
+    isOperating: operation !== null,
+    operation,
     booting,
     checkStatus,
     handleStart,

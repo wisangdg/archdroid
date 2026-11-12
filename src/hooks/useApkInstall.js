@@ -23,27 +23,43 @@ export function useApkInstall({ addToast, operationInFlight, loadApps }) {
   // The file being installed. A big bundle takes minutes, so the page shows
   // it for the whole time (with Cancel) instead of a toast that is gone in 4 s.
   const [installingApk, setInstallingApk] = useState(null);
+  // Cancel was pressed for the current install. Shown on the button, and
+  // remembered when the backend has not announced the task ID yet.
+  const [cancelling, setCancelling] = useState(false);
   const installActive = useRef(false);
   const installTaskId = useRef(null);
+  const cancelRequested = useRef(false);
+  // Set by Cancel, read by a multi-file drop to skip the files after it.
+  const cancelledBatch = useRef(false);
 
-  // The backend announces the install's task ID; Cancel needs it.
-  useEffect(() => {
-    const unlisten = listen("cmd-started", (event) => {
-      if (installActive.current) installTaskId.current = event.payload.task_id;
-    });
-    return () => {
-      unlisten.then((f) => f());
-    };
-  }, []);
-
-  const cancelInstall = useCallback(async () => {
-    if (!installTaskId.current) return;
+  const sendCancel = useCallback(async (taskId) => {
     try {
-      await invoke("cancel_task", { taskId: installTaskId.current });
+      await invoke("cancel_task", { taskId });
     } catch (e) {
       console.error("Cancel install failed:", e);
     }
   }, []);
+
+  // The backend announces the install's task ID; Cancel needs it. A Cancel
+  // pressed before this arrives is sent now instead of being lost.
+  useEffect(() => {
+    const unlisten = listen("cmd-started", (event) => {
+      if (!installActive.current) return;
+      installTaskId.current = event.payload.task_id;
+      if (cancelRequested.current) sendCancel(event.payload.task_id);
+    });
+    return () => {
+      unlisten.then((f) => f());
+    };
+  }, [sendCancel]);
+
+  const cancelInstall = useCallback(async () => {
+    if (!installActive.current || cancelRequested.current) return;
+    cancelRequested.current = true;
+    cancelledBatch.current = true;
+    setCancelling(true);
+    if (installTaskId.current) await sendCancel(installTaskId.current);
+  }, [sendCancel]);
 
   const installApkFile = useCallback(
     async (filePath) => {
@@ -70,6 +86,8 @@ export function useApkInstall({ addToast, operationInFlight, loadApps }) {
       }
       installActive.current = true;
       installTaskId.current = null;
+      cancelRequested.current = false;
+      setCancelling(false);
       setInstallingApk(fileName);
       try {
         const res = await invoke("waydroid_install_apk", { path: filePath });
@@ -106,6 +124,8 @@ export function useApkInstall({ addToast, operationInFlight, loadApps }) {
       } finally {
         installActive.current = false;
         installTaskId.current = null;
+        cancelRequested.current = false;
+        setCancelling(false);
         setInstallingApk(null);
       }
     },
@@ -151,9 +171,13 @@ export function useApkInstall({ addToast, operationInFlight, loadApps }) {
         return;
       }
 
+      cancelledBatch.current = false;
       for (const apk of apkFiles) {
         await installApkFile(apk);
+        // Cancel stops the batch, not only the file that was installing.
+        if (cancelledBatch.current) break;
       }
+      cancelledBatch.current = false;
     },
     [addToast, installApkFile]
   );
@@ -211,6 +235,7 @@ export function useApkInstall({ addToast, operationInFlight, loadApps }) {
   return {
     isDraggingOver,
     installingApk,
+    cancellingInstall: cancelling,
     cancelInstall,
     handleInstallApk,
     handleDragOver,

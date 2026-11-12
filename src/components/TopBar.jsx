@@ -10,6 +10,7 @@ import {
   Square,
   RotateCw,
 } from "lucide-react";
+import { enginePhase, ENGINE_PHASES } from "../lib/enginePhase";
 
 const NAV_ITEMS = [
   { id: "home", label: "My Apps", icon: MonitorPlay },
@@ -30,6 +31,8 @@ export default function TopBar({
   isInitialized,
   isOperating,
   booting = false,
+  // From useEngineStatus; derived here when a caller (or a test) leaves it out.
+  phase: phaseProp,
   busy = false,
   onStart,
   onStop,
@@ -38,6 +41,8 @@ export default function TopBar({
 }) {
   const online = status === "online";
   const locked = isOperating || busy;
+  const phase = phaseProp ?? enginePhase({ status, isInitialized, booting });
+  const { label, tone, transient } = ENGINE_PHASES[phase];
 
   return (
     <header className="topbar">
@@ -91,17 +96,12 @@ export default function TopBar({
 
         <div className={`engine-pill ${online ? "online" : "offline"}`}>
           <div
-            className={`status-badge ${online ? "status-online" : "status-offline"} ${online && booting ? "status-booting" : ""}`}
+            className={`status-badge status-${tone} ${transient ? "status-booting" : ""}`}
             role="status"
+            data-engine-phase={phase}
           >
             <span className="status-dot" aria-hidden="true"></span>
-            <span className="status-text">
-              {online
-                ? booting
-                  ? "Android Booting…"
-                  : "Engine Running"
-                : "Engine Stopped"}
-            </span>
+            <span className="status-text">{label}</span>
           </div>
 
           {isInitialized &&

@@ -37,9 +37,10 @@ export default function App() {
   // GApps/Houdini probes go through adb, so they are refreshed when the
   // session comes online and after each task rather than on every poll.
   const {
+    phase: enginePhase,
     status,
     isInitialized,
-    isOperating,
+    operation,
     booting,
     handleStart,
     handleStop,
@@ -198,6 +199,7 @@ export default function App() {
   const {
     isDraggingOver,
     installingApk,
+    cancellingInstall,
     cancelInstall,
     handleInstallApk,
     handleDragOver,
@@ -205,15 +207,38 @@ export default function App() {
     handleDrop,
   } = useApkInstall({ addToast, operationInFlight, loadApps });
 
+  // The backend runs one streaming task at a time (`TaskGuard`), and an APK
+  // install holds that slot too. Buttons that would start another task are
+  // disabled while it is taken, instead of asking for root and then hearing
+  // "busy".
+  const taskSlotBusy = installing || Boolean(installingApk);
+
   // An app asked for before Android was ready. `waydroid app launch` must
   // never run against a stopped session (it would become the session and the
   // backend refuses it), so Launch starts the engine and waits for the boot.
+  // The request lives only while the engine is on its way up: it opens once
+  // `androidReady`, and is dropped when the engine ends up stopped, so a
+  // launch asked for minutes ago never fires on a later start.
   const [pendingLaunch, setPendingLaunch] = useState(null);
+  useEffect(() => {
+    if (enginePhase === "stopped" || enginePhase === "unreachable") {
+      setPendingLaunch(null);
+    }
+  }, [enginePhase]);
 
   const handleLaunchApp = async (pkg) => {
-    if (status !== "online") {
+    if (operation === "stop") {
+      addToast({
+        type: "info",
+        title: "Engine Is Stopping",
+        message: `Launch ${pkg} again once the engine has stopped; it then starts the engine first.`,
+        duration: 4000,
+      });
+      return;
+    }
+    if (status !== "online" || operation === "restart") {
       setPendingLaunch(pkg);
-      if (isOperating) return;
+      if (operation) return;
       addToast({
         type: "info",
         title: "Starting Engine First",
@@ -547,11 +572,12 @@ export default function App() {
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         appCount={apps.length}
+        phase={enginePhase}
         status={status}
         isInitialized={isInitialized}
-        isOperating={isOperating}
+        isOperating={operation !== null}
         booting={booting}
-        busy={installing || Boolean(installingApk)}
+        busy={taskSlotBusy}
         onStart={handleStart}
         onStop={handleStop}
         onRestart={handleRestart}
@@ -587,6 +613,7 @@ export default function App() {
                   onInstallApk={handleInstallApk}
                   installingApk={installingApk}
                   onCancelInstall={cancelInstall}
+                  cancellingInstall={cancellingInstall}
                   onUninstallApp={handleUninstallApp}
                   onCopyPackage={handleCopyPackage}
                   onBackupApk={handleBackupApk}
@@ -601,7 +628,7 @@ export default function App() {
                 <KeymapView
                   onRunPhantom={handleRunPhantom}
                   onInstallPhantom={handleInstallPhantom}
-                  installing={installing}
+                  installing={taskSlotBusy}
                   touchMode={touchMode}
                   onToggleTouchMode={touchMode.setEnabled}
                   onEnableTouchAccess={handleEnableTouchAccess}
@@ -613,7 +640,7 @@ export default function App() {
                   gappsStatus={gappsStatus}
                   houdiniStatus={houdiniStatus}
                   multitouchStatus={multitouchStatus}
-                  installing={installing}
+                  installing={taskSlotBusy}
                   onInstallGApps={handleInstallGApps}
                   onInstallHoudini={handleInstallHoudini}
                   onInstallMultitouch={handleInstallMultitouch}
@@ -636,7 +663,7 @@ export default function App() {
                   onApplyResolution={handleApplyResolution}
                   engineRunning={androidReady}
                   onRestartEngine={handleRestart}
-                  busy={installing}
+                  busy={taskSlotBusy}
                 />
               )}
             </>

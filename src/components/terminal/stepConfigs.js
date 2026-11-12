@@ -90,6 +90,54 @@ export const TASK_STEP_CONFIGS = {
   ],
 };
 
+/**
+ * What the terminal says about the task, by outcome. The header badge, the
+ * header status and the stage card all read this one table, so they cannot
+ * disagree (a cancelled task used to keep the "active" card style).
+ *
+ * running ──► succeeded | failed | cancelled
+ * `ended`: not running and no outcome known (output ended without a result).
+ */
+export const TERMINAL_OUTCOMES = {
+  running: {
+    badge: "badge-running",
+    card: "status-active",
+    status: "Running…",
+  },
+  succeeded: {
+    badge: "badge-done",
+    card: "status-completed",
+    status: "Finished successfully",
+    phase: "All Stages Completed",
+  },
+  failed: {
+    badge: "badge-failed",
+    card: "status-failed",
+    status: "Process encountered errors",
+    phase: "Execution Failed",
+  },
+  cancelled: {
+    badge: "badge-cancelled",
+    card: "status-cancelled",
+    status: "Operation cancelled",
+    phase: "Operation Cancelled",
+  },
+  ended: {
+    badge: "badge-running",
+    card: "status-active",
+    status: "Task Complete",
+  },
+};
+
+/** The terminal's outcome from `detectStepProgress` and whether it still runs. */
+export function terminalOutcome(progress, running) {
+  if (running) return "running";
+  if (progress.isCancelled) return "cancelled";
+  if (progress.isFailed) return "failed";
+  if (progress.isCompleted) return "succeeded";
+  return "ended";
+}
+
 const STEP_MARKER = /^\s*\[STEP\] (\S+)/;
 
 /** Newest "[STEP] <id>" line that names a known step, plus the line after it. */

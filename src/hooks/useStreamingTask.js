@@ -77,9 +77,13 @@ export function useStreamingTask({ addToast, onTaskSuccess }) {
     try {
       const result = await invoke(command, args);
       if (result?.status === "error" && result.code === "busy") {
+        // Refused before it started (an APK install or another window's task
+        // holds the backend slot): no output will ever arrive, so the terminal
+        // must not stay open on "Awaiting…".
         operationInFlight.current = false;
         activeTaskId.current = null;
         setInstalling(false);
+        setTerminalOpen(false);
         addToast({
           type: "warning",
           title: "Operation In Progress",
