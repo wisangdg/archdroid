@@ -1424,7 +1424,7 @@ async fn install_houdini(app: AppHandle, approved_packages: Option<Vec<String>>)
 async fn install_phantom(app: AppHandle) -> CommandResult {
     if !check_network_connectivity() {
         return AppError::command_failed(
-            "No internet connection detected. Internet access is required to download Phantom source.",
+            "No internet connection detected. Internet access is required to download Phantom.",
         )
         .into();
     }
@@ -1437,9 +1437,8 @@ async fn install_phantom(app: AppHandle) -> CommandResult {
         return error.into();
     }
 
-    // Phantom installs into $HOME/.local and its system wrapper is disabled, so
-    // it must not run through pkexec/sudo. Running it as the desktop user also
-    // avoids executing the user's Rust toolchain as root.
+    // Phantom installs into $HOME/.local, so it must not run through
+    // pkexec/sudo: root would leave root-owned files in the user's home.
     stream_user_script(app, phantom_install_script(), waydroid::TIMEOUT_LONG)
         .await
         .into_command_result()

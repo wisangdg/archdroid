@@ -67,14 +67,14 @@ export const TASK_STEP_CONFIGS = {
   ],
   phantom: [
     {
-      id: "repo",
-      label: "Source Checkout",
-      description: "Cloning pinned Phantom repo",
+      id: "download",
+      label: "Verified Download",
+      description: "Phantom release, SHA-256 pinned",
     },
     {
-      id: "build",
-      label: "Compile & Install",
-      description: "Building binaries as user",
+      id: "install",
+      label: "Install",
+      description: "Into ~/.local, no root",
     },
     { id: "done", label: "Ready", description: "Phantom ready" },
   ],

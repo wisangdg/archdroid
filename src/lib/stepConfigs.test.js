@@ -88,12 +88,12 @@ test("detectStepProgress does not falsely fail on words like failed in third-par
   assert.equal(result.isCancelled, false);
 });
 
-test("detectStepProgress accurately tracks phantom compilation step", () => {
+test("detectStepProgress tracks the phantom install step", () => {
   // What phantom_install_script prints (src-tauri/src/scripts.rs).
   const logs = [
-    "[STEP] repo",
-    "[STEP] build",
-    "[SYSTEM] Running Phantom installer as the desktop user...",
+    "[STEP] download",
+    "[STEP] install",
+    "[SYSTEM] Installing Phantom as the desktop user...",
   ];
   const result = detectStepProgress("phantom", logs, null);
   assert.equal(result.activeStepIndex, 1);

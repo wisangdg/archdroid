@@ -150,68 +150,6 @@ pub(crate) fn has_program(name: &str) -> bool {
     resolve_program(name).is_some() || trusted_program(name).is_some()
 }
 
-/// Android SDK root, preferring the environment variables the upstream Phantom
-/// build script already understands.
-fn android_sdk_root() -> Option<PathBuf> {
-    for key in ["ANDROID_SDK_ROOT", "ANDROID_HOME"] {
-        if let Some(value) = std::env::var_os(key) {
-            let path = PathBuf::from(value);
-            if path.is_dir() {
-                return Some(path);
-            }
-        }
-    }
-    let home = std::env::var_os("HOME").map(PathBuf::from)?;
-    let path = home.join("Android/Sdk");
-    path.is_dir().then_some(path)
-}
-
-/// `android.jar` from `ANDROID_JAR` or a platform under the Android SDK.
-fn find_android_jar() -> Option<PathBuf> {
-    if let Some(value) = std::env::var_os("ANDROID_JAR") {
-        let path = PathBuf::from(value);
-        if path.is_file() {
-            return Some(path);
-        }
-    }
-    let platforms = android_sdk_root()?.join("platforms");
-    let mut candidates: Vec<PathBuf> = std::fs::read_dir(platforms)
-        .ok()?
-        .filter_map(|entry| entry.ok())
-        .map(|entry| entry.path().join("android.jar"))
-        .filter(|path| path.is_file())
-        .collect();
-    candidates.sort();
-    candidates.pop()
-}
-
-/// `d8` from `D8`, PATH, the SDK build-tools, or cmdline-tools.
-fn find_d8() -> Option<PathBuf> {
-    if let Some(value) = std::env::var_os("D8") {
-        let path = PathBuf::from(value);
-        if path.is_file() {
-            return Some(path);
-        }
-    }
-    if let Some(path) = resolve_program("d8").or_else(|| trusted_program("d8")) {
-        return Some(path);
-    }
-    let sdk = android_sdk_root()?;
-    if let Ok(entries) = std::fs::read_dir(sdk.join("build-tools")) {
-        let mut candidates: Vec<PathBuf> = entries
-            .filter_map(|entry| entry.ok())
-            .map(|entry| entry.path().join("d8"))
-            .filter(|path| path.is_file())
-            .collect();
-        candidates.sort();
-        if let Some(path) = candidates.pop() {
-            return Some(path);
-        }
-    }
-    let cmdline_d8 = sdk.join("cmdline-tools/latest/bin/d8");
-    cmdline_d8.is_file().then_some(cmdline_d8)
-}
-
 /// Generic dependency names shared by the GApps and ARM Translation installers.
 /// Root scripts run with `SAFE_PATH`, so only trusted system locations count.
 pub(crate) fn gapps_missing_dependencies() -> Vec<&'static str> {
@@ -428,85 +366,28 @@ pub(crate) fn installer_preflight(
     Ok(())
 }
 
-/// Phantom builds Rust binaries and an Android server jar as the desktop user.
-/// None of these can be fixed after the build starts, so collect them first.
-fn phantom_missing_dependencies() -> (Vec<&'static str>, Vec<&'static str>) {
-    let mut packages = Vec::new();
-    let mut sdk = Vec::new();
-    if !has_program("git") {
-        packages.push("git");
-    }
-    if !has_program("cargo") {
-        packages.push("cargo");
-    }
-    if !has_program("javac") || !has_program("jar") {
-        packages.push("jdk");
-    }
-    if !has_program("sed") {
-        packages.push("sed");
-    }
-    if !has_program("install") {
-        packages.push("coreutils");
-    }
-    if find_d8().is_none() {
-        sdk.push("d8");
-    }
-    if find_android_jar().is_none() {
-        sdk.push("android.jar");
-    }
-    (packages, sdk)
-}
-
-fn phantom_dependency_error(
-    packages: &[&'static str],
-    sdk: &[&'static str],
-    pm: Option<platform::PackageManager>,
-) -> AppError {
-    let mut names = packages.to_vec();
-    names.extend(sdk.iter().copied());
-
-    let mut hints = Vec::new();
-    if !packages.is_empty() {
-        match pm {
-            Some(pm) => hints.push(format!(
-                "Install missing packages with: {}",
-                pm.user_install_command(packages)
-            )),
-            None => hints.push(format!(
-                "Install missing packages ({}) with your distribution's package manager.",
-                packages.join(", ")
-            )),
-        }
-    }
-    if sdk.contains(&"d8") {
-        hints.push(
-            "Install Android SDK command-line tools so `d8` is on PATH, or set D8=/path/to/d8."
-                .to_string(),
-        );
-    }
-    if sdk.contains(&"android.jar") {
-        hints.push(
-            "Install an Android platform with sdkmanager (for example `sdkmanager \"platforms;android-34\"`), or set ANDROID_JAR=/path/to/android.jar."
-                .to_string(),
-        );
-    }
-
-    AppError::not_found(
-        &names.join(", "),
-        &format!(
-            "Phantom requires missing dependencies: {}. {}",
-            names.join(", "),
-            hints.join(" ")
-        ),
-    )
+/// Phantom installs from its prebuilt release: the download is verified by
+/// `python3` (which Waydroid itself needs) and unpacked with `tar`.
+fn phantom_missing_dependencies() -> Vec<&'static str> {
+    ["python3", "tar"]
+        .into_iter()
+        .filter(|name| !has_program(name))
+        .collect()
 }
 
 pub(crate) fn phantom_preflight(pm: Option<platform::PackageManager>) -> Result<(), AppError> {
-    let (packages, sdk) = phantom_missing_dependencies();
-    if packages.is_empty() && sdk.is_empty() {
+    let missing = phantom_missing_dependencies();
+    if missing.is_empty() {
         return Ok(());
     }
-    Err(phantom_dependency_error(&packages, &sdk, pm))
+    let hint = match pm {
+        Some(pm) => format!("Install them with: {}", pm.user_install_command(&missing)),
+        None => "Install them with your distribution's package manager.".to_string(),
+    };
+    Err(AppError::not_found(
+        &missing.join(", "),
+        &format!("Installing Phantom needs {}. {hint}", missing.join(" and ")),
+    ))
 }
 
 pub(crate) fn phantom_disk_preflight() -> Result<(), AppError> {
@@ -514,9 +395,9 @@ pub(crate) fn phantom_disk_preflight() -> Result<(), AppError> {
         AppError::not_found("HOME", "Cannot determine the desktop home directory.")
     })?;
     if let Some(kb) = check_available_disk_space_kb(&home) {
-        if kb < 1_000_000 {
+        if kb < 200_000 {
             return Err(AppError::command_failed(format!(
-                "Insufficient disk space in {}: only {:.0} MB available. Phantom needs about 1 GB to build its Rust binaries and Android server jar.",
+                "Insufficient disk space in {}: only {:.0} MB available. Phantom needs about 200 MB to download and install.",
                 home.display(),
                 kb as f64 / 1024.0
             )));
@@ -645,47 +526,8 @@ mod tests {
         unique.dedup();
         assert_eq!(unique.len(), gapps.len(), "duplicate dependency reported");
 
-        let (packages, sdk) = phantom_missing_dependencies();
-        let allowed_packages = ["git", "cargo", "jdk", "sed", "coreutils"];
-        for name in &packages {
-            assert!(
-                allowed_packages.contains(name),
-                "unexpected package dependency: {name}"
-            );
+        for name in phantom_missing_dependencies() {
+            assert!(["python3", "tar"].contains(&name), "unexpected: {name}");
         }
-        for name in &sdk {
-            assert!(
-                ["d8", "android.jar"].contains(name),
-                "unexpected SDK dependency: {name}"
-            );
-        }
-    }
-
-    #[test]
-    fn phantom_dependency_error_includes_package_and_sdk_remediation() {
-        let error = phantom_dependency_error(
-            &["cargo", "jdk"],
-            &["d8", "android.jar"],
-            Some(platform::PackageManager::Pacman),
-        );
-        let message = error.to_string();
-        assert!(message.contains("cargo, jdk, d8, android.jar"), "{message}");
-        assert!(
-            message.contains("sudo pacman -S --needed rust jdk-openjdk"),
-            "{message}"
-        );
-        assert!(message.contains("D8=/path/to/d8"), "{message}");
-        assert!(
-            message.contains("ANDROID_JAR=/path/to/android.jar"),
-            "{message}"
-        );
-
-        let unsupported = phantom_dependency_error(&["git"], &[], None);
-        assert!(
-            unsupported
-                .to_string()
-                .contains("distribution's package manager"),
-            "{unsupported}"
-        );
     }
 }
