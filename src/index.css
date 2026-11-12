@@ -397,6 +397,11 @@ body {
   color: #fca5a5;
 }
 
+/* Start, Stop or Restart in flight. */
+.status-pending {
+  color: var(--warning-primary);
+}
+
 .status-dot {
   width: 8px;
   height: 8px;
@@ -2316,6 +2321,12 @@ body {
   border: 1px solid rgba(16, 185, 129, 0.3);
 }
 
+.terminal-icon-badge.badge-cancelled {
+  background: rgba(245, 158, 11, 0.12);
+  color: var(--warning-primary);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
 .terminal-icon-badge.badge-running {
   background: rgba(16, 185, 129, 0.12);
   color: var(--accent-primary);
@@ -2479,6 +2490,15 @@ body {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.5px;
+}
+
+.stepper-status-card.status-cancelled {
+  background: rgba(245, 158, 11, 0.06);
+  border-color: rgba(245, 158, 11, 0.3);
+}
+
+.status-cancelled .status-card-phase {
+  color: var(--warning-primary);
 }
 
 .status-active .status-card-phase {
