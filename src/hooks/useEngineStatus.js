@@ -5,7 +5,11 @@ import { pollDue } from "../lib/pollGate";
 import { enginePhase } from "../lib/enginePhase";
 
 const BOOT_POLL_MS = 2000;
-const BOOT_POLL_ATTEMPTS = 45; // ~90 s
+// 45 checks: ~90 s when each answers at once, but a check made before adbd is
+// up waits up to 5 s for the device (adb.rs `ensure_device`), so a slow first
+// boot is watched for up to ~5 min. Kept as a count: a 90 s deadline would end
+// the wait during exactly those slow boots and report Android ready too early.
+const BOOT_POLL_ATTEMPTS = 45;
 
 /**
  * Waydroid session state: polling, and the Start/Stop/Restart handlers that

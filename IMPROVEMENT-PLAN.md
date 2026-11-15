@@ -22,7 +22,8 @@
 > - **0.1.10:** Keep Android Awake.
 >
 > Kode baru itu ditinjau 15 Nov dari sisi performa: §14 (R19–R21, G7–G14).
-> R19 dan R20 dikerjakan di branch `chore/deps-and-plan-0.1.11`; sisanya ⬜.
+> R19 dan R20 masuk lewat PR #20. G7, G8, G9 langkah 1, G10, R21, dan R22
+> dikerjakan di branch `perf/plan-14`. Yang belum: G9 langkah 2 dan G11–G14.
 >
 > Yang tersisa dari §13 tidak bisa dikerjakan di sini, karena butuh hardware
 > asli dengan GPU dan cek `document.hidden` di Hyprland. Begitu juga B4, E1,
@@ -80,7 +81,7 @@ Detail R1–R10 di §12. Item yang selesai diberi ✅ dan tanggal.
 
 | # | Pekerjaan | Prio | Status |
 |---|---|---|---|
-| R19–R21, G7–G14 | Review 15 Nov: performa kode 0.1.8–0.1.10, cancel root, PR Dependabot | P1–P3 | R19, R20 ✅ 15 Nov; sisanya ⬜, status per item di tabel §14. Berikutnya: G7 + G8 |
+| R19–R22, G7–G14 | Review 15 Nov: performa kode 0.1.8–0.1.10, cancel root, PR Dependabot | P1–P3 | ✅ 15 Nov: R19–R22, G7, G8, G9 (1), G10. ⬜ G9 (2), G11–G14; status per item di tabel §14 |
 | R12–R18, G0–G6, H1–H12 | Temuan review 10 Nov: bug, performa, tampilan | P1–P3 | ✅ 11 Nov, dirilis di 0.1.7; status per item di tabel §13 |
 | R1 | `.pyc` ikut ter-commit; komentar basi di `apk.rs` | P1 | ✅ 9 Nov |
 | R2 | Settings dibaca ulang setelah Android selesai boot, bukan saat sesi `RUNNING` | P1 | ✅ 9 Nov (`a8a1c73`) |
@@ -1067,18 +1068,24 @@ engine) belum pernah ditinjau dari sisi performa.
 |---|---|---|---|---|
 | R19 | Cancel task root bisa tidak sampai: TERM hilang saat bash sedang fork; test `elevate` flaky di CI | P1 | S | ✅ 15 Nov |
 | R20 | PR Dependabot #9–#11 gagal CI: Tauri npm dan crate naik terpisah | P2 | S | ✅ 15 Nov (Tauri 2.12, Rust minimum 1.90) |
-| G7 | Focus trap dipasang ulang setiap render: fokus direbut, slider tidak bisa dipakai dengan keyboard | P1 | S | ⬜ |
-| G8 | Cek add-on jalan sebelum Android boot, dan dua kali saat app dibuka; hasilnya basi | P1 | S | ⬜ |
-| G9 | Screenshot editor keymap (data URL beberapa MB) dibangun ulang per gerakan drag | P2 | S / M | ⬜ |
-| G10 | Fallback Python dan root tetap jalan saat engine mati (`multitouch_state`, `gapps_state`) | P2 | S | ⬜ |
+| G7 | Focus trap dipasang ulang setiap render: fokus direbut, slider tidak bisa dipakai dengan keyboard | P1 | S | ✅ 15 Nov. Probe drag: fokus tetap di node yang di-drag |
+| G8 | Cek add-on jalan sebelum Android boot, dan dua kali saat app dibuka; hasilnya basi | P1 | S | ✅ 15 Nov. IPC startup (engine menyala) 20 → 16, setiap cek sekali setelah boot. Jumlah proses adb di VM belum dihitung |
+| G9 | Screenshot editor keymap (data URL beberapa MB) dibangun ulang per gerakan drag | P2 | S / M | Langkah (1) ✅ 15 Nov: 120 gerakan dengan 1,27 MB, script 171 → 75 ms, sampah heap 21,8 → 0,6 MB. Langkah (2) ⬜ |
+| G10 | Fallback Python dan root tetap jalan saat engine mati (`multitouch_state`, `gapps_state`) | P2 | S | ✅ 15 Nov. Juga: `waydroid app list` meng-unfreeze container (`app_manager.py:98-99`), jadi kini hanya untuk sesi yang tidak frozen |
 | G11 | `loadConfigs`: 4 proses Python `waydroid prop get` | P3 | S–M | ⬜ perlu verifikasi |
 | G12 | Daftar app mengganti array setiap 10 detik walau tidak berubah | P3 | S | ⬜ |
 | G13 | Screenshot lewat 3 panggilan adb; Recapture tidak di-disable selama capture | P3 | S | ⬜ |
 | G14 | Blur overlay di belakang editor keymap saat drag | P3 | S | ⬜ ukur dulu di VM |
-| R21 | Batas tunggu boot tertulis "~90 s", padahal bisa ±5 menit | P3 | S | ⬜ |
+| R21 | Batas tunggu boot tertulis "~90 s", padahal bisa ±5 menit | P3 | S | ✅ 15 Nov (komentar). Tetap dihitung per percobaan: tenggat 90 detik akan berakhir tepat saat boot pertama yang lambat |
+| R22 | Test `a_session_whose_container_fails_reports_it_despite_exit_zero` flaky: `session_start_argv` tanpa retry ETXTBSY | P3 | S | ✅ 15 Nov |
 
 **Urutan:** (1) G7 dan G8 bersama (keduanya juga bug). (2) G9 langkah 1,
 G10, R21. (3) G11–G14 saat menyentuh area itu.
+
+**Dikerjakan 15 Nov** di branch `perf/plan-14`: G7, G8, G9 langkah 1, G10,
+R21, R22. Hasil uji: `cargo test` 206 (225 dengan `dev-commands`), `node --test` 76,
+Vitest 132, E2E 7/7; clippy, fmt, ESLint, dan Prettier bersih. Sisa: G9
+langkah 2, G11–G14, dan hitungan proses adb di VM untuk G8.
 
 ### R19 — Cancel tidak sampai ke skrip root (P1, S) ✅ 15 Nov
 - **Bukti:**

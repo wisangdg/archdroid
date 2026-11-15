@@ -8,9 +8,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 ## [Unreleased]
 
 ### Fixed
+- **Dialogs took focus back on every refresh.** The keymap editor, confirmations and a finished terminal moved focus to their main button whenever the window re-rendered (every app-list refresh, every step of a drag), so the keymap's Size and Speed sliders could not be moved with the keyboard.
+- **Add-on cards showed answers from before Android had booted** (Block Ads stayed "On, unverified"). They are now checked once Android is ready, instead of at session start and again at launch, which also stops each check from retrying adb for 5 s during boot.
+- With the engine stopped, the touch-feature and GApps cards no longer run root-only or session-only `waydroid` commands; `waydroid app list` is not used on a frozen session, which it would have unfrozen.
 - **Cancel (or a timeout) sometimes did not stop a root task.** The privileged script's watcher sent its stop signal once; when it landed while the script was starting its next command, that command kept running, and the task said "Cancelled" while the root step carried on to the end. The watcher now repeats the signal until the script has exited, and still lets it clean up its work directory.
 
 ### Changed
+- Dragging in the keymap editor no longer copies the multi-MB screenshot on every pointer move (120 moves: 171 → 75 ms of script, 21.8 → 0.6 MB of garbage).
 - Tauri 2.12 (npm packages and crates together). Building from source needs Rust 1.90 or newer.
 
 ## [0.1.10] - 2026-11-15
