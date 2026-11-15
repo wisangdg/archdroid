@@ -53,6 +53,51 @@ describe("useDeviceConfig", () => {
     });
   });
 
+  it("reads every setting in one adb call when it answers", async () => {
+    invoke.mockImplementation(async (cmd) => {
+      if (cmd === "settings_values")
+        return { props: ["false", "true", "1280", "800"], density: 240 };
+      return ok();
+    });
+    const { result } = renderHook(() => useDeviceConfig({ addToast: vi.fn() }));
+    act(() => {
+      result.current.loadConfigs();
+    });
+    await waitFor(() => expect(result.current.invertColors).toBe(true));
+    expect(result.current.multiWindow).toBe(false);
+    expect(result.current.displayRes).toEqual({
+      width: "1280",
+      height: "800",
+      dpi: "240",
+    });
+    const slowReads = invoke.mock.calls.filter(([cmd]) =>
+      ["waydroid_prop_get", "waydroid_density_get"].includes(cmd)
+    );
+    expect(slowReads).toEqual([]);
+  });
+
+  it("falls back to one read per property when the adb call fails", async () => {
+    invoke.mockImplementation(async (cmd, args) => {
+      if (cmd === "settings_values")
+        throw { status: "error", code: "not_found", message: "adb" };
+      if (cmd === "waydroid_prop_get")
+        return ok(args.key === "persist.waydroid.width" ? "720" : "");
+      if (cmd === "waydroid_density_get") return ok("160");
+      return ok();
+    });
+    const { result } = renderHook(() => useDeviceConfig({ addToast: vi.fn() }));
+    act(() => {
+      result.current.loadConfigs();
+    });
+    await waitFor(() =>
+      expect(result.current.displayRes).toEqual({
+        width: "720",
+        height: "",
+        dpi: "160",
+      })
+    );
+  });
+
   it("applies Keep Android Awake once Android is up and switches it off on request", async () => {
     let awake = "true";
     invoke.mockImplementation(async (cmd, args) => {

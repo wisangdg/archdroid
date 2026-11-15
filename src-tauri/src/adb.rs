@@ -387,6 +387,53 @@ pub fn density() -> Result<u32> {
     })
 }
 
+/// The Android properties the Settings page shows. Fixed here, not taken from
+/// the UI, because they go into a shell line.
+pub const SETTINGS_PROPS: [&str; 4] = [
+    "persist.waydroid.multi_windows",
+    "persist.waydroid.invert_colors",
+    "persist.waydroid.width",
+    "persist.waydroid.height",
+];
+
+/// What the Settings page reads after boot. `props` follows [`SETTINGS_PROPS`];
+/// an unset property is empty.
+#[derive(Debug, Default, PartialEq, Eq, serde::Serialize)]
+pub struct SettingsValues {
+    pub props: Vec<String>,
+    pub density: Option<u32>,
+}
+
+/// One adb shell for every Settings value. `waydroid prop get` asks the same
+/// Android platform service (`IPlatform.getprop`), but is one Python process
+/// (~120 ms CPU) per property. Passive: a frozen container answers "not now".
+pub fn settings_values() -> Result<SettingsValues> {
+    let line = format!(
+        "for k in {}; do echo \"$k=$(getprop $k)\"; done; wm density",
+        SETTINGS_PROPS.join(" ")
+    );
+    Ok(parse_settings_values(&shell(&[&line])?))
+}
+
+/// Parse the output of [`settings_values`]'s shell line.
+pub fn parse_settings_values(output: &str) -> SettingsValues {
+    let props = SETTINGS_PROPS
+        .iter()
+        .map(|key| {
+            output
+                .lines()
+                .find_map(|line| line.strip_prefix(*key)?.strip_prefix('='))
+                .unwrap_or("")
+                .trim()
+                .to_string()
+        })
+        .collect();
+    SettingsValues {
+        props,
+        density: parse_wm_density(output),
+    }
+}
+
 /// Android's screen timeout (`screen_off_timeout`, ms), or `None` when the
 /// setting was never written and Android uses its built-in default. `active`
 /// resumes a frozen container for the read, as an explicit user action may.
@@ -1030,6 +1077,31 @@ mod tests {
         assert_eq!(error.code(), crate::error::code::COMMAND_FAILED);
         assert!(!path.exists());
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn settings_values_follow_the_fixed_keys_and_read_the_density() {
+        let output = "persist.waydroid.multi_windows=true\n\
+                      persist.waydroid.invert_colors=\n\
+                      persist.waydroid.width=1920\n\
+                      persist.waydroid.height=1080\n\
+                      Physical density: 240\n\
+                      Override density: 200\n";
+        assert_eq!(
+            parse_settings_values(output),
+            SettingsValues {
+                props: vec!["true".into(), "".into(), "1920".into(), "1080".into()],
+                density: Some(200),
+            }
+        );
+        // Nothing parsable: every value empty, no density.
+        assert_eq!(
+            parse_settings_values("sh: getprop: not found"),
+            SettingsValues {
+                props: vec![String::new(); 4],
+                density: None,
+            }
+        );
     }
 
     #[test]

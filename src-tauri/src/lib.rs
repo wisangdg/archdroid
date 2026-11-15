@@ -1441,6 +1441,17 @@ async fn app_info(package: String) -> std::result::Result<adb::AppInfo, CommandR
         .map_err(CommandResult::from)
 }
 
+/// Every value the Settings page shows, in one adb call (G11 in the plan).
+/// The page falls back to `waydroid_prop_get` and `waydroid_density_get` when
+/// this fails (no adb, frozen container).
+#[tauri::command]
+async fn settings_values() -> std::result::Result<adb::SettingsValues, CommandResult> {
+    tauri::async_runtime::spawn_blocking(adb::settings_values)
+        .await
+        .map_err(|e| CommandResult::from(AppError::Io(std::io::Error::other(e.to_string()))))?
+        .map_err(CommandResult::from)
+}
+
 /// Force-stop one Android app (the app detail's "Force stop"). Needs adb,
 /// because Waydroid only allows `shell` as root.
 #[tauri::command]
@@ -1889,6 +1900,7 @@ pub fn run() {
             install_phantom,
             phantom_status,
             app_info,
+            settings_values,
             keymap_screenshot,
             keymap_load,
             keymap_save,

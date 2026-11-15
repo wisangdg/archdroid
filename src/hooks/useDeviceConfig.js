@@ -54,24 +54,32 @@ export function useDeviceConfig({ addToast }) {
         if (res?.status === "success") setKeepAwake(res.data === "true");
       })
       .catch((e) => console.error("Failed to sync keep awake:", e));
+    const show = ([mw, inv, width, height, dpi]) => {
+      setMultiWindow(mw === "true");
+      setInvertColors(inv === "true");
+      setDisplayRes({ width, height, dpi });
+    };
+    try {
+      // One adb shell for all five values (in src-tauri/src/adb.rs, in the
+      // order of PROP); `waydroid prop get` is a Python process per key.
+      const { props, density } = await invoke("settings_values");
+      show([...props, density ? String(density) : ""]);
+      return;
+    } catch {
+      // No adb, or a frozen container: read them the slower way below.
+    }
     try {
       const get = (key) => invoke("waydroid_prop_get", { key });
       // Independent reads: together they take as long as the slowest one.
-      const [mw, inv, widthRes, heightRes, dpiRes] = await Promise.all([
+      const value = (res) => (res.status === "success" ? res.data || "" : "");
+      const results = await Promise.all([
         get(PROP.multiWindow),
         get(PROP.invertColors),
         get(PROP.width),
         get(PROP.height),
         invoke("waydroid_density_get"),
       ]);
-      setMultiWindow(mw.status === "success" && mw.data === "true");
-      setInvertColors(inv.status === "success" && inv.data === "true");
-      const value = (res) => (res.status === "success" ? res.data || "" : "");
-      setDisplayRes({
-        width: value(widthRes),
-        height: value(heightRes),
-        dpi: value(dpiRes),
-      });
+      show(results.map(value));
     } catch (e) {
       console.error("Failed to load configs:", e);
     }

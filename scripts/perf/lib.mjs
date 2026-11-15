@@ -146,6 +146,7 @@ window.__MOCK_INVOKE__ = async function (cmd, args) {
   if (cmd === "check_multitouch_status") return { status: "partial" };
   if (cmd === "keep_awake_sync" || cmd === "keep_awake_set") return { status: "success", data: String(args?.enabled ?? true) };
   if (cmd === "check_adblock_status") return { status: s.adblock ?? "not_installed" };
+  if (cmd === "settings_values") { if (!s.online) throw { status: "error", code: "session_not_running", message: "session stopped" }; return { props: ["persist.waydroid.multi_windows", "persist.waydroid.invert_colors", "persist.waydroid.width", "persist.waydroid.height"].map((k) => PROPS[k] ?? ""), density: Number(window.__dpi || "280") }; }
   if (cmd === "waydroid_prop_get") return s.online ? { status: "success", data: PROPS[args.key] ?? "" } : { status: "error", message: "session stopped" };
   if (cmd === "waydroid_prop_set") { if (!s.online) return { status: "error", code: "command_failed", message: "WayDroid session is stopped" }; PROPS[args.key] = args.value; return { status: "success" }; }
   if (cmd === "waydroid_density_set") { window.__dpi = String(args.dpi); return { status: "success" }; }

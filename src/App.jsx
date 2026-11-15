@@ -23,6 +23,11 @@ import { TASKS } from "./lib/tasks";
 import { pollDue } from "./lib/pollGate";
 
 const APP_LIST_POLL_MS = 10000;
+const APP_FIELDS = ["id", "name", "package", "icon"];
+const sameApps = (a, b) =>
+  a.length === b.length &&
+  a.every((app, i) => APP_FIELDS.every((key) => app[key] === b[i][key]));
+
 export default function App() {
   const [activeTab, setActiveTab] = useState("home");
   const [apps, setApps] = useState([]);
@@ -184,8 +189,10 @@ export default function App() {
 
   const loadApps = useCallback(async () => {
     try {
-      const waydroidApps = await invoke("get_waydroid_apps");
-      setApps(waydroidApps || []);
+      const next = (await invoke("get_waydroid_apps")) || [];
+      // The list is polled every 10 s and is almost always unchanged: keeping
+      // the old array skips a re-render of the whole app, open dialogs included.
+      setApps((prev) => (sameApps(prev, next) ? prev : next));
     } catch (e) {
       console.error("Failed to load apps:", e);
     }
