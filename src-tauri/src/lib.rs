@@ -703,6 +703,12 @@ else
     exit 1
 fi"#;
 
+/// Whether `waydroid app list` can answer without side effects: the session
+/// runs and its container is not frozen.
+fn app_list_answers(status: &str) -> bool {
+    waydroid::session_running(status) && !status.contains("FROZEN")
+}
+
 fn gapps_state() -> CommandResult {
     let marker = marker_file("gapps_installed");
 
@@ -744,8 +750,17 @@ fn gapps_state() -> CommandResult {
         return report;
     }
 
-    // Method 3: Fallback to waydroid app list (works offline but only shows launchable apps)
-    if let Some(stdout) = probe(|waydroid| waydroid.app_list()) {
+    // Method 3: `waydroid app list` (launchable apps only), for a running
+    // session that adb could not reach. It asks the session, so it is skipped
+    // otherwise: stopped it only fails after ~120 ms of Python, and frozen it
+    // would unfreeze Android from a passive probe.
+    let listed = waydroid::Waydroid::detect().ok().and_then(|waydroid| {
+        let status = waydroid.status().ok()?;
+        app_list_answers(&status)
+            .then(|| waydroid.app_list().ok())
+            .flatten()
+    });
+    if let Some(stdout) = listed {
         if stdout.contains("com.android.vending") {
             return CommandResult::report("installed", "Play Store detected via app list.");
         }
@@ -797,9 +812,9 @@ async fn check_houdini_status() -> CommandResult {
 fn multitouch_state() -> CommandResult {
     let marker = marker_file("multitouch_installed");
 
-    let features = adb::shell_line("pm list features")
-        .ok()
-        .or_else(|| probe(|waydroid| waydroid.shell(&["pm", "list", "features"])));
+    // `live_shell`: with the session stopped or frozen, the root-only
+    // `waydroid shell` fallback cannot answer and may prompt or hang.
+    let features = live_shell(&["pm", "list", "features"]);
 
     if let Some(output) = features {
         let declared = capabilities::parse_features(&output);
@@ -2024,6 +2039,16 @@ mod tests {
         assert!(icon_data_uri(&dir).is_none());
         assert!(icon_data_uri(Path::new("relative.png")).is_none());
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn app_list_probe_only_asks_an_awake_session() {
+        let running = "Session:\tRUNNING\nContainer:\tRUNNING\nVendor type:\tMAINLINE\n";
+        let frozen = "Session:\tRUNNING\nContainer:\tFROZEN\nVendor type:\tMAINLINE\n";
+        let stopped = "Session:\tSTOPPED\nVendor type:\tMAINLINE\n";
+        assert!(app_list_answers(running));
+        assert!(!app_list_answers(frozen), "app list would unfreeze Android");
+        assert!(!app_list_answers(stopped), "app list cannot answer");
     }
 
     #[test]
