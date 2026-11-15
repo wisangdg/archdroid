@@ -387,6 +387,39 @@ pub fn density() -> Result<u32> {
     })
 }
 
+/// Android's screen timeout (`screen_off_timeout`, ms), or `None` when the
+/// setting was never written and Android uses its built-in default. `active`
+/// resumes a frozen container for the read, as an explicit user action may.
+pub fn screen_off_timeout(active: bool) -> Result<Option<u64>> {
+    let args = ["settings", "get", "system", "screen_off_timeout"];
+    let output = if active {
+        shell_active(&args)?
+    } else {
+        shell(&args)?
+    };
+    let value = output.trim();
+    if value == "null" || value.is_empty() {
+        return Ok(None);
+    }
+    value.parse().map(Some).map_err(|_| {
+        AppError::command_failed(format!("Could not read the screen timeout from: {value}"))
+    })
+}
+
+/// Set the screen timeout and read it back.
+pub fn set_screen_off_timeout(ms: u64) -> Result<()> {
+    let value = ms.to_string();
+    shell_active(&["settings", "put", "system", "screen_off_timeout", &value])?;
+    // Active: the write may have resumed a frozen container and frozen it
+    // again afterwards, and a passive read would then be refused.
+    match screen_off_timeout(true)? {
+        Some(applied) if applied == ms => Ok(()),
+        applied => Err(AppError::command_failed(format!(
+            "Android did not apply screen timeout {ms} ms (now {applied:?})."
+        ))),
+    }
+}
+
 /// Set the display density with `wm density`, which applies at once and
 /// survives a session restart (checked on Waydroid 1.6.3 / LineageOS 20).
 /// `ro.sf.lcd_density` cannot be used for this: it is set at boot and

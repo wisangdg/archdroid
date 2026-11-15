@@ -59,6 +59,8 @@ export default function App() {
   const {
     multiWindow,
     invertColors,
+    keepAwake,
+    toggleKeepAwake,
     displayRes,
     loadConfigs,
     toggleMultiWindow,
@@ -688,6 +690,8 @@ export default function App() {
                   invertColors={invertColors}
                   onToggleMultiWindow={toggleMultiWindow}
                   onToggleInvertColors={toggleInvertColors}
+                  keepAwake={keepAwake}
+                  onToggleKeepAwake={toggleKeepAwake}
                   onPropSet={handlePropSet}
                   onOpenSharedFolder={handleOpenSharedFolder}
                   onViewLogs={handleViewLogs}
