@@ -105,12 +105,17 @@ export default function KeymapEditor({ app, onClose, addToast }) {
   const canvasRef = useRef(null);
   const dragRef = useRef(null);
 
+  // A capture is three adb calls; clicks while one runs would queue more.
+  const [capturing, setCapturing] = useState(false);
   const takeScreenshot = useCallback(async () => {
     setShotError(null);
+    setCapturing(true);
     try {
       setShot(await invoke("keymap_screenshot", { package: app.package }));
     } catch (err) {
       setShotError(err?.message || String(err));
+    } finally {
+      setCapturing(false);
     }
   }, [app.package]);
 
@@ -352,10 +357,11 @@ export default function KeymapEditor({ app, onClose, addToast }) {
               type="button"
               className="btn btn-outline btn-sm"
               onClick={takeScreenshot}
+              disabled={capturing}
               title="Capture the game screen again"
             >
               <RotateCw size={14} aria-hidden="true" />
-              <span>Recapture</span>
+              <span>{capturing ? "Capturing…" : "Recapture"}</span>
             </button>
             <button
               type="button"

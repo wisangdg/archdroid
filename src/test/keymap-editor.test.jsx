@@ -152,4 +152,21 @@ describe("keymap editor", () => {
       screen.getByText(/open the game, then press Recapture/)
     ).toBeTruthy();
   });
+  it("does not queue another capture while one runs", async () => {
+    let finish;
+    invoke.mockImplementation(async (cmd) => {
+      if (cmd === "keymap_screenshot")
+        return new Promise((resolve) => (finish = () => resolve(SHOT)));
+      return null;
+    });
+    render(<KeymapEditor app={APP} addToast={vi.fn()} onClose={vi.fn()} />);
+    const button = await screen.findByRole("button", { name: /Capturing/ });
+    expect(button.disabled).toBe(true);
+    fireEvent.click(button);
+    expect(
+      invoke.mock.calls.filter(([cmd]) => cmd === "keymap_screenshot")
+    ).toHaveLength(1);
+    finish();
+    await screen.findByRole("button", { name: /Recapture/ });
+  });
 });
