@@ -12,6 +12,7 @@ import SetupWizard from "./components/setup/SetupWizard";
 import TerminalModal from "./components/terminal/TerminalModal";
 import ToastContainer from "./components/ui/ToastContainer";
 import ConfirmModal from "./components/ui/ConfirmModal";
+import KeymapEditor from "./components/keymap/KeymapEditor";
 import { useToasts } from "./hooks/useToasts";
 import { useStreamingTask } from "./hooks/useStreamingTask";
 import { useTouchMode } from "./hooks/useTouchMode";
@@ -456,6 +457,8 @@ export default function App() {
   };
 
   const touchMode = useTouchMode({ addToast });
+  // The app whose keymap is being edited on its own screen, or null.
+  const [keymapApp, setKeymapApp] = useState(null);
 
   const handleRunPhantom = async () => {
     try {
@@ -610,6 +613,7 @@ export default function App() {
                   onLaunchApp={handleLaunchApp}
                   onForceStopApp={handleForceStopApp}
                   onOpenKeymap={() => setActiveTab("keymap")}
+                  onEditKeymap={setKeymapApp}
                   onInstallApk={handleInstallApk}
                   installingApk={installingApk}
                   onCancelInstall={cancelInstall}
@@ -689,6 +693,14 @@ export default function App() {
         onRetry={handleRetryTask}
         onCancel={handleCancelTask}
       />
+
+      {keymapApp && (
+        <KeymapEditor
+          app={keymapApp}
+          addToast={addToast}
+          onClose={() => setKeymapApp(null)}
+        />
+      )}
 
       {/* Confirmation Modal */}
       <ConfirmModal

@@ -19,6 +19,7 @@ mod diagnostics;
 mod elevate;
 mod error;
 mod hostenv;
+mod keymap;
 mod logs;
 mod markers;
 mod platform;
@@ -1502,6 +1503,80 @@ async fn phantom_status() -> CommandResult {
     off_main_thread(phantom_state).await
 }
 
+/// Keymap editor backdrop: what Android shows right now (the open game).
+#[tauri::command]
+async fn keymap_screenshot(
+    package: String,
+) -> std::result::Result<keymap::Screenshot, CommandResult> {
+    tauri::async_runtime::spawn_blocking(move || -> error::Result<keymap::Screenshot> {
+        // Only to name the file; the screenshot shows whatever is on screen.
+        if !adb::is_valid_package(&package) {
+            return Err(AppError::invalid_input("Invalid Android package name."));
+        }
+        let file = std::env::temp_dir().join(format!(
+            "archdroid-keymap-{}-{package}.png",
+            std::process::id()
+        ));
+        let result = adb::screenshot(&file)
+            .and_then(|()| Ok(std::fs::read(&file)?))
+            .and_then(|bytes| keymap::screenshot_from_png(&bytes));
+        let _ = std::fs::remove_file(&file);
+        result
+    })
+    .await
+    .map_err(|e| CommandResult::from(AppError::Io(std::io::Error::other(e.to_string()))))?
+    .map_err(CommandResult::from)
+}
+
+/// The saved keymap of a game, or null when it has none yet.
+#[tauri::command]
+async fn keymap_load(
+    package: String,
+) -> std::result::Result<Option<serde_json::Value>, CommandResult> {
+    tauri::async_runtime::spawn_blocking(move || keymap::load(&package))
+        .await
+        .map_err(|e| CommandResult::from(AppError::Io(std::io::Error::other(e.to_string()))))?
+        .map_err(CommandResult::from)
+}
+
+/// Save a game's keymap as a Phantom profile; `data` is the file.
+#[tauri::command]
+async fn keymap_save(package: String, profile: serde_json::Value) -> CommandResult {
+    off_main_thread(move || match keymap::save(&package, &profile) {
+        Ok(path) => CommandResult::with_data(path.to_string_lossy().into_owned()),
+        Err(error) => error.into(),
+    })
+    .await
+}
+
+/// Load a game's saved keymap into the running Phantom daemon.
+#[tauri::command]
+async fn keymap_apply(package: String) -> CommandResult {
+    off_main_thread(move || {
+        let path = match keymap::profile_path(&package) {
+            Ok(path) if path.is_file() => path,
+            Ok(_) => return AppError::command_failed("Save the keymap first.").into(),
+            Err(error) => return error.into(),
+        };
+        let Some(phantom) = find_phantom("phantom") else {
+            return AppError::not_found(
+                "phantom",
+                "Install Phantom from the Keymapping page first.",
+            )
+            .into();
+        };
+        let args = ["load".to_string(), path.to_string_lossy().into_owned()];
+        match waydroid::run_program(&phantom, &args, waydroid::TIMEOUT_QUICK, None) {
+            Ok(_) => CommandResult::with_message("Keymap loaded into Phantom."),
+            Err(error) => AppError::command_failed(format!(
+                "Phantom did not load the keymap: {error} The keymap is saved; it applies once the Phantom daemon runs (Keymapping → Launch) with the same screen size."
+            ))
+            .into(),
+        }
+    })
+    .await
+}
+
 #[tauri::command]
 async fn run_phantom() -> CommandResult {
     off_main_thread(run_phantom_sync).await
@@ -1673,6 +1748,10 @@ pub fn run() {
             install_phantom,
             phantom_status,
             app_info,
+            keymap_screenshot,
+            keymap_load,
+            keymap_save,
+            keymap_apply,
             run_phantom,
             check_host_diagnostics,
             preview_package_install

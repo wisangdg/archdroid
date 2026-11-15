@@ -7,6 +7,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Added
+- **Keymap editor on the game's own screen**, like LDPlayer: My Apps → select a game → Edit Keymap captures what Android shows (adb, no root), and you place Buttons, Fire (left click), a WASD Joystick and mouse Aim where the game draws them, press the key for each, and drag to adjust. Unbound buttons, keys used twice and Phantom's hotkeys are flagged before saving. It saves a Phantom profile for that game (`~/.config/phantom/profiles/archdroid-<package>.json`, also editable in Phantom's GUI); Save & Apply loads it into a running Phantom.
+
 ## [0.1.8] - 2026-11-12
 
 ### Fixed

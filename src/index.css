@@ -3530,3 +3530,238 @@ pre,
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ========================================================
+   Keymap editor: controls placed on the game's own screen
+   ======================================================== */
+
+.keymap-editor {
+  width: 100%;
+  max-width: 1400px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px 20px;
+  background: rgba(13, 17, 23, 0.97);
+  border: 1px solid var(--border-highlight);
+  box-shadow: var(--shadow-lg);
+}
+
+.keymap-editor-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.keymap-editor-head h3 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.keymap-editor-sub {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.keymap-editor-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.keymap-discard {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  background: rgba(245, 158, 11, 0.08);
+  color: var(--warning-primary);
+  font-size: 13px;
+}
+
+.keymap-discard span {
+  flex: 1;
+}
+
+.keymap-editor-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr) 240px;
+  gap: 14px;
+}
+
+.keymap-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.keymap-tool {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.keymap-tool.active {
+  border-color: var(--border-accent);
+  background: var(--accent-glow-subtle);
+  color: var(--text-primary);
+}
+
+.keymap-stage {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* The screenshot keeps its aspect ratio and fits the stage either way. */
+.keymap-canvas {
+  position: relative;
+  max-width: 100%;
+  max-height: 100%;
+  width: 100%;
+  background-size: 100% 100%;
+  background-color: #000;
+  border-radius: var(--radius-xs);
+  outline: 1px solid var(--border-highlight);
+  cursor: crosshair;
+  touch-action: none;
+}
+
+@supports (width: min(1px, 1px)) {
+  .keymap-canvas {
+    width: min(100%, calc((100vh - 220px) * var(--keymap-ratio, 1.7778)));
+  }
+}
+
+.keymap-stage-empty {
+  color: var(--text-secondary);
+  font-size: 14px;
+  text-align: center;
+}
+
+.keymap-node {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  min-width: 34px;
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 6px;
+  border-radius: var(--radius-full);
+  border: 2px solid rgba(255, 255, 255, 0.85);
+  background: rgba(15, 23, 42, 0.7);
+  color: #fff;
+  font: 600 12px var(--font-mono);
+  cursor: grab;
+  touch-action: none;
+}
+
+.keymap-node:active {
+  cursor: grabbing;
+}
+
+.keymap-node-joystick {
+  border-style: dashed;
+  background: rgba(16, 185, 129, 0.18);
+}
+
+.keymap-node-aim {
+  border-color: var(--accent-cyan);
+  background: rgba(6, 182, 212, 0.2);
+}
+
+.keymap-node.selected {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.keymap-node.flagged {
+  border-color: var(--warning-primary);
+}
+
+.keymap-inspector {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  overflow-y: auto;
+  padding-left: 14px;
+  border-left: 1px solid var(--border-subtle);
+}
+
+.keymap-inspector h4 {
+  margin: 0;
+  font: 600 14px var(--font-mono);
+}
+
+.keymap-field {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.keymap-mouse-row {
+  grid-column: 2;
+  display: flex;
+  gap: 6px;
+}
+
+.keymap-key-btn.listening {
+  border-color: var(--warning-primary);
+  color: var(--warning-primary);
+}
+
+.keymap-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.keymap-hotkeys {
+  margin-top: auto;
+}
+
+.keymap-issues {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.keymap-issues button {
+  width: 100%;
+  text-align: left;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: rgba(245, 158, 11, 0.1);
+  color: var(--warning-primary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}

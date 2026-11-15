@@ -54,6 +54,7 @@ export default function AppDetail({
   onLaunch,
   onForceStop,
   onOpenKeymap,
+  onEditKeymap,
   onCopyPackage,
   onBackupApk,
   savingApk = false,
@@ -113,14 +114,31 @@ export default function AppDetail({
           <Square size={14} aria-hidden="true" />
           <span>Force stop</span>
         </button>
-        <button
-          type="button"
-          className="btn btn-outline"
-          onClick={onOpenKeymap}
-        >
-          <Gamepad2 size={16} aria-hidden="true" />
-          <span>Keymapping</span>
-        </button>
+        {onEditKeymap ? (
+          <button
+            type="button"
+            className="btn btn-outline"
+            onClick={() => onEditKeymap(app)}
+            disabled={!engineOnline || booting}
+            title={
+              engineOnline && !booting
+                ? "Place keys on this game's screen (open the game first)"
+                : "Start the engine and open the game to edit its keymap"
+            }
+          >
+            <Gamepad2 size={16} aria-hidden="true" />
+            <span>Edit Keymap</span>
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="btn btn-outline"
+            onClick={onOpenKeymap}
+          >
+            <Gamepad2 size={16} aria-hidden="true" />
+            <span>Keymapping</span>
+          </button>
+        )}
         <button
           type="button"
           className="btn btn-outline"
