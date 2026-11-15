@@ -849,6 +849,24 @@ describe("App state & workflow integration", () => {
     });
   }, 10000);
 
+  it("orders the list from the cached usage first, then asks Android once booted", async () => {
+    let booted = false;
+    bootingSession(() => booted);
+    render(<App />);
+    await screen.findByText("Android Booting…");
+    const usageCalls = () =>
+      invoke.mock.calls
+        .filter(([cmd]) => cmd === "app_usage")
+        .map(([, a]) => a);
+    expect(usageCalls()).toEqual([{ live: false }]);
+
+    booted = true;
+    await screen.findByText("Engine Running", {}, { timeout: 4000 });
+    await waitFor(() =>
+      expect(usageCalls()).toEqual([{ live: false }, { live: true }])
+    );
+  }, 10000);
+
   it("probes the add-ons once from markers when the engine is stopped", async () => {
     invoke.mockImplementation((cmd) => {
       if (cmd === "waydroid_status")

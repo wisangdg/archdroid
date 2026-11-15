@@ -1452,6 +1452,39 @@ async fn settings_values() -> std::result::Result<adb::SettingsValues, CommandRe
         .map_err(CommandResult::from)
 }
 
+/// How often each app was opened, for the order of the app list. `live` (Android
+/// has booted) asks Android; otherwise, or when it does not answer (frozen),
+/// the last live answer is read from the user cache, so the order stays put
+/// while the engine is stopped.
+#[tauri::command]
+async fn app_usage(live: bool) -> HashMap<String, u32> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = markers::marker_file("app_usage.json");
+        let answer = if live {
+            adb::app_launch_counts()
+        } else {
+            Err(AppError::session_not_running("not asked"))
+        };
+        match answer {
+            Ok(counts) => {
+                if let Some(dir) = path.parent() {
+                    let _ = std::fs::create_dir_all(dir);
+                }
+                if let Ok(json) = serde_json::to_vec(&counts) {
+                    let _ = std::fs::write(&path, json);
+                }
+                counts
+            }
+            Err(_) => std::fs::read_to_string(&path)
+                .ok()
+                .and_then(|text| serde_json::from_str(&text).ok())
+                .unwrap_or_default(),
+        }
+    })
+    .await
+    .unwrap_or_default()
+}
+
 /// Force-stop one Android app (the app detail's "Force stop"). Needs adb,
 /// because Waydroid only allows `shell` as root.
 #[tauri::command]
@@ -1901,6 +1934,7 @@ pub fn run() {
             phantom_status,
             app_info,
             settings_values,
+            app_usage,
             keymap_screenshot,
             keymap_load,
             keymap_save,

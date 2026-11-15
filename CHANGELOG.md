@@ -14,6 +14,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - **Cancel (or a timeout) sometimes did not stop a root task.** The privileged script's watcher sent its stop signal once; when it landed while the script was starting its next command, that command kept running, and the task said "Cancelled" while the root step carried on to the end. The watcher now repeats the signal until the script has exited, and still lets it clean up its work directory.
 
 ### Changed
+- **My Apps lists user apps first, then system apps**, each group with the apps opened most often at the top and the rest A to Z (the list had no order before). The counts are Android's own (`dumpsys usagestats`), so apps opened from Waydroid's launcher count too; the last answer is kept in `~/.cache/archdroid/app_usage.json`, so the order stays the same while the engine is stopped.
 - **Settings reads its values in one adb call** after boot instead of four `waydroid prop get` processes (measured in the test VM: 52 ms instead of 673 ms, with the same values); the old way stays as a fallback without adb.
 - Recapture in the keymap editor is disabled while a capture runs ("Capturing…"), so repeated clicks no longer queue captures.
 - The app list keeps its state when a refresh returns the same apps, so the window does not re-render every 10 s.
