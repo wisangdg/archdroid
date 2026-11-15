@@ -105,6 +105,57 @@ export const TASKS = {
       ],
     },
   },
+  adblock: {
+    command: "install_adblock",
+    title: "Turning On Ad Blocking",
+    errorTitle: "Ad Blocking Error",
+    confirm: {
+      ...ROOT_CONFIRM,
+      title: "Block Ads (Root Required)",
+      description:
+        "Stops every Android app from reaching known ad servers, so games show no ads.",
+      details: [
+        {
+          label: "Changes",
+          text: "Writes one file: /var/lib/waydroid/overlay/system/etc/hosts, which Android uses as /system/etc/hosts. Restart Waydroid afterwards.",
+        },
+        {
+          label: "Source",
+          text: "Built into ArchDroid: the AdAway list of mobile ad servers. Nothing is downloaded and no DNS goes to a third party.",
+        },
+        {
+          label: "Trade-off",
+          text: "Ads you choose to watch for a reward stop loading too.",
+        },
+        ROOT_ACCESS,
+        {
+          label: "Undo",
+          text: "Turn ad blocking off here, then restart Waydroid.",
+        },
+      ],
+    },
+  },
+  "adblock-off": {
+    command: "remove_adblock",
+    title: "Turning Off Ad Blocking",
+    errorTitle: "Ad Blocking Error",
+    confirm: {
+      ...ROOT_CONFIRM,
+      title: "Stop Blocking Ads (Root Required)",
+      description: "Lets Android apps reach ad servers again.",
+      details: [
+        {
+          label: "Deletes",
+          text: "/var/lib/waydroid/overlay/system/etc/hosts, only if ArchDroid wrote it. Restart Waydroid afterwards.",
+        },
+        ROOT_ACCESS,
+        {
+          label: "Undo",
+          text: "Turn ad blocking on again.",
+        },
+      ],
+    },
+  },
   "touch-access": {
     command: "install_touch_mode_access",
     title: "Granting Touch Mode Access",

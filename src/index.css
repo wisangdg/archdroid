@@ -1087,6 +1087,12 @@ body {
   border-top: 1px solid var(--border-subtle);
 }
 
+.tool-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .tool-requirement-hint {
   font-size: 12px;
   color: var(--text-muted);

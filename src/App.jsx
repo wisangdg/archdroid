@@ -34,6 +34,7 @@ export default function App() {
   const [gappsStatus, setGappsStatus] = useState("unknown");
   const [houdiniStatus, setHoudiniStatus] = useState("unknown");
   const [multitouchStatus, setMultitouchStatus] = useState("unknown");
+  const [adblockStatus, setAdblockStatus] = useState("unknown");
   const { toasts, addToast, removeToast } = useToasts();
   // GApps/Houdini probes go through adb, so they are refreshed when the
   // session comes online and after each task rather than on every poll.
@@ -52,6 +53,7 @@ export default function App() {
       checkGappsStatus();
       checkHoudiniStatus();
       checkMultitouchStatus();
+      checkAdblockStatus();
     },
   });
   const {
@@ -94,6 +96,7 @@ export default function App() {
       checkGappsStatus();
       checkHoudiniStatus();
       checkMultitouchStatus();
+      checkAdblockStatus();
       loadApps();
     },
   });
@@ -133,6 +136,7 @@ export default function App() {
     checkHoudiniStatus();
     // Answers from the overlay file and marker even while the engine is off.
     checkMultitouchStatus();
+    checkAdblockStatus();
     // Mount only. loadApps is declared further down, so it cannot be listed
     // here, and the status checks are plain functions recreated each render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -163,6 +167,15 @@ export default function App() {
       setMultitouchStatus(res.status);
     } catch (e) {
       console.error("Failed to check touch feature status:", e);
+    }
+  };
+
+  const checkAdblockStatus = async () => {
+    try {
+      const res = await invoke("check_adblock_status");
+      setAdblockStatus(res.status);
+    } catch (e) {
+      console.error("Failed to check ad blocking status:", e);
     }
   };
 
@@ -497,6 +510,19 @@ export default function App() {
           "Android reads declared features at boot. Restart Waydroid, then check Google Play again.",
       }),
     "touch-access": () => touchMode.refresh(),
+    adblock: () =>
+      addToast({
+        type: "info",
+        title: "Restart Required",
+        message:
+          "Android reads its hosts file at boot. Restart Waydroid to start blocking ads.",
+      }),
+    "adblock-off": () =>
+      addToast({
+        type: "info",
+        title: "Restart Required",
+        message: "Restart Waydroid so Android stops blocking ads.",
+      }),
   };
 
   const runTask = async (taskType, args) => {
@@ -550,6 +576,7 @@ export default function App() {
   const handleInstallHoudini = () => startTask("houdini");
   const handleInstallMultitouch = () => startTask("multitouch");
   const handleEnableTouchAccess = () => startTask("touch-access");
+  const handleToggleAdblock = (on) => startTask(on ? "adblock" : "adblock-off");
   const handleInitWaydroid = () => startTask("init");
   const handleWipeData = () => startTask("wipe");
   const handleInstallPhantom = () => startTask("phantom");
@@ -648,6 +675,10 @@ export default function App() {
                   onInstallGApps={handleInstallGApps}
                   onInstallHoudini={handleInstallHoudini}
                   onInstallMultitouch={handleInstallMultitouch}
+                  adblockStatus={adblockStatus}
+                  onToggleAdblock={handleToggleAdblock}
+                  engineRunning={androidReady}
+                  onRestartEngine={handleRestart}
                 />
               )}
 

@@ -10,7 +10,8 @@ const HEADINGS = {
   },
   install: {
     title: "Install Tools",
-    subtitle: "Google Play, ARM translation and Play Store compatibility",
+    subtitle:
+      "Google Play, ARM translation, Play Store compatibility and ad blocking",
   },
   settings: {
     title: "Settings",

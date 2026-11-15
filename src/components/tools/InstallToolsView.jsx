@@ -7,6 +7,8 @@ import {
   Layers,
   Cpu,
   Puzzle,
+  ShieldBan,
+  RotateCw,
 } from "lucide-react";
 
 export default function InstallToolsView({
@@ -17,7 +19,21 @@ export default function InstallToolsView({
   onInstallGApps,
   onInstallHoudini,
   onInstallMultitouch,
+  adblockStatus,
+  onToggleAdblock,
+  engineRunning,
+  onRestartEngine,
 }) {
+  // The overlay file decides on/off; "partial" and "pending" mean it is on
+  // but Android has not loaded or confirmed it yet.
+  const adblockOn = ["installed", "partial", "pending"].includes(adblockStatus);
+  const adblockBadge = {
+    installed: ["badge-success", "On"],
+    partial: ["badge-warning", "On after restart"],
+    pending: ["badge-warning", "On, unverified"],
+    not_installed: ["badge-neutral", "Off"],
+  }[adblockStatus] ?? ["badge-neutral", "Checking..."];
+
   const renderStatusBadge = (status) => {
     switch (status) {
       case "installed":
@@ -211,6 +227,58 @@ export default function InstallToolsView({
                 </>
               )}
             </button>
+          </div>
+        </div>
+
+        {/* Ad blocking (hosts file in the system overlay) Card */}
+        <div className="glass-panel tool-card" data-testid="adblock-card">
+          <div className="tool-card-header">
+            <div className="tool-icon-wrap gapps-icon-wrap">
+              <ShieldBan size={26} />
+            </div>
+            <div className="tool-header-text">
+              <div className="tool-title-row">
+                <h3>Block Ads</h3>
+                <span className={`badge-pill ${adblockBadge[0]}`}>
+                  {adblockBadge[1]}
+                </span>
+              </div>
+              <p>
+                Stops games and apps from reaching mobile ad servers (AdMob,
+                AppLovin, ironSource, Unity Ads, Facebook Audience Network and
+                others), so ads between levels never load. The blocklist is
+                built in; nothing is downloaded. Ads you choose to watch for a
+                reward stop loading too.
+              </p>
+            </div>
+          </div>
+
+          <div className="tool-card-footer">
+            <span className="tool-requirement-hint">
+              {adblockStatus === "partial"
+                ? "Restart Waydroid to apply"
+                : "Root required • System overlay"}
+            </span>
+            <div className="tool-card-actions">
+              {adblockStatus === "partial" && engineRunning && (
+                <button
+                  className="btn btn-outline"
+                  onClick={onRestartEngine}
+                  disabled={installing}
+                >
+                  <RotateCw size={17} />
+                  <span>Restart Waydroid</span>
+                </button>
+              )}
+              <button
+                className={adblockOn ? "btn btn-outline" : "btn btn-primary"}
+                onClick={() => onToggleAdblock(!adblockOn)}
+                disabled={installing || adblockStatus === "unknown"}
+              >
+                <ShieldBan size={17} />
+                <span>{adblockOn ? "Turn Off" : "Block Ads"}</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>

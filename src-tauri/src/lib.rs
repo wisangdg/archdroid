@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 use tauri::AppHandle;
 
 mod adb;
+mod adblock;
 mod apk;
 mod bundle;
 mod capabilities;
@@ -868,6 +869,105 @@ async fn install_multitouch(app: AppHandle) -> CommandResult {
     .await
     .into_command_result_with_message(
         "Multitouch features written to the Waydroid overlay. Restart Waydroid so Android declares them.",
+    )
+}
+
+/// Ad blocking is on when ArchDroid's hosts file is in the overlay; Android
+/// uses it once the container restarts, which the live check tells apart.
+fn adblock_state() -> CommandResult {
+    let live = adb::shell_line(&format!("head -n 1 {}", adblock::ANDROID_HOSTS))
+        .ok()
+        .map(|line| adblock::is_managed(line.trim_end()));
+    match (adblock::overlay_state(), live) {
+        (adblock::Overlay::Foreign, _) => CommandResult::report(
+            "not_installed",
+            &format!(
+                "{} was not written by ArchDroid, so ArchDroid leaves it alone.",
+                adblock::overlay_hosts().display()
+            ),
+        ),
+        (adblock::Overlay::Managed, Some(true)) => {
+            CommandResult::report("installed", "Ads are blocked for every Android app.")
+        }
+        (adblock::Overlay::Managed, Some(false)) => CommandResult::report(
+            "partial",
+            "Ad blocking is on but Android has not loaded it yet - restart Waydroid.",
+        ),
+        (adblock::Overlay::Managed, None) => CommandResult::report(
+            "pending",
+            "Ad blocking is on. Start Waydroid to check that Android uses it.",
+        ),
+        (adblock::Overlay::Absent, Some(true)) => CommandResult::report(
+            "not_installed",
+            "Ad blocking is off, but Android still blocks ads until Waydroid restarts.",
+        ),
+        (adblock::Overlay::Absent, _) => {
+            CommandResult::report("not_installed", "Ads are not blocked.")
+        }
+    }
+}
+
+#[tauri::command]
+async fn check_adblock_status() -> CommandResult {
+    off_main_thread(adblock_state).await
+}
+
+/// Root is needed because the overlay is root-owned; the list itself is
+/// handed over in a file the desktop user writes (see `adblock::install_script`).
+#[tauri::command]
+async fn install_adblock(app: AppHandle) -> CommandResult {
+    if has_elevation_tool().is_none() {
+        return AppError::elevation_denied(
+            "No root elevation tool (pkexec or sudo) found on host. Cannot perform administrative operations.",
+        )
+        .into();
+    }
+    if let Err(error) = require_initialized_waydroid("turning on ad blocking") {
+        return error.into();
+    }
+    let staged = match dirs::cache_dir() {
+        Some(dir) => dir.join("archdroid").join("adblock-hosts.txt"),
+        None => {
+            return AppError::command_failed("Cannot find the cache directory (no HOME).").into()
+        }
+    };
+    let written = staged
+        .parent()
+        .map_or(Ok(()), std::fs::create_dir_all)
+        .and_then(|_| std::fs::write(&staged, adblock::blocklist()));
+    if let Err(error) = written {
+        return AppError::Io(error).into();
+    }
+    let result = stream_privileged_script(
+        app,
+        adblock::install_script(&staged),
+        Completion::None,
+        waydroid::TIMEOUT_NORMAL,
+    )
+    .await;
+    let _ = std::fs::remove_file(&staged);
+    result.into_command_result_with_message(
+        "Ad blocking is on. Restart Waydroid so Android starts using it.",
+    )
+}
+
+#[tauri::command]
+async fn remove_adblock(app: AppHandle) -> CommandResult {
+    if has_elevation_tool().is_none() {
+        return AppError::elevation_denied(
+            "No root elevation tool (pkexec or sudo) found on host. Cannot perform administrative operations.",
+        )
+        .into();
+    }
+    stream_privileged_script(
+        app,
+        adblock::remove_script(),
+        Completion::None,
+        waydroid::TIMEOUT_NORMAL,
+    )
+    .await
+    .into_command_result_with_message(
+        "Ad blocking is off. Restart Waydroid so Android stops using it.",
     )
 }
 
@@ -1739,9 +1839,12 @@ pub fn run() {
             check_gapps_status,
             check_houdini_status,
             check_multitouch_status,
+            check_adblock_status,
             install_gapps,
             install_houdini,
             install_multitouch,
+            install_adblock,
+            remove_adblock,
             touch_mode_status,
             touch_mode_set,
             install_touch_mode_access,

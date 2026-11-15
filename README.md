@@ -16,6 +16,7 @@ ArchDroid is a desktop app for [Waydroid](https://waydroid.net/). Set up Android
 
 - 🎮 **App library and launcher.** A Control Center: your installed Android apps in a list with icons, instant search (`Ctrl+F`) and All/User/System filters, next to the selected app with Launch, Force stop, Keymapping, Copy package ID, and Uninstall. Double-click a row to launch; right-click for the menu. The engine state and Start/Stop stay in the top bar on every page.
 - 📦 **Drag-and-drop APK install.** Drop an `.apk`, or a split APK bundle (`.apks`, `.xapk`, `.apkm`; needs adb), from your file manager onto the window, or use the file picker.
+- 🛡️ **Block Ads.** One switch in Install Tools blocks mobile ad servers for every Android app, from a built-in list (AdAway); nothing is downloaded.
 - 🧩 **Google Play and ARM translation.** Add Google Play Services (MindTheGapps / OpenGApps) and Intel libhoudini so ARM-only games run on x86_64 CPUs.
 - ⌨️ **Keyboard and mouse controls.** One-click install and launch of the [Phantom](https://github.com/oliviermugishak/phantom) keymapper (its verified release build, no SDK or compiler needed): WASD, custom binds, and mouse look for shooters.
 - 👆 **Touch mode (Hyprland).** A left click or drag over an Android window acts like a finger, as in other Android emulators. Some games and in-app web pages ignore Waydroid's mouse input entirely; Plants vs Zombies 2's birth-date picker is one.
@@ -152,7 +153,7 @@ ArchDroid follows the **least-privilege** principle.
 **Root is requested only for:**
 1. Installing missing system packages (`waydroid`, `squashfs-tools`, `lzip`, `git`) with your package manager.
 2. First-time initialization (`waydroid init`).
-3. Add-on injection (GApps, libhoudini, multitouch), which modifies the Waydroid system image.
+3. Add-on injection (GApps, libhoudini, multitouch) and Block Ads, which modify the Waydroid system image or its overlay.
 4. Touch mode access, only if your install did not ship it: a udev rule that lets the logged-in user read mice (never keyboards) and use `/dev/uinput`. `/dev/uinput` lets any program you run create virtual input devices, keyboards included; Steam Input's udev rule grants the same. The Arch, `.deb` and `.rpm` packages install it as `/usr/lib/udev/rules.d/70-archdroid-touch.rules`; delete the rule and run `sudo udevadm control --reload-rules` to revoke it.
 
 **Everything else runs as your normal user:** opening the app, starting the Waydroid session, launching apps, installing APKs, changing resolution and DPI, running Phantom, and diagnostics.

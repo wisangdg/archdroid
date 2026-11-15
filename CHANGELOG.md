@@ -9,6 +9,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Added
 - **Keymap editor on the game's own screen**, like LDPlayer: My Apps → select a game → Edit Keymap captures what Android shows (adb, no root), and you place Buttons, Fire (left click), a WASD Joystick and mouse Aim where the game draws them, press the key for each, and drag to adjust. Unbound buttons, keys used twice and Phantom's hotkeys are flagged before saving. It saves a Phantom profile for that game (`~/.config/phantom/profiles/archdroid-<package>.json`, also editable in Phantom's GUI); Save & Apply loads it into a running Phantom.
+- **Block Ads** (Install Tools): one switch stops every Android app from reaching mobile ad servers (AdMob, AppLovin, ironSource/LevelPlay, Unity Ads, Facebook Audience Network, ...), so games show no ads between levels. It writes a hosts file into Waydroid's system overlay (`/var/lib/waydroid/overlay/system/etc/hosts`) from the AdAway list built into ArchDroid: nothing is downloaded and DNS still goes where it went. Takes effect after a Waydroid restart, which the card offers; Turn Off deletes the file, and a hosts file ArchDroid did not write is never touched. Ads you choose to watch for a reward stop loading too.
 
 ## [0.1.8] - 2026-11-12
 

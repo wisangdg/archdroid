@@ -1,5 +1,11 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import ConfirmModal from "../components/ui/ConfirmModal";
 import TerminalModal from "../components/terminal/TerminalModal";
 import ProcessStepper from "../components/terminal/ProcessStepper";
@@ -301,5 +307,50 @@ describe("InstallToolsView marker states", () => {
       .filter((button) => button.disabled);
     // Only the verified Houdini install locks its button.
     expect(disabled.length).toBe(1);
+  });
+});
+
+describe("InstallToolsView ad blocking", () => {
+  const view = (adblockStatus, extra = {}) => {
+    const props = {
+      onToggleAdblock: vi.fn(),
+      onRestartEngine: vi.fn(),
+      ...extra,
+    };
+    render(
+      <InstallToolsView
+        gappsStatus="installed"
+        houdiniStatus="installed"
+        multitouchStatus="installed"
+        installing={false}
+        adblockStatus={adblockStatus}
+        {...props}
+      />
+    );
+    return { props, card: screen.getByTestId("adblock-card") };
+  };
+
+  it("turns blocking on while it is off", () => {
+    const { props, card } = view("not_installed");
+    expect(within(card).getByText("Off")).toBeTruthy();
+    fireEvent.click(within(card).getByRole("button", { name: /Block Ads/ }));
+    expect(props.onToggleAdblock).toHaveBeenCalledWith(true);
+  });
+
+  it("offers the restart Android needs before blocking starts", () => {
+    const { props, card } = view("partial", { engineRunning: true });
+    expect(within(card).getByText("On after restart")).toBeTruthy();
+    fireEvent.click(
+      within(card).getByRole("button", { name: /Restart Waydroid/ })
+    );
+    expect(props.onRestartEngine).toHaveBeenCalled();
+    fireEvent.click(within(card).getByRole("button", { name: /Turn Off/ }));
+    expect(props.onToggleAdblock).toHaveBeenCalledWith(false);
+  });
+
+  it("shows blocking that Android uses as on, without a restart", () => {
+    const { card } = view("installed", { engineRunning: true });
+    expect(within(card).getByText("On")).toBeTruthy();
+    expect(within(card).queryByRole("button", { name: /Restart/ })).toBeNull();
   });
 });
