@@ -12,6 +12,7 @@ use tauri::AppHandle;
 mod adb;
 mod adblock;
 mod apk;
+mod awake;
 mod bundle;
 mod capabilities;
 #[cfg(feature = "dev-commands")]
@@ -1385,6 +1386,26 @@ async fn waydroid_density_set(dpi: u32) -> CommandResult {
     .await
 }
 
+/// Applies the stored Keep Android Awake choice once Android has booted and
+/// answers with it (`data` is `"true"` or `"false"`).
+#[tauri::command]
+async fn keep_awake_sync() -> CommandResult {
+    off_main_thread(|| match awake::sync() {
+        Ok(awake) => CommandResult::with_data(awake.to_string()),
+        Err(error) => error.into(),
+    })
+    .await
+}
+
+#[tauri::command]
+async fn keep_awake_set(enabled: bool) -> CommandResult {
+    run_exclusive("keep awake", move |_| match awake::set(enabled) {
+        Ok(awake) => CommandResult::with_data(awake.to_string()),
+        Err(error) => error.into(),
+    })
+    .await
+}
+
 /// `"booted"` or `"booting"` while the session runs; polled by the UI after
 /// Start until Android reports `sys.boot_completed`.
 #[tauri::command]
@@ -1817,6 +1838,8 @@ pub fn run() {
             waydroid_backup_apk,
             waydroid_density_get,
             waydroid_density_set,
+            keep_awake_sync,
+            keep_awake_set,
             #[cfg(feature = "dev-commands")]
             waydroid_getprop_all,
             #[cfg(feature = "dev-commands")]

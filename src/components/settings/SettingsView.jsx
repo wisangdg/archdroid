@@ -31,6 +31,8 @@ export default function SettingsView({
   invertColors,
   onToggleMultiWindow,
   onToggleInvertColors,
+  keepAwake = true,
+  onToggleKeepAwake,
   onPropSet,
   onOpenSharedFolder,
   onViewLogs,
@@ -134,6 +136,31 @@ export default function SettingsView({
             >
               <div className="toggle-switch-handle">
                 {multiWindow && <Check size={12} />}
+              </div>
+            </button>
+          </div>
+
+          {/* Keep Android Awake */}
+          <div className="config-toggle-item">
+            <div className="toggle-info">
+              <h4>Keep Android Awake</h4>
+              <p>
+                Android never dims or turns its screen off, so a game left alone
+                does not turn grey and Waydroid does not freeze it. Your
+                desktop&apos;s own idle and lock settings still apply.
+              </p>
+            </div>
+            <button
+              type="button"
+              className={`toggle-switch ${keepAwake ? "active" : ""}`}
+              onClick={onToggleKeepAwake}
+              disabled={busy || !engineRunning}
+              role="switch"
+              aria-checked={keepAwake}
+              aria-label="Keep Android Awake"
+            >
+              <div className="toggle-switch-handle">
+                {keepAwake && <Check size={12} />}
               </div>
             </button>
           </div>

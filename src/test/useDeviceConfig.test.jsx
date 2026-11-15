@@ -53,6 +53,55 @@ describe("useDeviceConfig", () => {
     });
   });
 
+  it("applies Keep Android Awake once Android is up and switches it off on request", async () => {
+    let awake = "true";
+    invoke.mockImplementation(async (cmd, args) => {
+      if (cmd === "keep_awake_sync") return ok(awake);
+      if (cmd === "keep_awake_set") {
+        awake = String(args.enabled);
+        return ok(awake);
+      }
+      return ok("");
+    });
+    const addToast = vi.fn();
+    const { result } = renderHook(() => useDeviceConfig({ addToast }));
+    act(() => {
+      result.current.loadConfigs();
+    });
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("keep_awake_sync"));
+    expect(result.current.keepAwake).toBe(true);
+
+    await act(() => result.current.toggleKeepAwake());
+    expect(invoke).toHaveBeenCalledWith("keep_awake_set", { enabled: false });
+    expect(result.current.keepAwake).toBe(false);
+    expect(addToast).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Config Updated" })
+    );
+  });
+
+  it("keeps the switch where it was when Android refuses the change", async () => {
+    invoke.mockImplementation(async (cmd) => {
+      if (cmd === "keep_awake_sync") return ok("true");
+      if (cmd === "keep_awake_set")
+        return {
+          status: "error",
+          code: "session_frozen",
+          message: "Open the Waydroid window and try again.",
+        };
+      return ok("");
+    });
+    const addToast = vi.fn();
+    const { result } = renderHook(() => useDeviceConfig({ addToast }));
+    await act(() => result.current.toggleKeepAwake());
+    expect(result.current.keepAwake).toBe(true);
+    expect(addToast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "error",
+        message: "Open the Waydroid window and try again.",
+      })
+    );
+  });
+
   it("flips a toggle only after the backend confirmed the write", async () => {
     const { result, addToast } = setup();
     await waitFor(() => expect(invoke).toHaveBeenCalled());

@@ -38,6 +38,8 @@ async function setDensity(dpi) {
 export function useDeviceConfig({ addToast }) {
   const [multiWindow, setMultiWindow] = useState(false);
   const [invertColors, setInvertColors] = useState(false);
+  // Android never dims or sleeps while this is on (see src-tauri/src/awake.rs).
+  const [keepAwake, setKeepAwake] = useState(true);
   const [displayRes, setDisplayRes] = useState({
     width: "",
     height: "",
@@ -45,6 +47,13 @@ export function useDeviceConfig({ addToast }) {
   });
 
   const loadConfigs = useCallback(async () => {
+    // Applies the stored choice too, so a fresh Android is kept awake. Apart
+    // from the reads below: a failure here must not hide the other settings.
+    invoke("keep_awake_sync")
+      .then((res) => {
+        if (res?.status === "success") setKeepAwake(res.data === "true");
+      })
+      .catch((e) => console.error("Failed to sync keep awake:", e));
     try {
       const get = (key) => invoke("waydroid_prop_get", { key });
       // Independent reads: together they take as long as the slowest one.
@@ -183,7 +192,34 @@ export function useDeviceConfig({ addToast }) {
     }
   };
 
+  const toggleKeepAwake = async () => {
+    const enabled = !keepAwake;
+    try {
+      const res = await invoke("keep_awake_set", { enabled });
+      if (res?.status !== "success") {
+        throw new Error(res?.message || "Android did not take the change.");
+      }
+      setKeepAwake(res.data === "true");
+      addToast({
+        type: "info",
+        title: "Config Updated",
+        message: enabled
+          ? "Android stays awake: games no longer dim or freeze when left alone."
+          : "Android dims and sleeps again after its screen timeout.",
+        duration: 3000,
+      });
+    } catch (e) {
+      addToast({
+        type: "error",
+        title: "Config Toggle Failed",
+        message: e?.message || String(e),
+      });
+    }
+  };
+
   return {
+    keepAwake,
+    toggleKeepAwake,
     multiWindow,
     invertColors,
     displayRes,

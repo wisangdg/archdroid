@@ -4,6 +4,7 @@
 |---|---|
 | Device profile (versioned JSON, mode 0600, written atomically) | `~/.config/io.github.archdroid/profile.json` (a corrupt file is kept as `profile.json.corrupt`) |
 | Touch mode on/off | `~/.config/io.github.archdroid/touch-mode.json` |
+| Keep Android Awake on/off, and the screen timeout it replaced | `~/.config/io.github.archdroid/keep-awake.json` |
 | Touch mode udev rule | `/usr/lib/udev/rules.d/70-archdroid-touch.rules` (packages, removed with the package) or `/etc/udev/rules.d/70-archdroid-touch.rules` (Enable access button) |
 | Install markers (`gapps_installed`, `houdini_installed`, `multitouch_installed`) and installer cache | `~/.cache/archdroid/` (`$XDG_CACHE_HOME`) |
 | Application log (Settings → Application Log shows the exact path) | Tauri app log dir, e.g. `~/.local/share/io.github.wisangdg.archdroid/logs/` |

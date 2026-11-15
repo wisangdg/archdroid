@@ -7,6 +7,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Fixed
+- **A game left alone for a minute turned grey and froze.** Android dimmed its screen after its 60 s timeout (Waydroid shows that as a grey window) and then turned it off, and Waydroid freezes the container when that happens. ArchDroid now keeps Android awake once it has booted, like other desktop emulators; Settings → **Keep Android Awake** turns it off again and restores the timeout Android had. The choice is kept in `~/.config/io.github.archdroid/keep-awake.json`, so a fresh Android after Factory Reset is kept awake too.
+
 ## [0.1.9] - 2026-11-15
 
 ### Added
