@@ -14,11 +14,19 @@
 
 ## Status pengerjaan
 
-> **Review 10 Nov 2026 (performa dan tampilan):** 26 item baru (R12–R18,
-> G0–G6, H1–H12) dengan bukti ukur ada di §13. Per 11 Nov semuanya sudah
-> dikerjakan di branch `improve/plan-0.1.7`; status per item ada di tabel §13.
-> Yang tersisa hanya pengukuran di hardware asli dan cek `document.hidden` di
-> Hyprland.
+> **Per 15 Nov 2026 (rilis 0.1.10):** semua item kode dari §3–§13 sudah
+> dikerjakan dan dirilis di 0.1.7. Setelah itu:
+> - **0.1.8:** task yang ditolak karena sibuk, Launch saat Stop/Restart, Cancel
+>   APK di detik pertama, Phantom prebuilt.
+> - **0.1.9:** editor keymap, Block Ads.
+> - **0.1.10:** Keep Android Awake.
+>
+> Kode baru itu ditinjau 15 Nov dari sisi performa: §14 (R19–R21, G7–G14).
+> R19 dan R20 dikerjakan di branch `chore/deps-and-plan-0.1.11`; sisanya ⬜.
+>
+> Yang tersisa dari §13 tidak bisa dikerjakan di sini, karena butuh hardware
+> asli dengan GPU dan cek `document.hidden` di Hyprland. Begitu juga B4, E1,
+> E3, dan F5 di tabel To-do, yang butuh akun, review upstream, atau mesin lain.
 
 PR #2 (`improve/plan-0.1.6`) di-merge 9 Nov 2026 dan dirilis sebagai 0.1.6.
 Setiap item satu commit atau lebih. Review 9 Nov atas PR itu menghasilkan
@@ -29,7 +37,7 @@ workflow paket hijau (AppImage, `.deb`, `.rpm`, paket Arch). Lokal:
 `cargo test` 179 lulus (198 dengan `dev-commands`; 4 test live `#[ignore]`),
 `node --test` 51 lulus dan 1 skip, Vitest 80, E2E 7/7; clippy, fmt, ESLint, dan
 Prettier bersih. `cargo audit` di CI menangkap 4 advisory pada `zip` 4.6.1, jadi
-crate itu diganti `zip` 9 (Rust minimum 1.88).
+crate itu diganti `zip` 9 (Rust minimum 1.88; sejak 15 Nov 1.90 karena Tauri 2.12, R20).
 
 **Hasil uji 10 Nov (`main`):** `cargo test` 183 lulus (202 dengan
 `dev-commands`; 4 `#[ignore]`), `node --test` 52, Vitest 84, E2E 7/7; clippy,
@@ -72,7 +80,8 @@ Detail R1–R10 di §12. Item yang selesai diberi ✅ dan tanggal.
 
 | # | Pekerjaan | Prio | Status |
 |---|---|---|---|
-| R12–R18, G0–G6, H1–H12 | Temuan review 10 Nov: bug, performa, tampilan | P1–P3 | ✅ 11 Nov; status per item di tabel §13. Berikutnya: rilis 0.1.7 |
+| R19–R21, G7–G14 | Review 15 Nov: performa kode 0.1.8–0.1.10, cancel root, PR Dependabot | P1–P3 | R19, R20 ✅ 15 Nov; sisanya ⬜, status per item di tabel §14. Berikutnya: G7 + G8 |
+| R12–R18, G0–G6, H1–H12 | Temuan review 10 Nov: bug, performa, tampilan | P1–P3 | ✅ 11 Nov, dirilis di 0.1.7; status per item di tabel §13 |
 | R1 | `.pyc` ikut ter-commit; komentar basi di `apk.rs` | P1 | ✅ 9 Nov |
 | R2 | Settings dibaca ulang setelah Android selesai boot, bukan saat sesi `RUNNING` | P1 | ✅ 9 Nov (`a8a1c73`) |
 | R3 | Launch saat booting juga dicegah di double-click dan menu konteks | P2 | ✅ 9 Nov (`a8a1c73`) |
@@ -82,8 +91,8 @@ Detail R1–R10 di §12. Item yang selesai diberi ✅ dan tanggal.
 | B1 | Rilis 0.1.6 | P1 | ✅ 9 Nov: PR #2 di-merge, tag `v0.1.6` bertanda tangan, [rilis](https://github.com/wisangdg/archdroid/releases/tag/v0.1.6) dengan artefak CI; smoke di VM Arch (0.1.5 → 0.1.6 → rollback → 0.1.6) dan AppImage di hardware asli, lihat `docs/P0-8.2-MATRIX-RESULTS.md`. Debian 12/Fedora 44 tidak diulang |
 | — | Setelah merge: PR Dependabot pertama lewat CI (DoD C3); smoke biner asli hijau di `main` (DoD C4) | P2 | ✅ 9 Nov: CI `main` hijau di `508c43e`; Dependabot membuka #3–#6 dan CI menilai semuanya |
 | R11 | PR Dependabot #4–#6 gagal CI: Tauri npm (#5, #6) dan crate Tauri (#4) naik di PR terpisah, jadi `tauri build` menolak versi yang tidak cocok; #5/#6 juga membawa lompatan major (ESLint 10 yang belum didukung `eslint-plugin-react`, React 19, lucide-react 1.x) | P2 | ✅ 11 Nov (`.github/dependabot.yml`): Dependabot tidak bisa mengelompokkan lintas ekosistem, jadi grup `tauri` di npm dan cargo hanya menerima patch; minor/major Tauri dan semua major lain diabaikan dan dikerjakan manual dalam satu commit. Baru berlaku setelah merge ke `main`; #4–#6 bisa ditutup, #3 bisa di-merge |
-| B4 | Publikasi `archdroid-bin` ke AUR | P2 | ⏳ PKGBUILD 0.1.6 siap dan lolos `makepkg` terhadap rilis (biner identik dengan `.deb` bertanda tangan). Butuh akun AUR + SSH key, lalu `scripts/release/publish-aur.sh`. **9 Nov 2026: pendaftaran akun AUR sedang ditutup sementara** (gelombang akun otomatis); tunggu pengumuman di aur-general / Arch news |
-| E1 | Kirim patch `fake_touch` ke upstream | P2 | ✅ 9 Nov: [PR #60](https://github.com/waydroid/android_vendor_waydroid/pull/60) (memperbaiki issue #30 yang sudah ada). Sisa: tanggapi review; build image hanya bila diminta |
+| B4 | Publikasi `archdroid-bin` ke AUR | P2 | ⏳ PKGBUILD 0.1.6 siap dan lolos `makepkg` terhadap rilis (biner identik dengan `.deb` bertanda tangan). Butuh akun AUR + SSH key, lalu `scripts/release/publish-aur.sh`. **9 Nov 2026: pendaftaran akun AUR sedang ditutup sementara** (gelombang akun otomatis); tunggu pengumuman di aur-general / Arch news. **15 Nov:** PKGBUILD masih `pkgver=0.1.6`, sedangkan rilis sudah 0.1.10, jadi naikkan versi dan checksum sebelum publikasi |
+| E1 | Kirim patch `fake_touch` ke upstream | P2 | ✅ 9 Nov: [PR #60](https://github.com/waydroid/android_vendor_waydroid/pull/60) (memperbaiki issue #30 yang sudah ada). Sisa: tanggapi review; build image hanya bila diminta. 15 Nov: masih open, belum ada review |
 | F5 | Uji di GNOME, KDE, dan GPU AMD | P2 | ⏳ butuh mesin lain |
 | R7 | E4: test batas jumlah split dan ukuran | P3 | ✅ 9 Nov (`9df44f1`) |
 | R8 | E4: uji `.apks` buatan bundletool | P3 | ✅ 9 Nov (`9df44f1`), uji live |
@@ -1022,3 +1031,199 @@ biaya render, fase VM), supaya DoD di bawah bisa diulang.
 - **H12:** toggle Settings tanpa `role="switch"` (`SettingsView.jsx:97-107`);
   label resolusi tidak terhubung ke input (`ResolutionPresets.jsx:272-273`);
   perintah "Fix" diagnostik tidak bisa diseleksi dan tanpa tombol salin.
+
+---
+
+## 14. Review 15 Nov 2026: performa kode 0.1.8–0.1.10
+
+Diperiksa: `release/0.1.10` di `dea003a`. Kode yang masuk setelah review §13
+(editor keymap, Block Ads, Keep Android Awake, Phantom prebuilt, mesin status
+engine) belum pernah ditinjau dari sisi performa.
+
+- **Cara:** pembacaan kode, ditambah probe headless: Vitest/jsdom, dan Chromium
+  dengan bridge tiruan dari `scripts/perf/lib.mjs` atas `dist/`. Tidak ada
+  jendela yang dibuka di desktop, dan VM tidak dijalankan.
+- **Belum diukur:** semua angka adb dan Python di bawah masih berasal dari
+  pembacaan kode atau dari ukuran §13, belum dari VM. §13 juga masih
+  menyisakan dua pengukuran: hardware ber-GPU dan `document.hidden` di
+  Hyprland.
+
+**Diperiksa dan tidak perlu dikerjakan:**
+- **CSS:** tidak ada animasi `infinite` baru. Pulse hanya saat booting.
+- **Timer dan listener:** kedua `setInterval` dibersihkan saat unmount.
+- **Backend:** semua command baru sudah di luar main thread.
+- **Block Ads:** `install_adblock` menulis 240 KB, dan `adblock_state` di bawah
+  1 ms. Daftar AdAway yang dibundel menambah 243 KB ke biner.
+- **Keep awake:** `awake.rs` 1–2 panggilan adb per boot.
+- **Keymap:** `problems()` dan render node ringan sampai 128 node.
+- **Unduhan:** skrip unduh Phantom/GApps tidak mencetak baris per chunk.
+- **Bundle:** JS 293 KB (87 KB gzip, dari 264 KB), CSS 53 KB (10 KB gzip).
+  Ikon lucide di-import per nama.
+- **Poll status:** ±8 ms lewat busctl.
+
+### Ringkasan
+
+| ID | Item | Prio | Effort | Status |
+|---|---|---|---|---|
+| R19 | Cancel task root bisa tidak sampai: TERM hilang saat bash sedang fork; test `elevate` flaky di CI | P1 | S | ✅ 15 Nov |
+| R20 | PR Dependabot #9–#11 gagal CI: Tauri npm dan crate naik terpisah | P2 | S | ✅ 15 Nov (Tauri 2.12, Rust minimum 1.90) |
+| G7 | Focus trap dipasang ulang setiap render: fokus direbut, slider tidak bisa dipakai dengan keyboard | P1 | S | ⬜ |
+| G8 | Cek add-on jalan sebelum Android boot, dan dua kali saat app dibuka; hasilnya basi | P1 | S | ⬜ |
+| G9 | Screenshot editor keymap (data URL beberapa MB) dibangun ulang per gerakan drag | P2 | S / M | ⬜ |
+| G10 | Fallback Python dan root tetap jalan saat engine mati (`multitouch_state`, `gapps_state`) | P2 | S | ⬜ |
+| G11 | `loadConfigs`: 4 proses Python `waydroid prop get` | P3 | S–M | ⬜ perlu verifikasi |
+| G12 | Daftar app mengganti array setiap 10 detik walau tidak berubah | P3 | S | ⬜ |
+| G13 | Screenshot lewat 3 panggilan adb; Recapture tidak di-disable selama capture | P3 | S | ⬜ |
+| G14 | Blur overlay di belakang editor keymap saat drag | P3 | S | ⬜ ukur dulu di VM |
+| R21 | Batas tunggu boot tertulis "~90 s", padahal bisa ±5 menit | P3 | S | ⬜ |
+
+**Urutan:** (1) G7 dan G8 bersama (keduanya juga bug). (2) G9 langkah 1,
+G10, R21. (3) G11–G14 saat menyentuh area itu.
+
+### R19 — Cancel tidak sampai ke skrip root (P1, S) ✅ 15 Nov
+- **Bukti:**
+  - `elevate::tests::cancel_file_ends_a_set_e_script_and_removes_its_work_dir`
+    gagal dua kali di CI: PR #10 (10 Nov) dan `main` setelah merge #18
+    (15 Nov), dengan pesan "the watcher did not stop the script".
+  - Lokal (bash 5.3) 0 dari 930 kali, termasuk 600 kali paralel dan 120 kali
+    di satu CPU yang penuh. CI memakai Ubuntu 24.04 (bash 5.2).
+- **Sebab:**
+  - Watcher di prelude hanya mengirim `kill -TERM 0` sekali, lalu ikut mati
+    oleh sinyalnya sendiri.
+  - Bila TERM tiba saat bash sedang fork perintah berikutnya, anak yang baru
+    dibuat bisa menerimanya sebelum exec, lewat handler trap milik bash, dan
+    sinyal itu hilang.
+  - Bash lalu menunggu anak yang tetap berjalan.
+- **Dampak di produksi:** Cancel atau timeout melaporkan "Cancelled", padahal
+  perintah root yang sedang jalan tetap berlanjut sampai selesai. App tidak
+  bisa memberi sinyal ke grup root (EPERM), jadi watcher adalah satu-satunya
+  jalur cancel.
+- **Perbaikan:** watcher mengabaikan TERM setelah terpicu, lalu mengirim ulang
+  TERM setiap detik selama shell masih hidup. Cleanup menghentikan watcher
+  dengan KILL sebelum `rm -rf`, supaya TERM berikutnya tidak memotong
+  pembersihan. Output watcher dibuang ke `/dev/null`, supaya tidak menahan
+  pipe stdout.
+- **Test:** `cancel_is_sent_again_when_the_first_signal_is_lost`. Anaknya
+  menelan TERM pertama, sama seperti saat sinyal hilang. Test ini gagal di kode
+  lama (habis waktu 10 detik) dan lulus dalam ±1 detik.
+
+### R20 — Tauri npm dan crate dalam satu commit (P2, S) ✅ 15 Nov
+- **Bukti:**
+  - #11 (crate Tauri) gagal: `tauri (v2.12.5) : @tauri-apps/api (v2.11.1)`.
+  - #9 (npm Tauri) lulus sendirian, tetapi tidak bisa digabung tanpa #11.
+  - #10 (`serde_json`, `libc`) gagal karena R19.
+  - PR-PR ini dibuka 10 Nov, sebelum aturan R11 masuk `main`.
+- **Dikerjakan:**
+  - npm: `@tauri-apps/api` dan `cli` 2.12.4, `plugin-dialog` 2.8.4.
+  - Crate: `tauri` 2.12.5, `tauri-build` 2.7.4, `tauri-plugin-dialog` 2.8.4,
+    `tauri-plugin-log` 2.10.2, ditambah `serde_json` 1.0.154 dan
+    `libc` 0.2.191.
+  - Tauri 2.12 butuh Rust 1.90, jadi `rust-version` naik dari 1.88.
+  - `webkit2gtk` tetap 2.0.2, jadi dependensi sistem tidak berubah.
+- **Sisa:** tutup #9–#11 setelah PR ini di-merge.
+
+### G7 — Focus trap dipasang ulang setiap render (P1, S)
+- **Bukti:**
+  - `KeymapEditor.jsx:55` memberi `useFocusTrap` callback baru setiap render.
+    Effect di `src/lib/useFocusTrap.js:88` bergantung pada
+    `[isOpen, onClose]`, jadi setiap render melepas dan memasang lagi listener
+    keydown, mengembalikan fokus ke elemen luar, menjalankan
+    `querySelectorAll`, lalu memfokuskan tombol utama.
+  - Pola yang sama ada di `ConfirmModal` (`onCancel` inline di `App.jsx`) dan
+    di `TerminalModal` yang sudah selesai (`onClose` inline). Keduanya dipicu
+    re-render poll daftar app setiap 10 detik (G12).
+- **Diukur (jsdom dan Chromium):** 20 gerakan pointer saat drag menghasilkan
+  20 pemasangan ulang listener, dan fokus dipaksa ke "Save & Apply". Slider
+  Size/Speed tidak bisa digeser lebih dari satu langkah dengan keyboard.
+- **Kerjakan:** simpan `onClose` di ref di dalam `useFocusTrap`, dan buat
+  effect hanya bergantung pada `[isOpen]`. Satu perubahan menutup ketiga
+  tempat.
+- **DoD:** test: re-render dengan callback baru tidak memindahkan fokus;
+  slider bisa digeser beberapa langkah dengan panah.
+
+### G8 — Cek add-on sebelum boot dan dua kali saat startup (P1, S)
+- **Bukti:**
+  - `onOnline` (`App.jsx:52-57`) menjalankan cek GApps, Houdini, multitouch,
+    dan Block Ads begitu sesi `RUNNING`, padahal Android baru siap 7–12 detik
+    kemudian.
+  - Keempat cek itu juga jalan saat mount (`App.jsx:135-145`).
+  - Dengan engine menyala, bridge tiruan menghitung 20 IPC saat startup:
+    setiap cek, dan juga `get_waydroid_apps`, jalan dua kali. Dengan engine
+    mati: 7 IPC.
+- **Biaya di backend:** setiap perintah adb pasif menjalankan busctl dua kali,
+  `adb devices`, lalu `adb shell`, berurutan di balik `ADB_GATE`
+  (`adb.rs:288-345`).
+  - Sebelum adbd siap, `ensure_device` (`adb.rs:673-700`) mencoba lagi selama
+    5 detik, dengan disconnect/connect setiap 500 ms: ±30 proses adb per cek.
+  - Empat cek ditambah `waydroid_boot_state` menahan kunci adb sepanjang boot,
+    jadi command adb lain menunggu.
+- **Hasil salah:** jawaban dari sebelum boot tidak pernah dibaca ulang. Block
+  Ads tetap "On, unverified", dan GApps jatuh ke marker file.
+- **Kerjakan:** jalankan keempat cek sekali saat `androidReady` berubah, seperti
+  `loadConfigs` (`App.jsx:76-78`). Hapus `onOnline` dan pemanggilan saat
+  mount; marker file tetap menjawab saat engine mati.
+- **DoD:** test: tidak ada cek add-on sebelum `androidReady`, dan satu kali
+  setelahnya. Di VM, hitung proses adb dari Start sampai booted dengan
+  `strace -f -e execve` atau `perf_probe.py`, sebelum dan sesudah.
+
+### G9 — Screenshot keymap di inline style (P2, S / M)
+- **Bukti:** `KeymapEditor.jsx:429` membangun
+  `backgroundImage: url(${shot.data_url})` setiap render. Setiap gerakan drag
+  me-render ulang, jadi string beberapa MB itu dibuat dan dibandingkan lagi.
+- **Diukur (Chromium, CDP, 120 gerakan drag):**
+
+  | data URL | script | task | sampah heap |
+  |---|---|---|---|
+  | 0,06 MB | 76 ms | 256 ms | 0,3 MB |
+  | 1,27 MB | 259 ms | 707 ms | 22 MB |
+
+  Biayanya naik sebanding ukuran. Proyeksi untuk screenshot nyata 2–4 MB:
+  5–7 ms script per gerakan, mendekati anggaran 16 ms per frame.
+- **Kerjakan:**
+  - **(1) S:** `useMemo` style berdasarkan `shot`, atau pindahkan screenshot ke
+    lapisan `<img>`.
+  - **(2) M:** `keymap.rs:47` mengirim byte mentah (`tauri::ipc::Response`), dan
+    halaman memakai Blob URL. Ini menghapus base64 (+33%) dan JSON beberapa MB
+    di IPC.
+- **DoD:** probe drag 120 gerakan dengan screenshot 3 MB: script < 100 ms.
+
+### G10 — Fallback Python saat engine mati (P2, S)
+- **Bukti:**
+  - `multitouch_state` (`lib.rs:800-802`) memakai
+    `adb::shell_line(..).ok().or_else(waydroid shell ..)`, bukan `live_shell`
+    (`lib.rs:248`). Saat engine mati, setiap startup dan setiap task yang
+    selesai menjalankan `waydroid shell pm list features`. Itu jalur root-only
+    yang menurut komentar `live_shell` sendiri bisa meminta password atau hang.
+  - `gapps_state` (`lib.rs:748`) menjalankan `waydroid app list` bila marker
+    tidak ada.
+  - Biaya: ±120 ms CPU per proses Python.
+- **Kerjakan:** `multitouch_state` lewat `live_shell`; `app_list` dilewati bila
+  sesi tidak `RUNNING`.
+- **DoD:** test: dengan sesi mati, tidak ada pemanggilan `waydroid` (mock
+  program runner).
+
+### G11–G14, R21 (P3)
+- **G11:** `loadConfigs` (`useDeviceConfig.js:49-80`) menjalankan 4
+  `waydroid prop get` (±0,5 detik CPU), ditambah density dan
+  `keep_awake_sync`. Ini terjadi setelah boot, setelah Apply, dan setelah
+  property diubah. Satu `adb shell "getprop …; wm density"` kira-kira 25 ms.
+  **Verifikasi dulu** bahwa `getprop` di Android memberi nilai yang sama dengan
+  `waydroid prop get`. Kalau tidak sama, cukup gabungkan keempatnya menjadi
+  satu proses Python.
+- **G12:** `loadApps` (`App.jsx:187`) selalu memasang array baru, jadi seluruh
+  tree, termasuk dialog yang terbuka, re-render setiap 10 detik. §13 menerima
+  biaya render ini, tetapi re-render inilah yang memicu G7. Lewati
+  `setApps` bila daftar paket dan ikon sama.
+- **G13:** `adb::screenshot` (`adb.rs:156-174`) menjalankan `screencap` ke file,
+  lalu `pull`, lalu `rm`: tiga proses adb. `adb exec-out screencap -p` cukup
+  satu, tetapi butuh varian `run_program` yang mengembalikan byte.
+  "Recapture" (`KeymapEditor.jsx:334-342`) tidak di-disable selama capture, jadi
+  klik berulang mengantrekan capture penuh.
+- **G14:** editor keymap ada di dalam `.terminal-overlay`, yang tetap memakai
+  `backdrop-filter: blur(8px)` (`index.css:1732`, sengaja dipertahankan di
+  G5). Di WebKitGTK tanpa GPU, drag mungkin ikut menggambar ulang blur. Ukur
+  drag di VM dengan dan tanpa blur; ubah hanya bila bedanya terlihat.
+- **R21:** `BOOT_POLL_ATTEMPTS = 45; // ~90 s` (`useEngineStatus.js:7-8`),
+  padahal setiap percobaan menunggu `waydroid_boot_state` (sampai 5 detik di
+  `ensure_device`) ditambah 2 detik. Batas sebenarnya ±5 menit. Pakai tenggat
+  waktu, bukan jumlah percobaan, atau perbaiki komentarnya.
