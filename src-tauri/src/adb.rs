@@ -185,7 +185,17 @@ pub fn uninstall_app(package: &str, cancel: Option<&AtomicBool>) -> Result<Strin
     with_device(true, |adb, serial| {
         let before = launcher_entries();
         let argv = adb_uninstall_args(serial, package);
-        let output = waydroid::run_program(adb, &argv, TIMEOUT_LONG, cancel)?;
+        let output = match waydroid::run_program(adb, &argv, TIMEOUT_LONG, cancel) {
+            // Preinstalled apps live on /system, which `adb uninstall` cannot
+            // touch. Removing them for user 0 hides them like an uninstall;
+            // `cmd package install-existing <package>` or a reset brings them back.
+            Err(error) if is_system_app_refusal(&error) => {
+                log::info!("{package} is a system app; removing it for user 0");
+                let argv = adb_user_uninstall_args(serial, package);
+                waydroid::run_program(adb, &argv, TIMEOUT_LONG, cancel)?
+            }
+            result => result?,
+        };
         wait_for_launcher_change(&before, cancel);
         Ok(output)
     })
@@ -273,6 +283,25 @@ fn adb_uninstall_args(serial: &str, package: &str) -> Vec<String> {
         "uninstall".to_string(),
         package.to_string(),
     ]
+}
+
+fn adb_user_uninstall_args(serial: &str, package: &str) -> Vec<String> {
+    [
+        "-s",
+        serial,
+        "shell",
+        "pm",
+        "uninstall",
+        "--user",
+        "0",
+        package,
+    ]
+    .map(str::to_string)
+    .to_vec()
+}
+
+fn is_system_app_refusal(error: &AppError) -> bool {
+    error.to_string().contains("DELETE_FAILED_INTERNAL_ERROR")
 }
 
 fn shell_mode(args: &[&str], allow_unfreeze: bool) -> Result<String> {
@@ -1020,6 +1049,41 @@ mod tests {
                 "org.fdroid.fdroid"
             ]
         );
+        assert_eq!(
+            adb_user_uninstall_args("192.168.240.112:5555", "com.android.deskclock"),
+            vec![
+                "-s",
+                "192.168.240.112:5555",
+                "shell",
+                "pm",
+                "uninstall",
+                "--user",
+                "0",
+                "com.android.deskclock"
+            ]
+        );
+    }
+
+    /// Live: `ARCHDROID_UNINSTALL_PKG=<package> cargo test live_uninstall -- --ignored`
+    /// with a running Waydroid session. Uninstalls the package for real; a
+    /// system app comes back with `adb shell cmd package install-existing`.
+    #[test]
+    #[ignore]
+    fn live_uninstall() {
+        let package = std::env::var("ARCHDROID_UNINSTALL_PKG").expect("ARCHDROID_UNINSTALL_PKG");
+        uninstall_app(&package, None).expect("uninstall");
+    }
+
+    #[test]
+    fn only_a_system_app_refusal_falls_back_to_a_user_uninstall() {
+        let refusal = AppError::Exit {
+            program: "/usr/bin/adb".to_string(),
+            code: Some(1),
+            output: "Failure [DELETE_FAILED_INTERNAL_ERROR]".to_string(),
+        };
+        assert!(is_system_app_refusal(&refusal));
+        let other = AppError::command_failed("Failure [DELETE_FAILED_DEVICE_POLICY_MANAGER]");
+        assert!(!is_system_app_refusal(&other));
     }
 
     #[test]

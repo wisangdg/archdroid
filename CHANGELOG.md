@@ -12,6 +12,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - **Add-on cards showed answers from before Android had booted** (Block Ads stayed "On, unverified"). They are now checked once Android is ready, instead of at session start and again at launch, which also stops each check from retrying adb for 5 s during boot.
 - With the engine stopped, the touch-feature and GApps cards no longer run root-only or session-only `waydroid` commands; `waydroid app list` is not used on a frozen session, which it would have unfrozen.
 - **Cancel (or a timeout) sometimes did not stop a root task.** The privileged script's watcher sent its stop signal once; when it landed while the script was starting its next command, that command kept running, and the task said "Cancelled" while the root step carried on to the end. The watcher now repeats the signal until the script has exited, and still lets it clean up its work directory.
+- **Preinstalled apps (Clock, Calculator, ...) could not be uninstalled**: My Apps showed adb's `Failure [DELETE_FAILED_INTERNAL_ERROR]`. They live in Android's read-only system image, so ArchDroid now removes them for the Android user instead, which takes them and their data off the list; `adb shell cmd package install-existing <package>` or Factory Reset brings one back.
 
 ### Changed
 - **Settings reads its values in one adb call** after boot instead of four `waydroid prop get` processes (measured in the test VM: 52 ms instead of 673 ms, with the same values); the old way stays as a fallback without adb.
