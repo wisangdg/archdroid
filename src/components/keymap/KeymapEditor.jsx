@@ -1,4 +1,10 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   X,
@@ -56,6 +62,17 @@ export default function KeymapEditor({ app, onClose, addToast }) {
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [shot, setShot] = useState(null); // { data_url, width, height }
   const [shotError, setShotError] = useState(null);
+  // A screenshot is a data URL of several MB. Built once per capture: inside
+  // the render it was copied again on every pointer move of a drag.
+  const canvasStyle = useMemo(
+    () =>
+      shot && {
+        aspectRatio: `${shot.width} / ${shot.height}`,
+        "--keymap-ratio": shot.width / shot.height,
+        backgroundImage: `url(${shot.data_url})`,
+      },
+    [shot]
+  );
   const [nodes, setNodes] = useState([]);
   const [base, setBase] = useState({});
   const [tool, setToolState] = useState("tap");
@@ -423,11 +440,7 @@ export default function KeymapEditor({ app, onClose, addToast }) {
               <div
                 ref={canvasRef}
                 className="keymap-canvas"
-                style={{
-                  aspectRatio: `${shot.width} / ${shot.height}`,
-                  "--keymap-ratio": shot.width / shot.height,
-                  backgroundImage: `url(${shot.data_url})`,
-                }}
+                style={canvasStyle}
                 onClick={handleCanvasClick}
                 onPointerMove={onDrag}
                 onPointerUp={endDrag}

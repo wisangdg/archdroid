@@ -740,13 +740,13 @@ describe("App state & workflow integration", () => {
     const calls = () =>
       invoke.mock.calls.filter(([cmd]) => cmd === "check_multitouch_status")
         .length;
-    // Once on mount (works while offline), once when the session is online.
-    await waitFor(() => expect(calls()).toBe(2));
+    // Once Android has booted (not at mount and again at RUNNING).
+    await waitFor(() => expect(calls()).toBe(1));
 
     fireEvent.click(screen.getByRole("button", { name: "Install Tools" }));
     fireEvent.click(await screen.findByText(/Declare Touch Features/));
     fireEvent.click(await screen.findByText("Proceed & Authorize Root"));
-    await waitFor(() => expect(calls()).toBe(3));
+    await waitFor(() => expect(calls()).toBe(2));
   });
 
   it("reads Settings properties again once the session is online", async () => {
@@ -826,6 +826,46 @@ describe("App state & workflow integration", () => {
     );
     await screen.findByText("Engine Running");
   }, 10000);
+
+  it("probes the add-ons once Android has booted, not at RUNNING or at mount", async () => {
+    const probes = [
+      "check_gapps_status",
+      "check_houdini_status",
+      "check_multitouch_status",
+      "check_adblock_status",
+    ];
+    let booted = false;
+    bootingSession(() => booted);
+    render(<App />);
+    await screen.findByText("Android Booting…");
+    // Before boot each adb probe retried for 5 s and kept the stale answer.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    for (const probe of probes) expect(callsOf(probe)).toBe(0);
+
+    booted = true;
+    await screen.findByText("Engine Running", {}, { timeout: 4000 });
+    await waitFor(() => {
+      for (const probe of probes) expect(callsOf(probe)).toBe(1);
+    });
+  }, 10000);
+
+  it("probes the add-ons once from markers when the engine is stopped", async () => {
+    invoke.mockImplementation((cmd) => {
+      if (cmd === "waydroid_status")
+        return Promise.resolve({
+          status: "success",
+          data: "Session:\tSTOPPED",
+        });
+      if (cmd === "get_waydroid_apps") return Promise.resolve([]);
+      return Promise.resolve({ status: "not_installed" });
+    });
+    render(<App />);
+    await screen.findByText("Engine Stopped");
+    await waitFor(() => expect(callsOf("check_gapps_status")).toBe(1));
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(callsOf("check_gapps_status")).toBe(1);
+    expect(callsOf("check_adblock_status")).toBe(1);
+  });
 
   it("does not launch from the list or the menu while Android boots", async () => {
     bootingSession(() => false);

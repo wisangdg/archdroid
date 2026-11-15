@@ -36,8 +36,6 @@ export default function App() {
   const [multitouchStatus, setMultitouchStatus] = useState("unknown");
   const [adblockStatus, setAdblockStatus] = useState("unknown");
   const { toasts, addToast, removeToast } = useToasts();
-  // GApps/Houdini probes go through adb, so they are refreshed when the
-  // session comes online and after each task rather than on every poll.
   const {
     phase: enginePhase,
     status,
@@ -47,15 +45,7 @@ export default function App() {
     handleStart,
     handleStop,
     handleRestart,
-  } = useEngineStatus({
-    addToast,
-    onOnline: () => {
-      checkGappsStatus();
-      checkHoudiniStatus();
-      checkMultitouchStatus();
-      checkAdblockStatus();
-    },
-  });
+  } = useEngineStatus({ addToast });
   const {
     multiWindow,
     invertColors,
@@ -134,15 +124,26 @@ export default function App() {
 
   useEffect(() => {
     loadApps();
-    checkGappsStatus();
-    checkHoudiniStatus();
-    // Answers from the overlay file and marker even while the engine is off.
-    checkMultitouchStatus();
-    checkAdblockStatus();
-    // Mount only. loadApps is declared further down, so it cannot be listed
-    // here, and the status checks are plain functions recreated each render.
+    // Mount only. loadApps is declared further down, so it cannot be listed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Add-on cards are probed once per settled engine state, and after each
+  // task, rather than on every poll. Stopped, they answer from markers and the
+  // overlay file; booted, over adb. Not at "RUNNING": adbd is still seconds
+  // away, each probe retried adb for 5 s and kept that pre-boot answer.
+  const addonProbeState = androidReady
+    ? "ready"
+    : status === "offline" && isInitialized !== null
+      ? "stopped"
+      : null;
+  useEffect(() => {
+    if (!addonProbeState) return;
+    checkGappsStatus();
+    checkHoudiniStatus();
+    checkMultitouchStatus();
+    checkAdblockStatus();
+  }, [addonProbeState]);
 
   const checkGappsStatus = async () => {
     try {

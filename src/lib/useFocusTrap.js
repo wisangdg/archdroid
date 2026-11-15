@@ -12,10 +12,16 @@ const FOCUSABLE_SELECTOR = [
 /**
  * Traps keyboard focus within container, manages initial focus and restores
  * focus to the trigger element when the container closes or unmounts.
+ *
+ * Callers pass inline callbacks, so `onClose` is read through a ref: the trap
+ * is set up once per open, not again on every render (that moved focus back to
+ * the primary button during a drag or a slider step).
  */
 export function useFocusTrap(isOpen, onClose) {
   const containerRef = useRef(null);
   const previousActiveElement = useRef(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     if (!isOpen) return;
@@ -37,9 +43,9 @@ export function useFocusTrap(isOpen, onClose) {
 
     const handleKeyDown = (e) => {
       if (e.key === "Escape") {
-        if (onClose) {
+        if (onCloseRef.current) {
           e.preventDefault();
-          onClose();
+          onCloseRef.current();
         }
         return;
       }
@@ -85,7 +91,7 @@ export function useFocusTrap(isOpen, onClose) {
         previousActiveElement.current.focus();
       }
     };
-  }, [isOpen, onClose]);
+  }, [isOpen]);
 
   return containerRef;
 }

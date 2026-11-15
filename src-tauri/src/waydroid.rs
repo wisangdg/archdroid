@@ -22,7 +22,7 @@
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Child, ExitStatus, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -349,9 +349,8 @@ impl Waydroid {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
-        let mut child: Child = command
-            .spawn()
-            .map_err(|error| AppError::from_spawn(&program, HINT, error))?;
+        let mut child: Child =
+            spawn(&mut command).map_err(|error| AppError::from_spawn(&program, HINT, error))?;
         let stdout = child.stdout.take().expect("stdout was piped");
         let stderr = child.stderr.take().expect("stderr was piped");
         let mut stdout_reader = Some(thread::spawn(move || read_lossy(stdout)));
@@ -482,6 +481,23 @@ impl Waydroid {
     }
 }
 
+/// `command.spawn()`. Tests create executable stubs while other tests fork: a
+/// fork can briefly inherit the stub's write fd, making exec fail with ETXTBSY
+/// until that child execs. The test build retries; production gets one attempt.
+/// 26 is ETXTBSY; ErrorKind::ExecutableFileBusy needs Rust 1.83.
+fn spawn(command: &mut Command) -> std::io::Result<Child> {
+    let mut busy_attempts = 0;
+    loop {
+        match command.spawn() {
+            Err(error) if cfg!(test) && error.raw_os_error() == Some(26) && busy_attempts < 50 => {
+                busy_attempts += 1;
+                thread::sleep(Duration::from_millis(10));
+            }
+            result => return result,
+        }
+    }
+}
+
 /// Run a child with a deadline, draining both pipes on reader threads.
 ///
 /// Shared with `adb.rs`: `adb shell` gets the same timeout and "exit 0 is not
@@ -504,22 +520,11 @@ pub(crate) fn run_program(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
-    // Tests create executable stubs while other tests fork. A fork can briefly
-    // inherit the stub's write fd, making exec fail with ETXTBSY until that
-    // child execs; retry only in the test build, production gets one attempt.
-    // 26 is ETXTBSY; ErrorKind::ExecutableFileBusy needs Rust 1.83.
-    let mut busy_attempts = 0;
-    let mut child: Child = loop {
-        match command.spawn() {
-            Ok(child) => break child,
-            Err(error) if cfg!(test) && error.raw_os_error() == Some(26) && busy_attempts < 50 => {
-                busy_attempts += 1;
-                thread::sleep(Duration::from_millis(10));
-            }
-            Err(error) => {
-                log::error!("{program} {:?} could not start: {error}", args);
-                return Err(AppError::from_spawn(&program, HINT, error));
-            }
+    let mut child: Child = match spawn(&mut command) {
+        Ok(child) => child,
+        Err(error) => {
+            log::error!("{program} {:?} could not start: {error}", args);
+            return Err(AppError::from_spawn(&program, HINT, error));
         }
     };
 
