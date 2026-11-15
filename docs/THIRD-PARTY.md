@@ -1,12 +1,14 @@
 # Third-party installers
 
-ArchDroid downloads these projects at install time. They are not vendored, so
-their source and license remain with the upstream projects.
+ArchDroid downloads the first two projects at install time. They are not
+vendored, so their source and license remain with the upstream projects. The
+AdAway blocklist is data, vendored unchanged with its attribution.
 
 | Project | Upstream | Pinned revision | License | Privilege |
 |---|---|---|---|---|
 | waydroid_script | https://github.com/casualsnek/waydroid_script | `48dbfaf34a6ddbe78688c530f9ba1c26522aafb2` | GPL-3.0 | root (mounts and edits the Waydroid image) |
 | Phantom | https://github.com/oliviermugishak/phantom | release `v1.1.0`, sha256 `dad785fa…a4e2` | MIT | desktop user |
+| AdAway blocklist | https://github.com/AdAway/adaway.github.io | `7b5368f03b35ec74e3984a8958494c6b88aa256b`, sha256 `8c925c37…fe55` | CC BY 3.0 | root (writes one hosts file) |
 
 ## How the installers are run
 
@@ -108,6 +110,26 @@ source tree that will run with the corresponding privilege.
 - **Updating:** change the URL and SHA-256 in `scripts.rs` together, from the
   new release's `SHA256SUMS`, and run
   `cargo test live_phantom_install -- --ignored`.
+
+### 3. AdAway default blocklist (vendored)
+
+- **Source:** `hosts.txt` of https://github.com/AdAway/adaway.github.io at commit
+  `7b5368f03b35ec74e3984a8958494c6b88aa256b` (2023-04-29), sha256
+  `8c925c37a5eaa5e1c582c76e12301797861addee5ad0fa0e6e46c9dd0136fe55`, stored
+  unchanged as `src-tauri/resources/adaway-hosts.txt` (its header keeps the
+  attribution). License: Creative Commons Attribution 3.0 (CC BY 3.0).
+- **Use:** Block Ads compiles the domains into the app; nothing is downloaded at
+  run time. `adblock::blocklist()` keeps only well-formed lowercase domains and
+  writes them as `0.0.0.0 <domain>`.
+- **Privilege:** root, to write one file. The root script (`adblock::install_script`)
+  copies only lines matching `^0\.0\.0\.0 [a-z0-9.-]+$` from the user-written
+  staging file and writes the header itself, so the staging file cannot smuggle
+  other content into Android. It refuses to replace or delete a hosts file it
+  did not write (first line `# ArchDroid ad blocking`).
+- **Target path modified:** `/var/lib/waydroid/overlay/system/etc/hosts`
+  (Android's `/system/etc/hosts`). Turn Off deletes it.
+- **Updating:** replace the file from a newer commit, update the commit and
+  hash here, and run `cargo test adblock`.
 
 ## Python dependencies
 

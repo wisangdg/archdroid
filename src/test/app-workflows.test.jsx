@@ -5,6 +5,7 @@ import {
   waitFor,
   fireEvent,
   act,
+  within,
 } from "@testing-library/react";
 import App from "../App";
 import { invoke } from "@tauri-apps/api/core";
@@ -666,6 +667,49 @@ describe("App state & workflow integration", () => {
       expect(
         screen.getByText("Enable Touch Mode Access (Root Required)")
       ).toBeTruthy()
+    );
+  });
+
+  it("blocks ads only after root consent, then asks for a restart", async () => {
+    let adblock = "not_installed";
+    invoke.mockImplementation((cmd) => {
+      if (cmd === "waydroid_status") return Promise.resolve(RUNNING);
+      if (cmd === "get_waydroid_apps") return Promise.resolve([]);
+      if (cmd === "check_adblock_status")
+        return Promise.resolve({ status: adblock });
+      if (cmd === "install_adblock") {
+        adblock = "partial";
+        setTimeout(() => {
+          eventListeners["cmd-started"]?.({ payload: { task_id: "task-9" } });
+          eventListeners["cmd-finished"]?.({
+            payload: { task_id: "task-9", success: true, code: null },
+          });
+        }, 10);
+        return new Promise((resolve) =>
+          setTimeout(() => resolve({ status: "success" }), 30)
+        );
+      }
+      if (cmd === "waydroid_prop_get")
+        return Promise.resolve({ status: "success", data: "false" });
+      return Promise.resolve({ status: "not_installed" });
+    });
+
+    render(<App />);
+    await waitFor(() =>
+      expect(screen.getByText("Engine Running")).toBeTruthy()
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Install Tools" }));
+    const card = await screen.findByTestId("adblock-card");
+    fireEvent.click(within(card).getByRole("button", { name: /Block Ads/ }));
+    expect(await screen.findByText("Block Ads (Root Required)")).toBeTruthy();
+    expect(invoke).not.toHaveBeenCalledWith("install_adblock", undefined);
+    fireEvent.click(screen.getByText("Proceed & Authorize Root"));
+
+    await waitFor(() =>
+      expect(within(card).getByText("On after restart")).toBeTruthy()
+    );
+    expect(invoke.mock.calls.some(([cmd]) => cmd === "install_adblock")).toBe(
+      true
     );
   });
 

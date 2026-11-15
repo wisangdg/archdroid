@@ -24,7 +24,8 @@ The app window itself cannot reach the network: its Content Security Policy only
 
 | Data | Location | Purpose |
 |---|---|---|
-| **Add-on markers and installer cache** | `~/.cache/archdroid/` | Whether GApps, libhoudini, and multitouch were installed (`pending` until confirmed in a running container, then `verified`). |
+| **Add-on markers and installer cache** | `~/.cache/archdroid/` | Whether GApps, libhoudini, and multitouch were installed (`pending` until confirmed in a running container, then `verified`). While **Block Ads** is being turned on, `adblock-hosts.txt` holds the built-in blocklist for the root step and is deleted afterwards. |
+| **Ad blocking** | `/var/lib/waydroid/overlay/system/etc/hosts` (root-owned) | Only while Block Ads is on: the built-in AdAway list of ad servers, which Android resolves to `0.0.0.0`. It sends nothing anywhere and records no lookups. |
 | **Device profile** | `~/.config/io.github.archdroid/profile.json` | Saved display/device profile. Current release builds do not write this file; resolution and DPI are stored by Waydroid itself (`/var/lib/waydroid/waydroid.cfg`). |
 | **Touch mode setting** | `~/.config/io.github.archdroid/touch-mode.json` | Only whether touch mode is on, so it comes back on at the next launch. Touch mode never records clicks or cursor positions. |
 | **Application log** | `~/.local/share/io.github.wisangdg.archdroid/logs/` (the exact path is shown in Settings → Application Log) | Commands the app ran, their result and duration, and the progress/error lines of installers. Never uploaded. |

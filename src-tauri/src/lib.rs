@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 use tauri::AppHandle;
 
 mod adb;
+mod adblock;
 mod apk;
 mod bundle;
 mod capabilities;
@@ -19,6 +20,7 @@ mod diagnostics;
 mod elevate;
 mod error;
 mod hostenv;
+mod keymap;
 mod logs;
 mod markers;
 mod platform;
@@ -870,6 +872,105 @@ async fn install_multitouch(app: AppHandle) -> CommandResult {
     )
 }
 
+/// Ad blocking is on when ArchDroid's hosts file is in the overlay; Android
+/// uses it once the container restarts, which the live check tells apart.
+fn adblock_state() -> CommandResult {
+    let live = adb::shell_line(&format!("head -n 1 {}", adblock::ANDROID_HOSTS))
+        .ok()
+        .map(|line| adblock::is_managed(line.trim_end()));
+    match (adblock::overlay_state(), live) {
+        (adblock::Overlay::Foreign, _) => CommandResult::report(
+            "not_installed",
+            &format!(
+                "{} was not written by ArchDroid, so ArchDroid leaves it alone.",
+                adblock::overlay_hosts().display()
+            ),
+        ),
+        (adblock::Overlay::Managed, Some(true)) => {
+            CommandResult::report("installed", "Ads are blocked for every Android app.")
+        }
+        (adblock::Overlay::Managed, Some(false)) => CommandResult::report(
+            "partial",
+            "Ad blocking is on but Android has not loaded it yet - restart Waydroid.",
+        ),
+        (adblock::Overlay::Managed, None) => CommandResult::report(
+            "pending",
+            "Ad blocking is on. Start Waydroid to check that Android uses it.",
+        ),
+        (adblock::Overlay::Absent, Some(true)) => CommandResult::report(
+            "not_installed",
+            "Ad blocking is off, but Android still blocks ads until Waydroid restarts.",
+        ),
+        (adblock::Overlay::Absent, _) => {
+            CommandResult::report("not_installed", "Ads are not blocked.")
+        }
+    }
+}
+
+#[tauri::command]
+async fn check_adblock_status() -> CommandResult {
+    off_main_thread(adblock_state).await
+}
+
+/// Root is needed because the overlay is root-owned; the list itself is
+/// handed over in a file the desktop user writes (see `adblock::install_script`).
+#[tauri::command]
+async fn install_adblock(app: AppHandle) -> CommandResult {
+    if has_elevation_tool().is_none() {
+        return AppError::elevation_denied(
+            "No root elevation tool (pkexec or sudo) found on host. Cannot perform administrative operations.",
+        )
+        .into();
+    }
+    if let Err(error) = require_initialized_waydroid("turning on ad blocking") {
+        return error.into();
+    }
+    let staged = match dirs::cache_dir() {
+        Some(dir) => dir.join("archdroid").join("adblock-hosts.txt"),
+        None => {
+            return AppError::command_failed("Cannot find the cache directory (no HOME).").into()
+        }
+    };
+    let written = staged
+        .parent()
+        .map_or(Ok(()), std::fs::create_dir_all)
+        .and_then(|_| std::fs::write(&staged, adblock::blocklist()));
+    if let Err(error) = written {
+        return AppError::Io(error).into();
+    }
+    let result = stream_privileged_script(
+        app,
+        adblock::install_script(&staged),
+        Completion::None,
+        waydroid::TIMEOUT_NORMAL,
+    )
+    .await;
+    let _ = std::fs::remove_file(&staged);
+    result.into_command_result_with_message(
+        "Ad blocking is on. Restart Waydroid so Android starts using it.",
+    )
+}
+
+#[tauri::command]
+async fn remove_adblock(app: AppHandle) -> CommandResult {
+    if has_elevation_tool().is_none() {
+        return AppError::elevation_denied(
+            "No root elevation tool (pkexec or sudo) found on host. Cannot perform administrative operations.",
+        )
+        .into();
+    }
+    stream_privileged_script(
+        app,
+        adblock::remove_script(),
+        Completion::None,
+        waydroid::TIMEOUT_NORMAL,
+    )
+    .await
+    .into_command_result_with_message(
+        "Ad blocking is off. Restart Waydroid so Android stops using it.",
+    )
+}
+
 /// Touch mode: left clicks over Waydroid windows become finger touches. The
 /// status is cheap (no root, no container), so the UI can poll it.
 #[tauri::command]
@@ -1502,6 +1603,80 @@ async fn phantom_status() -> CommandResult {
     off_main_thread(phantom_state).await
 }
 
+/// Keymap editor backdrop: what Android shows right now (the open game).
+#[tauri::command]
+async fn keymap_screenshot(
+    package: String,
+) -> std::result::Result<keymap::Screenshot, CommandResult> {
+    tauri::async_runtime::spawn_blocking(move || -> error::Result<keymap::Screenshot> {
+        // Only to name the file; the screenshot shows whatever is on screen.
+        if !adb::is_valid_package(&package) {
+            return Err(AppError::invalid_input("Invalid Android package name."));
+        }
+        let file = std::env::temp_dir().join(format!(
+            "archdroid-keymap-{}-{package}.png",
+            std::process::id()
+        ));
+        let result = adb::screenshot(&file)
+            .and_then(|()| Ok(std::fs::read(&file)?))
+            .and_then(|bytes| keymap::screenshot_from_png(&bytes));
+        let _ = std::fs::remove_file(&file);
+        result
+    })
+    .await
+    .map_err(|e| CommandResult::from(AppError::Io(std::io::Error::other(e.to_string()))))?
+    .map_err(CommandResult::from)
+}
+
+/// The saved keymap of a game, or null when it has none yet.
+#[tauri::command]
+async fn keymap_load(
+    package: String,
+) -> std::result::Result<Option<serde_json::Value>, CommandResult> {
+    tauri::async_runtime::spawn_blocking(move || keymap::load(&package))
+        .await
+        .map_err(|e| CommandResult::from(AppError::Io(std::io::Error::other(e.to_string()))))?
+        .map_err(CommandResult::from)
+}
+
+/// Save a game's keymap as a Phantom profile; `data` is the file.
+#[tauri::command]
+async fn keymap_save(package: String, profile: serde_json::Value) -> CommandResult {
+    off_main_thread(move || match keymap::save(&package, &profile) {
+        Ok(path) => CommandResult::with_data(path.to_string_lossy().into_owned()),
+        Err(error) => error.into(),
+    })
+    .await
+}
+
+/// Load a game's saved keymap into the running Phantom daemon.
+#[tauri::command]
+async fn keymap_apply(package: String) -> CommandResult {
+    off_main_thread(move || {
+        let path = match keymap::profile_path(&package) {
+            Ok(path) if path.is_file() => path,
+            Ok(_) => return AppError::command_failed("Save the keymap first.").into(),
+            Err(error) => return error.into(),
+        };
+        let Some(phantom) = find_phantom("phantom") else {
+            return AppError::not_found(
+                "phantom",
+                "Install Phantom from the Keymapping page first.",
+            )
+            .into();
+        };
+        let args = ["load".to_string(), path.to_string_lossy().into_owned()];
+        match waydroid::run_program(&phantom, &args, waydroid::TIMEOUT_QUICK, None) {
+            Ok(_) => CommandResult::with_message("Keymap loaded into Phantom."),
+            Err(error) => AppError::command_failed(format!(
+                "Phantom did not load the keymap: {error} The keymap is saved; it applies once the Phantom daemon runs (Keymapping → Launch) with the same screen size."
+            ))
+            .into(),
+        }
+    })
+    .await
+}
+
 #[tauri::command]
 async fn run_phantom() -> CommandResult {
     off_main_thread(run_phantom_sync).await
@@ -1664,15 +1839,22 @@ pub fn run() {
             check_gapps_status,
             check_houdini_status,
             check_multitouch_status,
+            check_adblock_status,
             install_gapps,
             install_houdini,
             install_multitouch,
+            install_adblock,
+            remove_adblock,
             touch_mode_status,
             touch_mode_set,
             install_touch_mode_access,
             install_phantom,
             phantom_status,
             app_info,
+            keymap_screenshot,
+            keymap_load,
+            keymap_save,
+            keymap_apply,
             run_phantom,
             check_host_diagnostics,
             preview_package_install

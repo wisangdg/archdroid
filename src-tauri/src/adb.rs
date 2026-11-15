@@ -146,6 +146,33 @@ pub fn pull_apks(package: &str, into: &Path) -> Result<Vec<std::path::PathBuf>> 
     })
 }
 
+/// Where `screenshot` stages the PNG inside Android; `/data/local/tmp` is
+/// writable by the adb shell user.
+const SCREENSHOT_REMOTE: &str = "/data/local/tmp/archdroid-keymap.png";
+
+/// Capture what Android shows right now as a PNG at `into` (the keymap
+/// editor's backdrop). An explicit user action, so a frozen container is
+/// resumed; no root.
+pub fn screenshot(into: &Path) -> Result<()> {
+    with_device(true, |adb, serial| {
+        let run = |args: &[&str], timeout| {
+            let mut argv = vec!["-s".to_string(), serial.to_string()];
+            argv.extend(args.iter().map(|a| a.to_string()));
+            waydroid::run_program(adb, &argv, timeout, None)
+        };
+        run(
+            &["shell", "screencap", "-p", SCREENSHOT_REMOTE],
+            TIMEOUT_QUICK,
+        )?;
+        let pulled = run(
+            &["pull", SCREENSHOT_REMOTE, &into.to_string_lossy()],
+            TIMEOUT_QUICK,
+        );
+        let _ = run(&["shell", "rm", "-f", SCREENSHOT_REMOTE], TIMEOUT_QUICK);
+        pulled.map(|_| ())
+    })
+}
+
 /// Uninstall a package through adb. `waydroid app remove` can exit 0 while the
 /// platform service fails (`Failed with code: -3`), so adb is the authoritative
 /// path when it is available.

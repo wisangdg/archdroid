@@ -38,6 +38,7 @@ export default function MyAppsView({
   onLaunchApp,
   onForceStopApp,
   onOpenKeymap,
+  onEditKeymap,
   onInstallApk,
   installingApk = null,
   onCancelInstall,
@@ -275,6 +276,7 @@ export default function MyAppsView({
         onLaunch={onLaunchApp}
         onForceStop={onForceStopApp}
         onOpenKeymap={onOpenKeymap}
+        onEditKeymap={onEditKeymap}
         onCopyPackage={onCopyPackage}
         onBackupApk={onBackupApk}
         savingApk={savingApk}

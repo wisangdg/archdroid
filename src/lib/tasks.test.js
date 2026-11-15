@@ -8,6 +8,8 @@ const ROOT_COMMANDS = [
   "install_gapps",
   "install_houdini",
   "install_multitouch",
+  "install_adblock",
+  "remove_adblock",
   "install_touch_mode_access",
   "waydroid_init",
   "waydroid_wipe",
