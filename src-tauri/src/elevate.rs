@@ -226,19 +226,26 @@ export WAYDROID_CONFIG=/var/lib/waydroid/waydroid.cfg
 # The unprivileged app cannot signal this root process group (EPERM), so
 # timeout/cancel writes a file instead. This root-side watcher sees it and
 # signals its own group, which makes cancellation work for all children.
+# A TERM that lands while bash forks a command can be lost by the new child,
+# so the watcher survives its own signal and repeats it until the shell exits.
 (
     while [ ! -e "$ARCHDROID_CANCEL_FILE" ]; do
         sleep 0.2
     done
-    kill -TERM 0
-) &
+    trap '' TERM
+    while kill -0 "$$" 2>/dev/null; do
+        kill -TERM 0
+        sleep 1
+    done
+) >/dev/null 2>&1 &
 ARCHDROID_CANCEL_WATCH=$!
 # The script body runs under `set -e`, which also applies inside traps: the
-# watcher is usually gone by now (its `kill -TERM 0` hits itself), so a bare
-# `kill` would fail and exit before `rm -rf`. A signal must also end the
+# watcher may already be gone, so a bare `kill` would fail and exit before
+# `rm -rf`. It ignores TERM once it fires, hence KILL, and it must stop before
+# `rm -rf` so a repeated TERM cannot cut the cleanup short. A signal must also end the
 # script instead of resuming the next root command after the trap.
 archdroid_cleanup() {{
-    kill "$ARCHDROID_CANCEL_WATCH" 2>/dev/null || true
+    kill -KILL "$ARCHDROID_CANCEL_WATCH" 2>/dev/null || true
     rm -rf "$ARCHDROID_WORK" /tmp/gapps /tmp/houdiniunpack /tmp/waydroid
 }}
 trap archdroid_cleanup EXIT
@@ -371,7 +378,7 @@ mod tests {
         assert!(body.contains("ARCHDROID_CANCEL_FILE"));
         assert!(body.contains("ARCHDROID_CANCEL_WATCH=$!"));
         assert!(body.contains("kill -TERM 0"));
-        assert!(body.contains("kill \"$ARCHDROID_CANCEL_WATCH\" 2>/dev/null || true"));
+        assert!(body.contains("kill -KILL \"$ARCHDROID_CANCEL_WATCH\" 2>/dev/null || true"));
         assert!(
             body.contains("rm -rf \"$ARCHDROID_WORK\" /tmp/gapps /tmp/houdiniunpack /tmp/waydroid")
         );
@@ -449,6 +456,68 @@ mod tests {
             !resumed.contains("resumed"),
             "a cancelled script must not run its next root command"
         );
+    }
+
+    /// A TERM that lands while bash is forking a command can be taken by the
+    /// new child before it execs, and is then lost: the child keeps running and
+    /// the shell waits for it. Seen on CI (Ubuntu bash 5.2) as a cancel that
+    /// never ended the script. The child here swallows the first TERM the same
+    /// way, so only a watcher that signals again can stop it.
+    #[test]
+    fn cancel_is_sent_again_when_the_first_signal_is_lost() {
+        use std::os::unix::process::CommandExt;
+        use std::process::Stdio;
+        use std::time::{Duration, Instant};
+
+        let dir = std::env::temp_dir().join(format!("archdroid-resend-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("test dir must be creatable");
+        let cancel_file = dir.join("cancel");
+        let ready_file = dir.join("ready");
+        let context = UserContext {
+            uid: 1234,
+            home: PathBuf::from("/home/archdroid-test"),
+        };
+        let body = elevate_env_for(
+            &context,
+            "set -eu\nbash -c 'n=0; trap \"n=\\$((n+1)); [ \\$n -lt 2 ] || exit 1\" TERM; touch \"$READY_FILE\"; while :; do sleep 0.05 || :; done' || :\necho resumed > \"$READY_FILE\"\n",
+        );
+        let mut child = Command::new("bash")
+            .args(["--noprofile", "--norc", "-c", &body])
+            .env("ARCHDROID_CANCEL_FILE", &cancel_file)
+            .env("READY_FILE", &ready_file)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .process_group(0)
+            .spawn()
+            .expect("bash must start");
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !ready_file.exists() {
+            assert!(Instant::now() < deadline, "the script never started");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        std::fs::write(&cancel_file, "cancel\n").expect("cancel file must be writable");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let status = loop {
+            if let Some(status) = child.try_wait().expect("try_wait must not fail") {
+                break status;
+            }
+            if Instant::now() > deadline {
+                // Stop the whole test group, not just bash.
+                let _ = Command::new("kill")
+                    .args(["-KILL", "--", &format!("-{}", child.id())])
+                    .status();
+                let _ = child.wait();
+                let _ = std::fs::remove_dir_all(&dir);
+                panic!("a lost cancel signal was never sent again");
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        let resumed = std::fs::read_to_string(&ready_file).unwrap_or_default();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(!status.success());
+        assert!(!resumed.contains("resumed"));
     }
 
     #[test]
