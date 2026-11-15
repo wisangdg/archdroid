@@ -7,6 +7,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Fixed
+- **Cancel (or a timeout) sometimes did not stop a root task.** The privileged script's watcher sent its stop signal once; when it landed while the script was starting its next command, that command kept running, and the task said "Cancelled" while the root step carried on to the end. The watcher now repeats the signal until the script has exited, and still lets it clean up its work directory.
+
+### Changed
+- Tauri 2.12 (npm packages and crates together). Building from source needs Rust 1.90 or newer.
+
 ## [0.1.10] - 2026-11-15
 
 ### Fixed
