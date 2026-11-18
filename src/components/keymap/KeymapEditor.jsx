@@ -296,7 +296,7 @@ export default function KeymapEditor({ app, onClose, addToast }) {
           ? {
               type: "success",
               title: "Keymap Active",
-              message: `${app.name}'s keymap is loaded. Press F8 in the game to capture keyboard and mouse.`,
+              message: `${app.name}'s keymap is loaded. Press F8 in the game to capture keyboard and mouse, and F2 when you are done: Phantom holds the keyboard while it runs.`,
             }
           : {
               type: "warning",

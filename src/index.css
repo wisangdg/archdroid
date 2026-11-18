@@ -1197,6 +1197,24 @@ body {
   color: var(--text-muted);
 }
 
+.keymap-daemon {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--warning-glow);
+  border-radius: 10px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.keymap-daemon p {
+  flex: 1 1 260px;
+  margin: 0;
+}
+
 /* Settings View */
 .settings-view-container {
   display: flex;

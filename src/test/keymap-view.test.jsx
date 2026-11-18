@@ -35,6 +35,27 @@ describe("KeymapView Phantom status", () => {
     expect(launch().disabled).toBe(true);
   });
 
+  it("says when the Phantom daemon holds the keyboard and stops it", async () => {
+    let state = "running";
+    invoke.mockImplementation(async (cmd) => {
+      if (cmd === "phantom_status") return { status: "installed" };
+      if (cmd === "phantom_daemon_state")
+        return { status: "success", data: state };
+      if (cmd === "phantom_daemon_stop") {
+        state = "stopped";
+        return { status: "success" };
+      }
+      return {};
+    });
+    renderView();
+    const stop = await screen.findByRole("button", { name: /Stop Phantom/ });
+    stop.click();
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: /Stop Phantom/ })).toBeNull()
+    );
+    expect(invoke).toHaveBeenCalledWith("phantom_daemon_stop");
+  });
+
   it("offers Install instead of Launch when Phantom is missing", async () => {
     invoke.mockResolvedValue({ status: "not_installed" });
     renderView();
