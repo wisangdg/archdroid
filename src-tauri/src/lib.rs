@@ -281,7 +281,12 @@ async fn waydroid_stop() -> CommandResult {
     // spawn, so a refused stop looked like a stopped session.
     run_exclusive("session stop", |_| {
         match waydroid::Waydroid::detect().and_then(|waydroid| waydroid.session_stop()) {
-            Ok(_) => CommandResult::success(),
+            Ok(_) => {
+                // With Android gone Phantom has nothing to drive, but it would
+                // keep holding the keyboard: stop it with the engine.
+                stop_phantom_daemon();
+                CommandResult::success()
+            }
             Err(error) => error.into(),
         }
     })
@@ -1797,6 +1802,46 @@ pub(crate) fn strip_ansi(text: &str) -> String {
     out
 }
 
+fn stop_phantom_daemon() {
+    if !phantom_daemon::running() {
+        return;
+    }
+    if let Some(phantom) = find_phantom("phantom") {
+        if let Err(error) = phantom_daemon::stop(&phantom) {
+            log::warn!("could not stop the Phantom daemon: {error}");
+        }
+    }
+}
+
+/// `"running"` while a Phantom daemon holds the keyboard, else `"stopped"`.
+#[tauri::command]
+async fn phantom_daemon_state() -> CommandResult {
+    off_main_thread(|| {
+        let state = if phantom_daemon::running() {
+            "running"
+        } else {
+            "stopped"
+        };
+        CommandResult::with_data(state.to_string())
+    })
+    .await
+}
+
+/// Keymapping → Stop: release the keyboard (the same as F2 in the game).
+#[tauri::command]
+async fn phantom_daemon_stop() -> CommandResult {
+    off_main_thread(|| {
+        let Some(phantom) = find_phantom("phantom") else {
+            return AppError::not_found("phantom", "Phantom is not installed.").into();
+        };
+        match phantom_daemon::stop(&phantom) {
+            Ok(()) => CommandResult::with_message("Phantom stopped; the keyboard is released."),
+            Err(error) => error.into(),
+        }
+    })
+    .await
+}
+
 #[tauri::command]
 async fn run_phantom() -> CommandResult {
     off_main_thread(run_phantom_sync).await
@@ -1979,11 +2024,22 @@ pub fn run() {
             keymap_save,
             keymap_apply,
             run_phantom,
+            phantom_daemon_state,
+            phantom_daemon_stop,
             check_host_diagnostics,
             preview_package_install
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_, event| {
+            // A daemon started by Save & Apply must not keep holding the
+            // keyboard after ArchDroid is gone.
+            if let tauri::RunEvent::Exit = event {
+                if let Some(phantom) = find_phantom("phantom") {
+                    phantom_daemon::stop_if_started_here(&phantom);
+                }
+            }
+        });
 }
 
 #[cfg(test)]

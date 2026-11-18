@@ -16,11 +16,18 @@ use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::elevate::{elevated_command, sh_quote, SAFE_PATH};
 use crate::error::{AppError, Result};
+
+/// Whether the running daemon is one this ArchDroid started. While it runs,
+/// Phantom grabs every physical keyboard (for its F1/F2/F8 hotkeys) and relays
+/// typing through a virtual one, which can repeat keys on the desktop; so it
+/// should not outlive the game session.
+static STARTED_HERE: AtomicBool = AtomicBool::new(false);
 
 /// Time for the password prompt plus the daemon's start-up.
 const START_TIMEOUT: Duration = Duration::from_secs(120);
@@ -183,6 +190,7 @@ pub(crate) fn start(phantom: &Path) -> Result<()> {
     let deadline = Instant::now() + START_TIMEOUT;
     loop {
         if answers(&socket) {
+            STARTED_HERE.store(true, Ordering::SeqCst);
             // Reap pkexec once the daemon ends, so it never lingers as a zombie.
             thread::spawn(move || {
                 let _ = child.wait();
@@ -215,11 +223,27 @@ pub(crate) fn start(phantom: &Path) -> Result<()> {
     }
 }
 
+/// True while a Phantom daemon listens for this user.
+pub(crate) fn running() -> bool {
+    answers(&Session::current().socket())
+}
+
+/// Stop the daemon if this ArchDroid started it (ArchDroid is closing). One the
+/// user started elsewhere is left alone.
+pub(crate) fn stop_if_started_here(phantom: &Path) {
+    if STARTED_HERE.load(Ordering::SeqCst) {
+        if let Err(error) = stop(phantom) {
+            log::warn!("could not stop the Phantom daemon: {error}");
+        }
+    }
+}
+
 /// Ask a running daemon to exit (`phantom shutdown`, over its user-owned
 /// socket, no password) and wait until it no longer listens.
 pub(crate) fn stop(phantom: &Path) -> Result<()> {
     let socket = Session::current().socket();
     if !answers(&socket) {
+        STARTED_HERE.store(false, Ordering::SeqCst);
         return Ok(());
     }
     crate::waydroid::run_program(
@@ -237,6 +261,8 @@ pub(crate) fn stop(phantom: &Path) -> Result<()> {
         }
         thread::sleep(Duration::from_millis(200));
     }
+    STARTED_HERE.store(false, Ordering::SeqCst);
+    log::info!("Phantom daemon stopped");
     Ok(())
 }
 
