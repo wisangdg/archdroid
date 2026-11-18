@@ -7,6 +7,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Added
+- **Super Key Skips Google Assistant** (Settings → Android Display Options, on by default). Waydroid passes the desktop's Super key to Android as Meta, and Android opened Google Assistant (Gemini) whenever it was pressed alone, which paused the game and could leave it washed out until it was restarted. Android now has no default assistant, as with Default apps → Digital assistant → None; turning the option off brings back the assistant it had. The choice is kept in `~/.config/io.github.archdroid/super-key.json` and applied again after each boot, so it survives Factory Reset.
+
 ### Fixed
 - **Dialogs took focus back on every refresh.** The keymap editor, confirmations and a finished terminal moved focus to their main button whenever the window re-rendered (every app-list refresh, every step of a drag), so the keymap's Size and Speed sliders could not be moved with the keyboard.
 - **Add-on cards showed answers from before Android had booted** (Block Ads stayed "On, unverified"). They are now checked once Android is ready, instead of at session start and again at launch, which also stops each check from retrying adb for 5 s during boot.

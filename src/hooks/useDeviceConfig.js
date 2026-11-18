@@ -40,6 +40,8 @@ export function useDeviceConfig({ addToast }) {
   const [invertColors, setInvertColors] = useState(false);
   // Android never dims or sleeps while this is on (see src-tauri/src/awake.rs).
   const [keepAwake, setKeepAwake] = useState(true);
+  // The Super key does not open Google Assistant (src-tauri/src/assistant.rs).
+  const [superKeyBlocked, setSuperKeyBlocked] = useState(true);
   const [displayRes, setDisplayRes] = useState({
     width: "",
     height: "",
@@ -54,6 +56,11 @@ export function useDeviceConfig({ addToast }) {
         if (res?.status === "success") setKeepAwake(res.data === "true");
       })
       .catch((e) => console.error("Failed to sync keep awake:", e));
+    invoke("super_key_sync")
+      .then((res) => {
+        if (res?.status === "success") setSuperKeyBlocked(res.data === "true");
+      })
+      .catch((e) => console.error("Failed to sync the Super key:", e));
     const show = ([mw, inv, width, height, dpi]) => {
       setMultiWindow(mw === "true");
       setInvertColors(inv === "true");
@@ -225,9 +232,36 @@ export function useDeviceConfig({ addToast }) {
     }
   };
 
+  const toggleSuperKey = async () => {
+    const blocked = !superKeyBlocked;
+    try {
+      const res = await invoke("super_key_set", { blocked });
+      if (res?.status !== "success") {
+        throw new Error(res?.message || "Android did not take the change.");
+      }
+      setSuperKeyBlocked(res.data === "true");
+      addToast({
+        type: "info",
+        title: "Config Updated",
+        message: blocked
+          ? "The Super key no longer opens Google Assistant over your game."
+          : "Google Assistant is back; the Super key opens it again.",
+        duration: 3000,
+      });
+    } catch (e) {
+      addToast({
+        type: "error",
+        title: "Config Toggle Failed",
+        message: e?.message || String(e),
+      });
+    }
+  };
+
   return {
     keepAwake,
     toggleKeepAwake,
+    superKeyBlocked,
+    toggleSuperKey,
     multiWindow,
     invertColors,
     displayRes,

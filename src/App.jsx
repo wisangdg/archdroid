@@ -56,6 +56,8 @@ export default function App() {
     invertColors,
     keepAwake,
     toggleKeepAwake,
+    superKeyBlocked,
+    toggleSuperKey,
     displayRes,
     loadConfigs,
     toggleMultiWindow,
@@ -700,6 +702,8 @@ export default function App() {
                   onToggleInvertColors={toggleInvertColors}
                   keepAwake={keepAwake}
                   onToggleKeepAwake={toggleKeepAwake}
+                  superKeyBlocked={superKeyBlocked}
+                  onToggleSuperKey={toggleSuperKey}
                   onPropSet={handlePropSet}
                   onOpenSharedFolder={handleOpenSharedFolder}
                   onViewLogs={handleViewLogs}

@@ -124,6 +124,32 @@ describe("useDeviceConfig", () => {
     );
   });
 
+  it("keeps the Super key from Google Assistant at boot and lets it back on request", async () => {
+    let blocked = "true";
+    invoke.mockImplementation(async (cmd, args) => {
+      if (cmd === "super_key_sync") return ok(blocked);
+      if (cmd === "super_key_set") {
+        blocked = String(args.blocked);
+        return ok(blocked);
+      }
+      return ok("");
+    });
+    const addToast = vi.fn();
+    const { result } = renderHook(() => useDeviceConfig({ addToast }));
+    act(() => {
+      result.current.loadConfigs();
+    });
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("super_key_sync"));
+    expect(result.current.superKeyBlocked).toBe(true);
+
+    await act(() => result.current.toggleSuperKey());
+    expect(invoke).toHaveBeenCalledWith("super_key_set", { blocked: false });
+    expect(result.current.superKeyBlocked).toBe(false);
+    expect(addToast).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Config Updated" })
+    );
+  });
+
   it("keeps the switch where it was when Android refuses the change", async () => {
     invoke.mockImplementation(async (cmd) => {
       if (cmd === "keep_awake_sync") return ok("true");
