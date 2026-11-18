@@ -1715,13 +1715,44 @@ async fn keymap_apply(package: String) -> CommandResult {
         let args = ["load".to_string(), path.to_string_lossy().into_owned()];
         match waydroid::run_program(&phantom, &args, waydroid::TIMEOUT_QUICK, None) {
             Ok(_) => CommandResult::with_message("Keymap loaded into Phantom."),
-            Err(error) => AppError::command_failed(format!(
-                "Phantom did not load the keymap: {error} The keymap is saved; it applies once the Phantom daemon runs (Keymapping → Launch) with the same screen size."
-            ))
-            .into(),
+            Err(error) => AppError::command_failed(phantom_load_failure(&error.to_string())).into(),
         }
     })
     .await
+}
+
+/// What Save & Apply says when `phantom load` fails. `load` only talks to
+/// the root daemon; opening Phantom (Keymapping → Launch) does not start it.
+fn phantom_load_failure(output: &str) -> String {
+    let detail = strip_ansi(output);
+    if detail.contains("cannot connect to daemon") {
+        return "The Phantom daemon is not running, so the keymap was saved but not loaded. Start it in Phantom (Keymapping → Launch, then start the daemon) or with \"sudo -E phantom --daemon\" in a terminal, then press Save & Apply again.".to_string();
+    }
+    format!(
+        "Phantom did not load the keymap: {detail} The keymap is saved; press Save & Apply again once Phantom runs with the same screen size."
+    )
+}
+
+/// Phantom logs with terminal colours (`ESC[31m`), which a toast shows as
+/// boxes.
+fn strip_ansi(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars();
+    while let Some(c) = chars.next() {
+        if c == '\u{1b}' {
+            // CSI: ESC [ parameters, then one final byte in @..~.
+            if chars.next() == Some('[') {
+                for c in chars.by_ref() {
+                    if ('@'..='~').contains(&c) {
+                        break;
+                    }
+                }
+            }
+            continue;
+        }
+        out.push(c);
+    }
+    out
 }
 
 #[tauri::command]
@@ -2051,6 +2082,18 @@ mod tests {
         assert!(icon_data_uri(&dir).is_none());
         assert!(icon_data_uri(Path::new("relative.png")).is_none());
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_missing_phantom_daemon_says_how_to_start_it_without_colour_codes() {
+        let output = "\"/home/u/.local/bin/phantom\" failed with exit code 1: \u{1b}[2m2026-11-18T11:52:54.464955Z\u{1b}[0m \u{1b}[31mERROR\u{1b}[0m IPC error: cannot connect to daemon: No such file or directory (os error 2)";
+        let message = phantom_load_failure(output);
+        assert!(message.starts_with("The Phantom daemon is not running"));
+        assert!(message.contains("Save & Apply again"));
+
+        let other = phantom_load_failure("\u{1b}[31mERROR\u{1b}[0m profile has 11 slots");
+        assert!(other.contains("ERROR profile has 11 slots"));
+        assert!(!other.contains('\u{1b}'));
     }
 
     #[test]

@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 ## [Unreleased]
 
 ### Fixed
+- **Save & Apply's "Saved, Not Applied" message was garbled and misleading** when the Phantom daemon was not running: it showed Phantom's terminal colour codes and said the keymap would apply once Keymapping → Launch ran, but Launch only opens Phantom and the daemon starts there (as root). It now says the daemon is not running, how to start it, and to press Save & Apply again.
 - **Dialogs took focus back on every refresh.** The keymap editor, confirmations and a finished terminal moved focus to their main button whenever the window re-rendered (every app-list refresh, every step of a drag), so the keymap's Size and Speed sliders could not be moved with the keyboard.
 - **Add-on cards showed answers from before Android had booted** (Block Ads stayed "On, unverified"). They are now checked once Android is ready, instead of at session start and again at launch, which also stops each check from retrying adb for 5 s during boot.
 - With the engine stopped, the touch-feature and GApps cards no longer run root-only or session-only `waydroid` commands; `waydroid app list` is not used on a frozen session, which it would have unfrozen.
