@@ -24,6 +24,7 @@ mod hostenv;
 mod keymap;
 mod logs;
 mod markers;
+mod phantom_daemon;
 mod platform;
 mod preflight;
 mod scripts;
@@ -1713,7 +1714,21 @@ async fn keymap_apply(package: String) -> CommandResult {
             .into();
         };
         let args = ["load".to_string(), path.to_string_lossy().into_owned()];
-        match waydroid::run_program(&phantom, &args, waydroid::TIMEOUT_QUICK, None) {
+        let load = || waydroid::run_program(&phantom, &args, waydroid::TIMEOUT_QUICK, None);
+        let result = match load() {
+            // `load` only talks to the daemon: start it (password prompt) and retry.
+            Err(error) if error.to_string().contains("cannot connect to daemon") => {
+                if let Err(error) = phantom_daemon::start(&phantom) {
+                    return AppError::command_failed(format!(
+                        "The keymap is saved, but the Phantom daemon was not started: {error}"
+                    ))
+                    .into();
+                }
+                load()
+            }
+            result => result,
+        };
+        match result {
             Ok(_) => CommandResult::with_message("Keymap loaded into Phantom."),
             Err(error) => AppError::command_failed(phantom_load_failure(&error.to_string())).into(),
         }
@@ -1726,9 +1741,7 @@ async fn keymap_apply(package: String) -> CommandResult {
 fn phantom_load_failure(output: &str) -> String {
     let detail = strip_ansi(output);
     if detail.contains("cannot connect to daemon") {
-        // Not Phantom's own start button: it runs sudo, which has no terminal
-        // to ask for the password when ArchDroid opened Phantom.
-        return "The Phantom daemon is not running, so the keymap was saved but not loaded. Start it in a terminal with \"sudo -E phantom --daemon\", then press Save & Apply again.".to_string();
+        return "The Phantom daemon started but did not take the keymap, so it was saved but not loaded. Press Save & Apply again.".to_string();
     }
     format!(
         "Phantom did not load the keymap: {detail} The keymap is saved; press Save & Apply again once Phantom runs with the same screen size."
@@ -1737,7 +1750,7 @@ fn phantom_load_failure(output: &str) -> String {
 
 /// Phantom logs with terminal colours (`ESC[31m`), which a toast shows as
 /// boxes.
-fn strip_ansi(text: &str) -> String {
+pub(crate) fn strip_ansi(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut chars = text.chars();
     while let Some(c) = chars.next() {
@@ -2090,7 +2103,7 @@ mod tests {
     fn a_missing_phantom_daemon_says_how_to_start_it_without_colour_codes() {
         let output = "\"/home/u/.local/bin/phantom\" failed with exit code 1: \u{1b}[2m2026-11-18T11:52:54.464955Z\u{1b}[0m \u{1b}[31mERROR\u{1b}[0m IPC error: cannot connect to daemon: No such file or directory (os error 2)";
         let message = phantom_load_failure(output);
-        assert!(message.starts_with("The Phantom daemon is not running"));
+        assert!(message.starts_with("The Phantom daemon started but did not take"));
         assert!(message.contains("Save & Apply again"));
 
         let other = phantom_load_failure("\u{1b}[31mERROR\u{1b}[0m profile has 11 slots");
