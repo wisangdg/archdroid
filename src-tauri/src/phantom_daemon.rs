@@ -215,6 +215,118 @@ pub(crate) fn start(phantom: &Path) -> Result<()> {
     }
 }
 
+/// Ask a running daemon to exit (`phantom shutdown`, over its user-owned
+/// socket, no password) and wait until it no longer listens.
+pub(crate) fn stop(phantom: &Path) -> Result<()> {
+    let socket = Session::current().socket();
+    if !answers(&socket) {
+        return Ok(());
+    }
+    crate::waydroid::run_program(
+        phantom,
+        &["shutdown".to_string()],
+        crate::waydroid::TIMEOUT_QUICK,
+        None,
+    )?;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while answers(&socket) {
+        if Instant::now() > deadline {
+            return Err(AppError::command_failed(
+                "The Phantom daemon did not stop within 5 s.",
+            ));
+        }
+        thread::sleep(Duration::from_millis(200));
+    }
+    Ok(())
+}
+
+/// Phantom's config file. The daemon reads its touchscreen size from
+/// `[screen]` there once, at start.
+fn config_path() -> Option<PathBuf> {
+    dirs::config_dir().map(|dir| dir.join("phantom/config.toml"))
+}
+
+/// Make the daemon's touchscreen the size Android renders at, which is the
+/// size the keymap was drawn on. Phantom refuses a profile whose screen
+/// differs, and touches would land in the wrong place if it did not. Returns
+/// whether the file changed; a missing file is left to the daemon, which
+/// writes it from its example on the first start.
+pub(crate) fn set_screen(width: u32, height: u32) -> Result<bool> {
+    let Some(path) = config_path() else {
+        return Ok(false);
+    };
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error.into()),
+    };
+    let Some(updated) = with_screen(&text, width, height) else {
+        return Ok(false);
+    };
+    let tmp = path.with_extension("toml.archdroid-tmp");
+    std::fs::write(&tmp, updated)?;
+    std::fs::rename(&tmp, &path)?;
+    log::info!(
+        "Phantom screen set to {width}x{height} in {}",
+        path.display()
+    );
+    Ok(true)
+}
+
+/// `text` with `[screen]` set to `width` x `height`, every other line kept;
+/// `None` when it already says so.
+pub(crate) fn with_screen(text: &str, width: u32, height: u32) -> Option<String> {
+    let wanted = [("width", width), ("height", height)];
+    let mut out: Vec<String> = Vec::new();
+    let mut in_screen = false;
+    let mut seen_section = false;
+    let mut found = [false, false];
+    let finish_section = |out: &mut Vec<String>, found: &[bool; 2]| {
+        // Missing keys go right after the section's last key/value line.
+        let at = out
+            .iter()
+            .rposition(|line| !line.trim().is_empty())
+            .map_or(out.len(), |i| i + 1);
+        for (i, (key, value)) in wanted.iter().enumerate() {
+            if !found[i] {
+                out.insert(at, format!("{key} = {value}"));
+            }
+        }
+    };
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') {
+            if in_screen {
+                finish_section(&mut out, &found);
+            }
+            in_screen = trimmed == "[screen]";
+            seen_section |= in_screen;
+        } else if in_screen {
+            let key = trimmed.split('=').next().unwrap_or("").trim();
+            if let Some(i) = wanted.iter().position(|(name, _)| *name == key) {
+                found[i] = true;
+                out.push(format!("{key} = {}", wanted[i].1));
+                continue;
+            }
+        }
+        out.push(line.to_string());
+    }
+    if in_screen {
+        finish_section(&mut out, &found);
+    }
+    if !seen_section {
+        out.push(String::new());
+        out.push("[screen]".to_string());
+        out.push(format!("width = {width}"));
+        out.push(format!("height = {height}"));
+    }
+    let mut updated = out.join("\n");
+    if text.ends_with('\n') {
+        updated.push('\n');
+    }
+    (updated != text).then_some(updated)
+}
+
 /// The last lines of the daemon log, without colour codes, for an error message.
 fn log_tail(path: &Path) -> String {
     let text = std::fs::read_to_string(path).unwrap_or_default();
@@ -273,6 +385,38 @@ mod tests {
         assert!(!is_x_display("host:0"));
         assert!(!is_x_display(":0 $(id)"));
         assert!(!is_x_display(":"));
+    }
+
+    const CONFIG: &str = "log_level = \"info\"\n\n# Fullscreen Android touch resolution.\n[screen]\nwidth = 1920\nheight = 1080\n\n[android]\nauto_launch = true\n";
+
+    #[test]
+    fn the_screen_is_set_and_everything_else_kept() {
+        let updated = with_screen(CONFIG, 2560, 1440).unwrap();
+        assert_eq!(
+            updated,
+            CONFIG.replace("1920", "2560").replace("1080", "1440")
+        );
+        assert_eq!(with_screen(&updated, 2560, 1440), None, "already right");
+    }
+
+    #[test]
+    fn a_missing_screen_key_or_section_is_added() {
+        let no_height = CONFIG.replace("height = 1080\n", "");
+        let updated = with_screen(&no_height, 2560, 1440).unwrap();
+        assert!(updated.contains("[screen]\nwidth = 2560\nheight = 1440\n\n[android]"));
+
+        let no_section = "log_level = \"info\"\n";
+        assert_eq!(
+            with_screen(no_section, 2560, 1440).unwrap(),
+            "log_level = \"info\"\n\n[screen]\nwidth = 2560\nheight = 1440\n"
+        );
+    }
+
+    #[test]
+    fn keys_of_other_sections_are_not_touched() {
+        let text = "[mouse_touch]\nwidth = 3\n[screen]\nwidth = 1920\nheight = 1080\n";
+        let updated = with_screen(text, 2560, 1440).unwrap();
+        assert!(updated.starts_with("[mouse_touch]\nwidth = 3\n"));
     }
 
     /// Live: `ARCHDROID_PHANTOM=/path/phantom cargo test live_phantom_daemon -- --ignored`

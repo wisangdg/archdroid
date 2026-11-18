@@ -1700,25 +1700,53 @@ async fn keymap_save(package: String, profile: serde_json::Value) -> CommandResu
 /// Load a game's saved keymap into the running Phantom daemon.
 #[tauri::command]
 async fn keymap_apply(package: String) -> CommandResult {
-    off_main_thread(move || {
-        let path = match keymap::profile_path(&package) {
-            Ok(path) if path.is_file() => path,
-            Ok(_) => return AppError::command_failed("Save the keymap first.").into(),
-            Err(error) => return error.into(),
-        };
-        let Some(phantom) = find_phantom("phantom") else {
-            return AppError::not_found(
-                "phantom",
-                "Install Phantom from the Keymapping page first.",
-            )
+    off_main_thread(move || apply_keymap(&package)).await
+}
+
+/// Load a game's saved keymap into Phantom, starting or restarting the daemon
+/// with the keymap's screen size when it needs to.
+fn apply_keymap(package: &str) -> CommandResult {
+    let path = match keymap::profile_path(package) {
+        Ok(path) if path.is_file() => path,
+        Ok(_) => return AppError::command_failed("Save the keymap first.").into(),
+        Err(error) => return error.into(),
+    };
+    let Some(phantom) = find_phantom("phantom") else {
+        return AppError::not_found("phantom", "Install Phantom from the Keymapping page first.")
             .into();
+    };
+    let args = ["load".to_string(), path.to_string_lossy().into_owned()];
+    let load = || waydroid::run_program(&phantom, &args, waydroid::TIMEOUT_QUICK, None);
+    // The size Android renders at, which the keymap was drawn on.
+    let screen = keymap::load(package).ok().flatten().and_then(|profile| {
+        let side = |key: &str| {
+            profile["screen"][key]
+                .as_u64()
+                .and_then(|v| u32::try_from(v).ok())
         };
-        let args = ["load".to_string(), path.to_string_lossy().into_owned()];
-        let load = || waydroid::run_program(&phantom, &args, waydroid::TIMEOUT_QUICK, None);
-        let result = match load() {
-            // `load` only talks to the daemon: start it (password prompt) and retry.
-            Err(error) if error.to_string().contains("cannot connect to daemon") => {
-                if let Err(error) = phantom_daemon::start(&phantom) {
+        Some((side("width")?, side("height")?))
+    });
+    let result = match load() {
+        // `load` only talks to the daemon, which reads its touchscreen size
+        // from Phantom's config once, at start: set the size, then start
+        // (password prompt) or restart it, and load again.
+        Err(error) => {
+            let detail = error.to_string();
+            let missing = detail.contains("cannot connect to daemon");
+            let wrong_size = detail.contains("does not match daemon touchscreen");
+            if !missing && !wrong_size {
+                Err(error)
+            } else {
+                let restarted = (|| {
+                    if let Some((width, height)) = screen {
+                        phantom_daemon::set_screen(width, height)?;
+                    }
+                    if wrong_size {
+                        phantom_daemon::stop(&phantom)?;
+                    }
+                    phantom_daemon::start(&phantom)
+                })();
+                if let Err(error) = restarted {
                     return AppError::command_failed(format!(
                         "The keymap is saved, but the Phantom daemon was not started: {error}"
                     ))
@@ -1726,14 +1754,13 @@ async fn keymap_apply(package: String) -> CommandResult {
                 }
                 load()
             }
-            result => result,
-        };
-        match result {
-            Ok(_) => CommandResult::with_message("Keymap loaded into Phantom."),
-            Err(error) => AppError::command_failed(phantom_load_failure(&error.to_string())).into(),
         }
-    })
-    .await
+        ok => ok,
+    };
+    match result {
+        Ok(_) => CommandResult::with_message("Keymap loaded into Phantom."),
+        Err(error) => AppError::command_failed(phantom_load_failure(&error.to_string())).into(),
+    }
 }
 
 /// What Save & Apply says when `phantom load` fails. `load` only talks to
@@ -2097,6 +2124,16 @@ mod tests {
         assert!(icon_data_uri(&dir).is_none());
         assert!(icon_data_uri(Path::new("relative.png")).is_none());
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Live: `ARCHDROID_KEYMAP_PKG=<package> cargo test live_apply_keymap -- --ignored`
+    /// with the package's keymap saved and a polkit agent: Save & Apply's path.
+    #[test]
+    #[ignore]
+    fn live_apply_keymap() {
+        let package = std::env::var("ARCHDROID_KEYMAP_PKG").expect("ARCHDROID_KEYMAP_PKG");
+        let result = apply_keymap(&package);
+        assert_eq!(result.status, "success", "{:?}", result.message);
     }
 
     #[test]
