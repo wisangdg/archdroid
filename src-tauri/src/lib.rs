@@ -1726,7 +1726,9 @@ async fn keymap_apply(package: String) -> CommandResult {
 fn phantom_load_failure(output: &str) -> String {
     let detail = strip_ansi(output);
     if detail.contains("cannot connect to daemon") {
-        return "The Phantom daemon is not running, so the keymap was saved but not loaded. Start it in Phantom (Keymapping → Launch, then start the daemon) or with \"sudo -E phantom --daemon\" in a terminal, then press Save & Apply again.".to_string();
+        // Not Phantom's own start button: it runs sudo, which has no terminal
+        // to ask for the password when ArchDroid opened Phantom.
+        return "The Phantom daemon is not running, so the keymap was saved but not loaded. Start it in a terminal with \"sudo -E phantom --daemon\", then press Save & Apply again.".to_string();
     }
     format!(
         "Phantom did not load the keymap: {detail} The keymap is saved; press Save & Apply again once Phantom runs with the same screen size."
