@@ -141,8 +141,14 @@ fn writes_restore(previous: &PrivateDns) -> [GlobalWrite<'_>; 2] {
 }
 
 /// Bring Android in line with `preference`; returns what Android uses now and
-/// the preference to store.
-fn apply(android: &mut dyn Settings, mut preference: Preference) -> Result<(State, Preference)> {
+/// the preference to store. `remember` stores what Android had before AdGuard
+/// DNS replaces it, so a write or a save that fails afterwards cannot lose what
+/// turning the switch off has to put back.
+fn apply(
+    android: &mut dyn Settings,
+    mut preference: Preference,
+    remember: &mut dyn FnMut(&Preference) -> Result<()>,
+) -> Result<(State, Preference)> {
     let current = android.read()?;
     let ours = preference.previous.is_some() && current == PrivateDns::adguard();
     if !ours {
@@ -159,8 +165,9 @@ fn apply(android: &mut dyn Settings, mut preference: Preference) -> Result<(Stat
     let state = match (preference.enabled, &preference.previous) {
         (true, Some(_)) => State::On,
         (true, None) => {
-            android.write(&writes_on())?;
             preference.previous = Some(current);
+            remember(&preference)?;
+            android.write(&writes_on())?;
             State::On
         }
         (false, Some(previous)) => {
@@ -184,7 +191,9 @@ fn change(
     let _change = CHANGE.lock().unwrap_or_else(PoisonError::into_inner);
     let path = preference_path(FILE);
     let stored: Preference = load(&path);
-    let (state, next) = apply(android, choose(stored.clone()))?;
+    let (state, next) = apply(android, choose(stored.clone()), &mut |preference| {
+        Ok(save(&path, preference)?)
+    })?;
     // Never touched, never written: no file for users who leave it off.
     if next != stored {
         save(&path, &next)?;
@@ -213,6 +222,12 @@ mod tests {
     struct Fake {
         now: PrivateDns,
         lines: Vec<String>,
+        /// adb going away before the write.
+        failing: bool,
+    }
+
+    fn keep(_: &Preference) -> Result<()> {
+        Ok(())
     }
 
     impl Settings for Fake {
@@ -220,6 +235,9 @@ mod tests {
             Ok(self.now.clone())
         }
         fn write(&mut self, writes: &[GlobalWrite]) -> Result<()> {
+            if self.failing {
+                return Err(crate::error::AppError::command_failed("adb went away"));
+            }
             for (key, value) in writes {
                 let slot = match *key {
                     MODE => &mut self.now.mode,
@@ -245,15 +263,34 @@ mod tests {
         Fake {
             now,
             lines: Vec::new(),
+            failing: false,
         }
     }
 
     const ON_LINE: &str = "settings put global private_dns_specifier 'dns.adguard-dns.com' && settings put global private_dns_mode 'hostname'";
 
     #[test]
+    fn what_android_had_is_remembered_before_anything_is_written() {
+        let before = dns(Some("opportunistic"), None);
+        let mut android = android(before.clone());
+        android.failing = true;
+        let mut remembered = None;
+        let on = Preference {
+            enabled: true,
+            previous: None,
+        };
+        let result = apply(&mut android, on, &mut |preference| {
+            remembered = Some(preference.clone());
+            Ok(())
+        });
+        assert!(result.is_err());
+        assert_eq!(remembered.unwrap().previous, Some(before));
+    }
+
+    #[test]
     fn off_by_default_and_nothing_is_written() {
         let mut android = android(dns(None, None));
-        let (state, stored) = apply(&mut android, Preference::default()).unwrap();
+        let (state, stored) = apply(&mut android, Preference::default(), &mut keep).unwrap();
         assert_eq!(state, State::Off);
         assert!(android.lines.is_empty());
         assert_eq!(stored, Preference::default());
@@ -266,14 +303,14 @@ mod tests {
             enabled: true,
             previous: None,
         };
-        let (state, stored) = apply(&mut android, on).unwrap();
+        let (state, stored) = apply(&mut android, on, &mut keep).unwrap();
         assert_eq!(state, State::On);
         assert_eq!(android.lines, [ON_LINE]);
         assert_eq!(android.now, PrivateDns::adguard());
         assert_eq!(stored.previous, Some(dns(None, None)));
 
         // Already on at the next boot: nothing is written, nothing forgotten.
-        let (state, stored) = apply(&mut android, stored).unwrap();
+        let (state, stored) = apply(&mut android, stored, &mut keep).unwrap();
         assert_eq!(state, State::On);
         assert_eq!(android.lines.len(), 1);
         assert_eq!(stored.previous, Some(dns(None, None)));
@@ -283,7 +320,7 @@ mod tests {
             enabled: false,
             ..stored
         };
-        let (state, stored) = apply(&mut android, off).unwrap();
+        let (state, stored) = apply(&mut android, off, &mut keep).unwrap();
         assert_eq!(state, State::Off);
         assert_eq!(
             android.lines[1],
@@ -302,12 +339,12 @@ mod tests {
             enabled: true,
             previous: None,
         };
-        let (_, stored) = apply(&mut android, on).unwrap();
+        let (_, stored) = apply(&mut android, on, &mut keep).unwrap();
         let off = Preference {
             enabled: false,
             ..stored
         };
-        apply(&mut android, off).unwrap();
+        apply(&mut android, off, &mut keep).unwrap();
         assert_eq!(android.now, before);
         assert_eq!(
             android.lines[1],
@@ -328,7 +365,7 @@ mod tests {
                     enabled,
                     previous: None,
                 };
-                let (state, stored) = apply(&mut android, stored).unwrap();
+                let (state, stored) = apply(&mut android, stored, &mut keep).unwrap();
                 assert_eq!(state, State::Foreign(own.clone()));
                 assert!(android.lines.is_empty(), "{own:?} was changed");
                 assert_eq!(android.now, own);
@@ -349,7 +386,7 @@ mod tests {
             enabled: true,
             previous: Some(dns(Some("off"), None)),
         };
-        let (state, stored) = apply(&mut android, stored).unwrap();
+        let (state, stored) = apply(&mut android, stored, &mut keep).unwrap();
         assert_eq!(state.name(), "foreign");
         assert!(android.lines.is_empty());
         assert_eq!(stored, Preference::default());
@@ -362,7 +399,7 @@ mod tests {
             enabled: true,
             previous: Some(dns(Some("off"), None)),
         };
-        let (state, stored) = apply(&mut android, stored).unwrap();
+        let (state, stored) = apply(&mut android, stored, &mut keep).unwrap();
         assert_eq!(state, State::On);
         assert_eq!(android.lines, [ON_LINE]);
         // Off now restores what this Android had, not the wiped one.
