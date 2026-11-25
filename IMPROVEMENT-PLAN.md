@@ -29,11 +29,12 @@
 > dan lag di game (E7) sudah ada alat ukur, tetapi pengukurannya butuh game
 > yang dimainkan di host.
 >
-> **Menunggu maintainer:**
-> - Rilis 0.1.11 (B5): tag bertanda tangan, artefak, dan publikasi. Pengguna
->   masih di 0.1.6.
-> - AUR (B4).
-> - Menghapus branch yang sudah di-merge (C8).
+> **Rilis 0.1.11 terbit 25 Nov** (B5, [rilis](https://github.com/wisangdg/archdroid/releases/tag/v0.1.11)),
+> setelah smoke di VM; pengguna tidak lagi tertahan di 0.1.6. Branch yang sudah
+> di-merge dihapus dan auto-delete dinyalakan (C8).
+>
+> **Menunggu:** AUR (B4: PKGBUILD 0.1.11 siap dan lolos `makepkg -f`, tetapi
+> belum ada akun AUR), dan pengukuran E7 di host.
 
 **Hasil uji 25 Nov (`main` di `f20f1cf`):** `cargo test` 234 lulus (253 dengan `dev-commands`; 9 `#[ignore]`), `node --test` 76 (+1 skip: `dist-release` belum di-stage), Vitest 149, E2E 7/7; clippy (kedua set fitur), fmt, ESLint, dan Prettier bersih; `npm audit --omit=dev` 0, `cargo audit` tanpa kerentanan (4 peringatan yang diizinkan).
 
@@ -45,10 +46,8 @@ dan tanggal.
 
 | # | Pekerjaan | Prio | Status |
 |---|---|---|---|
-| B5 | Rilis 0.1.11: semua perubahan sejak 0.1.6 | P1 | ⏳ versi dan CHANGELOG siap di PR rilis (§15); tersisa tag bertanda tangan, artefak CI dari tag, `generate-release.sh`, publikasi, dan smoke di VM |
 | E7 | Game kabur saat bergerak dan terasa lag | P2 | ⏳ alat ukur siap (`scripts/perf/game-frames.sh`); jalankan di host saat bermain (§15) |
-| B4 | Publikasi `archdroid-bin` ke AUR | P2 | ⏳ setelah B5: naikkan `packaging/aur/PKGBUILD` ke 0.1.11 dan checksum dari `SHA256SUMS` bertanda tangan; butuh akun AUR (pendaftaran ditutup sementara sejak 9 Nov) |
-| C8 | Hapus branch yang sudah di-merge di `origin`; nyalakan "Automatically delete head branches" | P3 | ⏳ butuh persetujuan maintainer (menghapus branch remote) |
+| B4 | Publikasi `archdroid-bin` ke AUR | P2 | ⏳ `packaging/aur/PKGBUILD` sudah 0.1.11 dan lolos `makepkg -f` terhadap rilis (biner identik dengan `.deb` bertanda tangan). Tersisa: akun AUR dengan SSH key (pendaftaran ditutup sementara sejak 9 Nov), lalu `scripts/release/publish-aur.sh` |
 | E1 | Patch `fake_touch` upstream ([PR #60](https://github.com/waydroid/android_vendor_waydroid/pull/60)) | P2 | ⏳ menunggu review upstream |
 | F5 | Uji di GNOME, KDE, dan GPU AMD | P2 | ⏳ butuh mesin lain |
 | §13 | Ukur di hardware ber-GPU dan cek `document.hidden` di Hyprland | P3 | ⏳ butuh hardware |
@@ -179,11 +178,11 @@ atau akun. Yang macet sekarang adalah jalur dari kode ke pengguna:
 | R25 | #27: keyboard bisa tetap di-grab; Stop yang gagal tidak terlihat | P2 | S | ✅ 25 Nov (#27); SIGTERM ⬜ opsional |
 | R26 | #28: assistant terhapus sebelum nilai lamanya disimpan | P2 | S | ✅ 25 Nov (#28) |
 | R27 | #23: app sistem penting bisa dihapus tanpa peringatan | P2 | S | ✅ 25 Nov (#23) |
-| B5 | Rilis 0.1.11: semua perubahan sejak 0.1.6 sekaligus | P1 | M | ⏳ PR rilis siap; tag, tanda tangan, dan publikasi oleh maintainer |
+| B5 | Rilis 0.1.11: semua perubahan sejak 0.1.6 sekaligus | P1 | M | ✅ 25 Nov ([rilis](https://github.com/wisangdg/archdroid/releases/tag/v0.1.11), smoke di VM) |
 | C5 | Audit dependensi terjadwal di `main` | P2 | S | ✅ 25 Nov (#33) |
 | C6 | Action GitHub naik versi major (#31) | P2 | S | ✅ 25 Nov (#31) |
 | C7 | ESLint 9 sudah tidak didukung | P3 | S–M | ⏳ menunggu `eslint-plugin-react` |
-| C8 | Kebersihan repo: branch yang sudah di-merge, peringatan Cargo | P3 | S | Cargo ✅ 25 Nov (#33); branch ⏳ maintainer |
+| C8 | Kebersihan repo: branch yang sudah di-merge, peringatan Cargo | P3 | S | ✅ 25 Nov (Cargo #33; branch dihapus) |
 | D6 | Satu backlog yang hidup: BACKEND-TODO dan arsip rencana ini | P2 | S | ✅ 25 Nov |
 | D4 | `lib.rs` tumbuh lagi: 1875 → 2294 baris | P3 | M | ✅ 25 Nov (#27) |
 | E6 | Block Ads lapis kedua: Private DNS opsional | P2 | M | ✅ 25 Nov (#34, diuji di VM) |
@@ -386,11 +385,25 @@ atau akun. Yang macet sekarang adalah jalur dari kode ke pengguna:
   - Smoke di VM Arch dari 0.1.6 ke 0.1.11, seperti B1, termasuk Save & Apply
     keymap.
   - PKGBUILD AUR dinaikkan ke 0.1.11 (B4).
-- **Hasil (25 Nov) ⏳:**
-  - Semua PR yang tertunda sudah masuk `main`.
-  - Bump versi 0.1.11 dan `[0.1.11]` di CHANGELOG ada di PR rilis.
-  - Tersisa untuk maintainer: merge PR itu, tag bertanda tangan, artefak CI dari
-    tag, `generate-release.sh`, publikasi, dan smoke 0.1.6 → 0.1.11 di VM.
+- **Hasil (25 Nov) ✅:** [ArchDroid 0.1.11](https://github.com/wisangdg/archdroid/releases/tag/v0.1.11)
+  sudah terbit sebagai Latest.
+  - **Tag dan artefak:** #36 di-merge, lalu tag bertanda tangan `v0.1.11` di
+    `010a067` (kunci rilis, lewat `git tag -u 18F47067ACC5BBF9`, karena
+    `user.signingkey` tidak di-set). Artefak dari `appimage.yml` run
+    45579085213: checksum CI cocok, dan `BUILD-INFO.txt` menyebut commit tag.
+    `generate-release.sh` dan `verify-release.sh` lolos.
+  - **Smoke sebelum publikasi** (rilis dibuat sebagai draft dulu), di VM dari
+    image smoke 0.1.6:
+    - `pacman -U` 0.1.6 → 0.1.11 → 0.1.6 → 0.1.11: engine start, 11 app, dan
+      stop di setiap versi.
+    - Kartu AdGuard DNS tampil.
+    - Save & Apply menjawab `approval_required` dengan `verified: true`; tanpa
+      agen polkit, pkexec menolak dengan pesan yang benar.
+    - Detail di `docs/P0-8.2-MATRIX-RESULTS.md`.
+  - **Release notes:** perubahan root dan privasi sejak 0.1.6 ditulis paling atas.
+  - **Tidak dikerjakan:** tag `v0.1.8`–`v0.1.10` (opsional; setiap tag `v*`
+    menjalankan build paket penuh), uji di Debian dan Fedora, dan AppImage
+    rilis di hardware asli.
 
 ### C5 — Audit dependensi terjadwal (P2, S)
 - **Bukti:** R23 ketahuan dari PR Dependabot yang tidak ada hubungannya, bukan
@@ -445,8 +458,11 @@ atau akun. Yang macet sekarang adalah jalur dari kode ke pengguna:
 - **Hasil (25 Nov):**
   - `homepage` dihapus dari `Cargo.toml` (#33). Field Homepage di paket diambil
     dari `bundle.homepage` di `tauri.conf.json`.
-  - Branch: ⏳. Branch yang sudah di-merge kini juga mencakup yang dari 25 Nov.
-    Menghapusnya butuh persetujuan maintainer.
+  - Branch ✅ (25 Nov, atas persetujuan maintainer):
+    - Remote: 19 branch yang sudah di-merge dihapus; lima branch Dependabot
+      sudah terhapus sendiri.
+    - Lokal: 18 branch yang sudah di-merge dihapus.
+    - "Automatically delete head branches" kini menyala.
 
 ### D6 — Satu backlog yang hidup (P2, S)
 - **Bukti:**
