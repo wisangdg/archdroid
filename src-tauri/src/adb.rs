@@ -191,7 +191,7 @@ pub fn uninstall_app(package: &str, cancel: Option<&AtomicBool>) -> Result<Strin
             // `cmd package install-existing <package>` or a reset brings them back.
             Err(error) if is_system_app_refusal(&error) => {
                 log::info!("{package} is a system app; removing it for user 0");
-                let argv = adb_user_uninstall_args(serial, package);
+                let argv = adb_user_uninstall_args(serial, package)?;
                 waydroid::run_program(adb, &argv, TIMEOUT_LONG, cancel)?
             }
             result => result?,
@@ -285,8 +285,28 @@ fn adb_uninstall_args(serial: &str, package: &str) -> Vec<String> {
     ]
 }
 
-fn adb_user_uninstall_args(serial: &str, package: &str) -> Vec<String> {
-    [
+/// Android itself: removed for user 0, these leave it without its screen, home
+/// screen, Settings, web pages in apps, or app installs. AOSP and LineageOS
+/// names (Trebuchet is `com.android.launcher3`), plus Google's variants in
+/// GApps images.
+const CORE_PACKAGES: &[&str] = &[
+    "android",
+    "com.android.systemui",
+    "com.android.launcher3",
+    "com.android.settings",
+    "com.android.webview",
+    "com.google.android.webview",
+    "com.android.packageinstaller",
+    "com.google.android.packageinstaller",
+];
+
+fn adb_user_uninstall_args(serial: &str, package: &str) -> Result<Vec<String>> {
+    if CORE_PACKAGES.contains(&package) {
+        return Err(AppError::invalid_input(format!(
+            "{package} is part of Android itself; ArchDroid does not remove it, since Android needs it to work."
+        )));
+    }
+    Ok([
         "-s",
         serial,
         "shell",
@@ -297,7 +317,7 @@ fn adb_user_uninstall_args(serial: &str, package: &str) -> Vec<String> {
         package,
     ]
     .map(str::to_string)
-    .to_vec()
+    .to_vec())
 }
 
 fn is_system_app_refusal(error: &AppError) -> bool {
@@ -1050,7 +1070,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            adb_user_uninstall_args("192.168.240.112:5555", "com.android.deskclock"),
+            adb_user_uninstall_args("192.168.240.112:5555", "com.android.deskclock").unwrap(),
             vec![
                 "-s",
                 "192.168.240.112:5555",
@@ -1084,6 +1104,25 @@ mod tests {
         assert!(is_system_app_refusal(&refusal));
         let other = AppError::command_failed("Failure [DELETE_FAILED_DEVICE_POLICY_MANAGER]");
         assert!(!is_system_app_refusal(&other));
+    }
+
+    #[test]
+    fn core_packages_are_never_removed_for_the_user() {
+        for package in [
+            "android",
+            "com.android.systemui",
+            "com.android.launcher3",
+            "com.android.settings",
+            "com.android.webview",
+            "com.google.android.webview",
+            "com.android.packageinstaller",
+            "com.google.android.packageinstaller",
+        ] {
+            let error =
+                adb_user_uninstall_args("192.168.240.112:5555", package).expect_err(package);
+            assert_eq!(error.code(), crate::error::code::INVALID_INPUT, "{package}");
+            assert!(error.to_string().contains(package), "{error}");
+        }
     }
 
     #[test]
