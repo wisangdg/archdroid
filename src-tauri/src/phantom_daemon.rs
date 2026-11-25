@@ -361,7 +361,7 @@ fn log_tail(path: &Path) -> String {
     if tail.is_empty() {
         format!("Its log is empty: {}", path.display())
     } else {
-        format!("Phantom said: {}", crate::strip_ansi(&tail))
+        format!("Phantom said: {}", crate::phantom::strip_ansi(&tail))
     }
 }
 
