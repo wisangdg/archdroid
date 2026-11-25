@@ -82,6 +82,19 @@ test("problems name unbound, reserved and doubled keys", () => {
   assert.deepEqual(problems(nodes.slice(4)), []);
 });
 
+test("problems name mouse buttons that only work with an Aim control", () => {
+  const nodes = [
+    { ...newNode("tap", { x: 0, y: 0 }), id: "shovel", key: "MouseRight" },
+  ];
+  assert.deepEqual(
+    problems(nodes).map((p) => `${p.id} ${p.text}`),
+    [
+      "shovel RMB only works with an Aim control: add one, or use a keyboard key",
+    ]
+  );
+  assert.deepEqual(problems([...nodes, newNode("aim", { x: 0, y: 0 })]), []);
+});
+
 test("the profile has unique slots, the screenshot's size, and keeps foreign controls", () => {
   const foreign = { id: "combo", type: "macro", key: "Q", steps: [] };
   const nodes = [
