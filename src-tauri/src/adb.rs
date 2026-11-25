@@ -17,6 +17,7 @@
 //! ADB operations are serialized: resuming and re-freezing a container around
 //! two concurrent shells would let one of them freeze the other mid-command.
 
+use std::collections::HashMap;
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -432,6 +433,45 @@ pub fn parse_settings_values(output: &str) -> SettingsValues {
         props,
         density: parse_wm_density(output),
     }
+}
+
+/// How often each app was opened, as Android counts it for `UsageStatsManager`,
+/// so apps opened from Waydroid's own launcher count too. Only apps opened at
+/// least once are listed. Passive: a frozen container answers "not now".
+pub fn app_launch_counts() -> Result<HashMap<String, u32>> {
+    // The full dump is ~300 KB; keep only the section headers and used apps.
+    let line = "dumpsys usagestats | grep -E '^  In-memory|appLaunchCount=[1-9]'";
+    Ok(parse_launch_counts(&shell(&[line])?))
+}
+
+/// Launch counts from the yearly interval of `dumpsys usagestats`, the longest
+/// one Android keeps, for the first (Waydroid's only) user.
+pub fn parse_launch_counts(output: &str) -> HashMap<String, u32> {
+    let mut counts = HashMap::new();
+    let mut yearly = false;
+    for line in output.lines() {
+        if line.trim_start().starts_with("In-memory ") {
+            if yearly {
+                break;
+            }
+            yearly = line.contains("yearly");
+            continue;
+        }
+        if !yearly {
+            continue;
+        }
+        let field = |name: &str| {
+            line.split_whitespace()
+                .find_map(|word| word.strip_prefix(name))
+        };
+        if let (Some(package), Some(Ok(count))) = (
+            field("package="),
+            field("appLaunchCount=").map(str::parse::<u32>),
+        ) {
+            counts.insert(package.to_string(), count);
+        }
+    }
+    counts
 }
 
 /// Android's screen timeout (`screen_off_timeout`, ms), or `None` when the
@@ -997,6 +1037,22 @@ mod tests {
         assert!(!is_valid_package("org.fdroid.fdroid; rm -rf /"));
         assert!(!is_valid_package("com.foo bar"));
         assert!(!is_valid_package("com.foo\nam start"));
+    }
+
+    #[test]
+    fn launch_counts_come_from_the_yearly_stats_of_the_first_user() {
+        let output = "  In-memory daily stats\n\
+      package=com.android.calculator2 totalTimeUsed=\"00:06\" appLaunchCount=1\n\
+  In-memory yearly stats\n\
+      package=com.android.calculator2 totalTimeUsed=\"00:06\" lastTimeUsed=\"2026-11-15 14:44:19\" appLaunchCount=3\n\
+      package=org.fdroid.fdroid totalTimeUsed=\"01:10\" appLaunchCount=12\n\
+  In-memory daily stats\n\
+      package=org.fdroid.fdroid totalTimeUsed=\"00:01\" appLaunchCount=99\n";
+        let counts = parse_launch_counts(output);
+        assert_eq!(counts.len(), 2);
+        assert_eq!(counts["com.android.calculator2"], 3);
+        assert_eq!(counts["org.fdroid.fdroid"], 12);
+        assert!(parse_launch_counts("").is_empty());
     }
 
     #[test]
