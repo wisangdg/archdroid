@@ -113,8 +113,50 @@ describe("Control Center: My Apps", () => {
     const first = screen.getByRole("button", { name: /^Plants vs Zombies 2,/ });
     fireEvent.keyDown(first, { key: "ArrowDown" });
     expect(
-      screen.getByRole("heading", { level: 2, name: "Settings" })
+      screen.getByRole("heading", { level: 2, name: "Clock" })
     ).toBeTruthy();
+  });
+
+  it("lists user apps first, each group most used first, then A to Z", () => {
+    const apps = [
+      { name: "Settings", package: "com.android.settings", icon: null },
+      { name: "zArchiver", package: "ru.zdevs.zarchiver", icon: null },
+      { name: "Calculator", package: "com.android.calculator2", icon: null },
+      { name: "aurora Store", package: "com.aurora.store", icon: null },
+      { name: "Clock", package: "com.android.deskclock", icon: null },
+      {
+        name: "Plants vs Zombies 2",
+        package: "com.ea.game.pvz2_row",
+        icon: null,
+      },
+      { name: "F-Droid", package: "org.fdroid.fdroid", icon: null },
+    ];
+    const usage = {
+      "org.fdroid.fdroid": 3,
+      "com.ea.game.pvz2_row": 12,
+      "com.android.deskclock": 2,
+    };
+    renderView({ apps, usage });
+    const order = () =>
+      [...document.querySelectorAll(".app-row")].map(
+        (row) => row.dataset.package
+      );
+    expect(order()).toEqual([
+      "com.ea.game.pvz2_row",
+      "org.fdroid.fdroid",
+      "com.aurora.store",
+      "ru.zdevs.zarchiver",
+      "com.android.deskclock",
+      "com.android.calculator2",
+      "com.android.settings",
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: /^System/ }));
+    expect(order()).toEqual([
+      "com.android.deskclock",
+      "com.android.calculator2",
+      "com.android.settings",
+    ]);
   });
 
   it("explains an empty library", () => {

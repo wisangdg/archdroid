@@ -21,6 +21,21 @@ export const INITIAL_VIEW_STATE = {
   selectedPackage: null,
 };
 
+/**
+ * List order: user apps above system apps, each group by how often the app
+ * was opened (`usage`, from Android), apps never opened alphabetically.
+ */
+export function sortApps(apps, usage = {}) {
+  const rank = (app) => (isSystemApp(app.package) ? 1 : 0);
+  return [...apps].sort(
+    (a, b) =>
+      rank(a) - rank(b) ||
+      (usage[b.package] ?? 0) - (usage[a.package] ?? 0) ||
+      a.name.localeCompare(b.name, undefined, { sensitivity: "base" }) ||
+      a.package.localeCompare(b.package)
+  );
+}
+
 const FILTERS = [
   { id: "all", label: "All" },
   { id: "user", label: "User" },
@@ -33,6 +48,7 @@ const FILTERS = [
  */
 export default function MyAppsView({
   apps,
+  usage,
   engineOnline = false,
   booting = false,
   onLaunchApp,
@@ -85,8 +101,10 @@ export default function MyAppsView({
     return { all: apps.length, user: apps.length - system, system };
   }, [apps]);
 
+  const sortedApps = useMemo(() => sortApps(apps, usage), [apps, usage]);
+
   const filteredApps = useMemo(() => {
-    let list = apps;
+    let list = sortedApps;
     if (categoryFilter === "user") {
       list = list.filter((app) => !isSystemApp(app.package));
     } else if (categoryFilter === "system") {
@@ -99,7 +117,7 @@ export default function MyAppsView({
         app.name.toLowerCase().includes(query) ||
         app.package.toLowerCase().includes(query)
     );
-  }, [apps, categoryFilter, searchQuery]);
+  }, [sortedApps, categoryFilter, searchQuery]);
 
   // The selection follows the visible list: if the selected app is filtered
   // out or uninstalled, the first visible app is shown instead.

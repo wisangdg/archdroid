@@ -12,6 +12,7 @@ use tauri::AppHandle;
 mod adb;
 mod adblock;
 mod apk;
+mod assistant;
 mod awake;
 mod bundle;
 mod capabilities;
@@ -1428,6 +1429,28 @@ async fn keep_awake_set(enabled: bool) -> CommandResult {
     .await
 }
 
+/// Applies the stored "Super key does not open Google Assistant" choice once
+/// Android has booted and answers with it (`data` is `"true"` or `"false"`).
+/// Not `run_exclusive`: a busy slot would skip it for the session; it waits
+/// for `super_key_set` inside `assistant` instead.
+#[tauri::command]
+async fn super_key_sync() -> CommandResult {
+    off_main_thread(|| match assistant::sync() {
+        Ok(blocked) => CommandResult::with_data(blocked.to_string()),
+        Err(error) => error.into(),
+    })
+    .await
+}
+
+#[tauri::command]
+async fn super_key_set(blocked: bool) -> CommandResult {
+    run_exclusive("assistant key", move |_| match assistant::set(blocked) {
+        Ok(blocked) => CommandResult::with_data(blocked.to_string()),
+        Err(error) => error.into(),
+    })
+    .await
+}
+
 /// `"booted"` or `"booting"` while the session runs; polled by the UI after
 /// Start until Android reports `sys.boot_completed`.
 #[tauri::command]
@@ -1457,6 +1480,39 @@ async fn settings_values() -> std::result::Result<adb::SettingsValues, CommandRe
         .await
         .map_err(|e| CommandResult::from(AppError::Io(std::io::Error::other(e.to_string()))))?
         .map_err(CommandResult::from)
+}
+
+/// How often each app was opened, for the order of the app list. `live` (Android
+/// has booted) asks Android; otherwise, or when it does not answer (frozen),
+/// the last live answer is read from the user cache, so the order stays put
+/// while the engine is stopped.
+#[tauri::command]
+async fn app_usage(live: bool) -> HashMap<String, u32> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = markers::marker_file("app_usage.json");
+        let answer = if live {
+            adb::app_launch_counts()
+        } else {
+            Err(AppError::session_not_running("not asked"))
+        };
+        match answer {
+            Ok(counts) => {
+                if let Some(dir) = path.parent() {
+                    let _ = std::fs::create_dir_all(dir);
+                }
+                if let Ok(json) = serde_json::to_vec(&counts) {
+                    let _ = std::fs::write(&path, json);
+                }
+                counts
+            }
+            Err(_) => std::fs::read_to_string(&path)
+                .ok()
+                .and_then(|text| serde_json::from_str(&text).ok())
+                .unwrap_or_default(),
+        }
+    })
+    .await
+    .unwrap_or_default()
 }
 
 /// Force-stop one Android app (the app detail's "Force stop"). Needs adb,
@@ -1745,6 +1801,8 @@ pub fn run() {
             waydroid_density_set,
             keep_awake_sync,
             keep_awake_set,
+            super_key_sync,
+            super_key_set,
             #[cfg(feature = "dev-commands")]
             waydroid_getprop_all,
             #[cfg(feature = "dev-commands")]
@@ -1780,6 +1838,7 @@ pub fn run() {
             phantom::phantom_status,
             app_info,
             settings_values,
+            app_usage,
             keymap_screenshot,
             keymap_load,
             keymap_save,
