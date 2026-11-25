@@ -22,7 +22,7 @@ use std::sync::{Mutex, PoisonError};
 use serde::{Deserialize, Serialize};
 
 use crate::adb::GlobalWrite;
-use crate::awake::{load, preference_path, save};
+use crate::awake::{config_file, load, save};
 use crate::error::Result;
 
 pub const MODE: &str = "private_dns_mode";
@@ -189,7 +189,7 @@ fn change(
     choose: impl FnOnce(Preference) -> Preference,
 ) -> Result<State> {
     let _change = CHANGE.lock().unwrap_or_else(PoisonError::into_inner);
-    let path = preference_path(FILE);
+    let path = config_file(FILE);
     let stored: Preference = load(&path);
     let (state, next) = apply(android, choose(stored.clone()), &mut |preference| {
         Ok(save(&path, preference)?)

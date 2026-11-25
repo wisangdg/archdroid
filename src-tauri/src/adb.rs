@@ -17,6 +17,7 @@
 //! ADB operations are serialized: resuming and re-freezing a container around
 //! two concurrent shells would let one of them freeze the other mid-command.
 
+use std::collections::HashMap;
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -186,7 +187,17 @@ pub fn uninstall_app(package: &str, cancel: Option<&AtomicBool>) -> Result<Strin
     with_device(true, |adb, serial| {
         let before = launcher_entries();
         let argv = adb_uninstall_args(serial, package);
-        let output = waydroid::run_program(adb, &argv, TIMEOUT_LONG, cancel)?;
+        let output = match waydroid::run_program(adb, &argv, TIMEOUT_LONG, cancel) {
+            // Preinstalled apps live on /system, which `adb uninstall` cannot
+            // touch. Removing them for user 0 hides them like an uninstall;
+            // `cmd package install-existing <package>` or a reset brings them back.
+            Err(error) if is_system_app_refusal(&error) => {
+                log::info!("{package} is a system app; removing it for user 0");
+                let argv = adb_user_uninstall_args(serial, package)?;
+                waydroid::run_program(adb, &argv, TIMEOUT_LONG, cancel)?
+            }
+            result => result?,
+        };
         wait_for_launcher_change(&before, cancel);
         Ok(output)
     })
@@ -274,6 +285,45 @@ fn adb_uninstall_args(serial: &str, package: &str) -> Vec<String> {
         "uninstall".to_string(),
         package.to_string(),
     ]
+}
+
+/// Android itself: removed for user 0, these leave it without its screen, home
+/// screen, Settings, web pages in apps, or app installs. AOSP and LineageOS
+/// names (Trebuchet is `com.android.launcher3`), plus Google's variants in
+/// GApps images.
+const CORE_PACKAGES: &[&str] = &[
+    "android",
+    "com.android.systemui",
+    "com.android.launcher3",
+    "com.android.settings",
+    "com.android.webview",
+    "com.google.android.webview",
+    "com.android.packageinstaller",
+    "com.google.android.packageinstaller",
+];
+
+fn adb_user_uninstall_args(serial: &str, package: &str) -> Result<Vec<String>> {
+    if CORE_PACKAGES.contains(&package) {
+        return Err(AppError::invalid_input(format!(
+            "{package} is part of Android itself; ArchDroid does not remove it, since Android needs it to work."
+        )));
+    }
+    Ok([
+        "-s",
+        serial,
+        "shell",
+        "pm",
+        "uninstall",
+        "--user",
+        "0",
+        package,
+    ]
+    .map(str::to_string)
+    .to_vec())
+}
+
+fn is_system_app_refusal(error: &AppError) -> bool {
+    error.to_string().contains("DELETE_FAILED_INTERNAL_ERROR")
 }
 
 fn shell_mode(args: &[&str], allow_unfreeze: bool) -> Result<String> {
@@ -433,6 +483,45 @@ pub fn parse_settings_values(output: &str) -> SettingsValues {
         props,
         density: parse_wm_density(output),
     }
+}
+
+/// How often each app was opened, as Android counts it for `UsageStatsManager`,
+/// so apps opened from Waydroid's own launcher count too. Only apps opened at
+/// least once are listed. Passive: a frozen container answers "not now".
+pub fn app_launch_counts() -> Result<HashMap<String, u32>> {
+    // The full dump is ~300 KB; keep only the section headers and used apps.
+    let line = "dumpsys usagestats | grep -E '^  In-memory|appLaunchCount=[1-9]'";
+    Ok(parse_launch_counts(&shell(&[line])?))
+}
+
+/// Launch counts from the yearly interval of `dumpsys usagestats`, the longest
+/// one Android keeps, for the first (Waydroid's only) user.
+pub fn parse_launch_counts(output: &str) -> HashMap<String, u32> {
+    let mut counts = HashMap::new();
+    let mut yearly = false;
+    for line in output.lines() {
+        if line.trim_start().starts_with("In-memory ") {
+            if yearly {
+                break;
+            }
+            yearly = line.contains("yearly");
+            continue;
+        }
+        if !yearly {
+            continue;
+        }
+        let field = |name: &str| {
+            line.split_whitespace()
+                .find_map(|word| word.strip_prefix(name))
+        };
+        if let (Some(package), Some(Ok(count))) = (
+            field("package="),
+            field("appLaunchCount=").map(str::parse::<u32>),
+        ) {
+            counts.insert(package.to_string(), count);
+        }
+    }
+    counts
 }
 
 /// Android's screen timeout (`screen_off_timeout`, ms), or `None` when the
@@ -1092,6 +1181,22 @@ mod tests {
     }
 
     #[test]
+    fn launch_counts_come_from_the_yearly_stats_of_the_first_user() {
+        let output = "  In-memory daily stats\n\
+      package=com.android.calculator2 totalTimeUsed=\"00:06\" appLaunchCount=1\n\
+  In-memory yearly stats\n\
+      package=com.android.calculator2 totalTimeUsed=\"00:06\" lastTimeUsed=\"2026-11-15 14:44:19\" appLaunchCount=3\n\
+      package=org.fdroid.fdroid totalTimeUsed=\"01:10\" appLaunchCount=12\n\
+  In-memory daily stats\n\
+      package=org.fdroid.fdroid totalTimeUsed=\"00:01\" appLaunchCount=99\n";
+        let counts = parse_launch_counts(output);
+        assert_eq!(counts.len(), 2);
+        assert_eq!(counts["com.android.calculator2"], 3);
+        assert_eq!(counts["org.fdroid.fdroid"], 12);
+        assert!(parse_launch_counts("").is_empty());
+    }
+
+    #[test]
     fn install_and_uninstall_target_the_waydroid_serial() {
         assert_eq!(
             adb_install_args("192.168.240.112:5555", "/tmp/app.apk"),
@@ -1112,6 +1217,60 @@ mod tests {
                 "org.fdroid.fdroid"
             ]
         );
+        assert_eq!(
+            adb_user_uninstall_args("192.168.240.112:5555", "com.android.deskclock").unwrap(),
+            vec![
+                "-s",
+                "192.168.240.112:5555",
+                "shell",
+                "pm",
+                "uninstall",
+                "--user",
+                "0",
+                "com.android.deskclock"
+            ]
+        );
+    }
+
+    /// Live: `ARCHDROID_UNINSTALL_PKG=<package> cargo test live_uninstall -- --ignored`
+    /// with a running Waydroid session. Uninstalls the package for real; a
+    /// system app comes back with `adb shell cmd package install-existing`.
+    #[test]
+    #[ignore]
+    fn live_uninstall() {
+        let package = std::env::var("ARCHDROID_UNINSTALL_PKG").expect("ARCHDROID_UNINSTALL_PKG");
+        uninstall_app(&package, None).expect("uninstall");
+    }
+
+    #[test]
+    fn only_a_system_app_refusal_falls_back_to_a_user_uninstall() {
+        let refusal = AppError::Exit {
+            program: "/usr/bin/adb".to_string(),
+            code: Some(1),
+            output: "Failure [DELETE_FAILED_INTERNAL_ERROR]".to_string(),
+        };
+        assert!(is_system_app_refusal(&refusal));
+        let other = AppError::command_failed("Failure [DELETE_FAILED_DEVICE_POLICY_MANAGER]");
+        assert!(!is_system_app_refusal(&other));
+    }
+
+    #[test]
+    fn core_packages_are_never_removed_for_the_user() {
+        for package in [
+            "android",
+            "com.android.systemui",
+            "com.android.launcher3",
+            "com.android.settings",
+            "com.android.webview",
+            "com.google.android.webview",
+            "com.android.packageinstaller",
+            "com.google.android.packageinstaller",
+        ] {
+            let error =
+                adb_user_uninstall_args("192.168.240.112:5555", package).expect_err(package);
+            assert_eq!(error.code(), crate::error::code::INVALID_INPUT, "{package}");
+            assert!(error.to_string().contains(package), "{error}");
+        }
     }
 
     #[test]

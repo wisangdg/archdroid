@@ -4,7 +4,10 @@ import { PackagePlus } from "lucide-react";
 
 import TopBar from "./components/TopBar";
 import PageHeading from "./components/PageHeading";
-import MyAppsView, { INITIAL_VIEW_STATE } from "./components/apps/MyAppsView";
+import MyAppsView, {
+  INITIAL_VIEW_STATE,
+  isSystemApp,
+} from "./components/apps/MyAppsView";
 import InstallToolsView from "./components/tools/InstallToolsView";
 import KeymapView from "./components/keymap/KeymapView";
 import SettingsView from "./components/settings/SettingsView";
@@ -28,10 +31,17 @@ const APP_FIELDS = ["id", "name", "package", "icon"];
 const sameApps = (a, b) =>
   a.length === b.length &&
   a.every((app, i) => APP_FIELDS.every((key) => app[key] === b[i][key]));
+const sameUsage = (a, b) =>
+  Object.keys(a).length === Object.keys(b).length &&
+  Object.keys(a).every((pkg) => a[pkg] === b[pkg]);
+// `dumpsys usagestats` is cheap but not free: re-read it at most this often
+// when the window regains focus (coming back from a game, say).
+const USAGE_REFRESH_MS = 30000;
 
 export default function App() {
   const [activeTab, setActiveTab] = useState("home");
   const [apps, setApps] = useState([]);
+  const [appUsage, setAppUsage] = useState({});
   // Search, filter and selection of My Apps; kept here so they survive a
   // visit to another tab.
   const [appsView, setAppsView] = useState(INITIAL_VIEW_STATE);
@@ -57,6 +67,8 @@ export default function App() {
     invertColors,
     keepAwake,
     toggleKeepAwake,
+    superKeyBlocked,
+    toggleSuperKey,
     displayRes,
     loadConfigs,
     toggleMultiWindow,
@@ -221,6 +233,30 @@ export default function App() {
       window.removeEventListener("focus", poll);
     };
   }, [status, loadApps]);
+
+  // How often each app was opened orders the list. The backend answers from
+  // Android once it has booted, and from its last answer before that.
+  const loadUsage = useCallback(async (live) => {
+    try {
+      const next = (await invoke("app_usage", { live })) || {};
+      setAppUsage((prev) => (sameUsage(prev, next) ? prev : next));
+    } catch (e) {
+      console.error("Failed to load app usage:", e);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadUsage(androidReady);
+    if (!androidReady) return undefined;
+    let lastRun = Date.now();
+    const onFocus = () => {
+      if (Date.now() - lastRun < USAGE_REFRESH_MS) return;
+      lastRun = Date.now();
+      loadUsage(true);
+    };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [androidReady, loadUsage]);
 
   const {
     isDraggingOver,
@@ -412,7 +448,11 @@ export default function App() {
     setConfirmModal({
       isOpen: true,
       title: `Uninstall ${name}?`,
-      description: `Are you sure you want to uninstall ${name} (${pkg})? All application data, cache, and save files will be permanently removed from Waydroid.`,
+      // A preinstalled app stays in Android's read-only system image: the
+      // backend removes it for user 0 only (src-tauri/src/adb.rs).
+      description: isSystemApp(pkg)
+        ? `Are you sure you want to uninstall ${name} (${pkg})? Its data, cache, and save files will be deleted. An app that came with Android stays in its system image and is only removed for the Android user; Factory Reset or "adb shell cmd package install-existing ${pkg}" brings it back.`
+        : `Are you sure you want to uninstall ${name} (${pkg})? All application data, cache, and save files will be permanently removed from Waydroid.`,
       confirmText: "Uninstall App",
       confirmVariant: "danger",
       iconType: "trash",
@@ -647,6 +687,7 @@ export default function App() {
               {activeTab === "home" && (
                 <MyAppsView
                   apps={apps}
+                  usage={appUsage}
                   engineOnline={status === "online"}
                   booting={booting}
                   onLaunchApp={handleLaunchApp}
@@ -703,6 +744,8 @@ export default function App() {
                   onToggleInvertColors={toggleInvertColors}
                   keepAwake={keepAwake}
                   onToggleKeepAwake={toggleKeepAwake}
+                  superKeyBlocked={superKeyBlocked}
+                  onToggleSuperKey={toggleSuperKey}
                   onPropSet={handlePropSet}
                   onOpenSharedFolder={handleOpenSharedFolder}
                   onViewLogs={handleViewLogs}
