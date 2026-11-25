@@ -22,6 +22,7 @@ import { useTouchMode } from "./hooks/useTouchMode";
 import { useEngineStatus } from "./hooks/useEngineStatus";
 import { useDeviceConfig } from "./hooks/useDeviceConfig";
 import { useApkInstall } from "./hooks/useApkInstall";
+import { useAdguardDns } from "./hooks/useAdguardDns";
 import { TASKS } from "./lib/tasks";
 import { pollDue } from "./lib/pollGate";
 
@@ -83,6 +84,7 @@ export default function App() {
   useEffect(() => {
     if (androidReady) loadConfigs();
   }, [androidReady, loadConfigs]);
+  const adguardDns = useAdguardDns({ androidReady, addToast });
 
   const {
     installing,
@@ -729,6 +731,7 @@ export default function App() {
                   onInstallMultitouch={handleInstallMultitouch}
                   adblockStatus={adblockStatus}
                   onToggleAdblock={handleToggleAdblock}
+                  adguardDns={adguardDns}
                   engineRunning={androidReady}
                   onRestartEngine={handleRestart}
                 />

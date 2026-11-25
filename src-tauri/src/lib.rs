@@ -29,6 +29,7 @@ mod phantom;
 mod phantom_daemon;
 mod platform;
 mod preflight;
+mod privatedns;
 mod scripts;
 mod stream;
 mod touchmode;
@@ -1429,6 +1430,33 @@ async fn keep_awake_set(enabled: bool) -> CommandResult {
     .await
 }
 
+/// `data` is `"on"`, `"off"` or `"foreign"`; `message` says which server a
+/// foreign Private DNS is.
+fn private_dns_result(result: error::Result<privatedns::State>) -> CommandResult {
+    match result {
+        Ok(state) => CommandResult {
+            message: state.message(),
+            ..CommandResult::with_data(state.name().to_string())
+        },
+        Err(error) => error.into(),
+    }
+}
+
+/// Applies the stored AdGuard DNS choice once Android has booted and answers
+/// with Android's Private DNS.
+#[tauri::command]
+async fn private_dns_sync() -> CommandResult {
+    off_main_thread(|| private_dns_result(privatedns::sync())).await
+}
+
+#[tauri::command]
+async fn private_dns_set(enabled: bool) -> CommandResult {
+    run_exclusive("AdGuard DNS", move |_| {
+        private_dns_result(privatedns::set(enabled))
+    })
+    .await
+}
+
 /// Applies the stored "Super key does not open Google Assistant" choice once
 /// Android has booted and answers with it (`data` is `"true"` or `"false"`).
 /// Not `run_exclusive`: a busy slot would skip it for the session; it waits
@@ -1801,6 +1829,8 @@ pub fn run() {
             waydroid_density_set,
             keep_awake_sync,
             keep_awake_set,
+            private_dns_sync,
+            private_dns_set,
             super_key_sync,
             super_key_set,
             #[cfg(feature = "dev-commands")]

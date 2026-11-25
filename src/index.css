@@ -3372,6 +3372,12 @@ body {
   }
 }
 
+/* AdGuard DNS switch (Block Ads card) */
+.toggle-info .dns-note {
+  margin-top: 8px;
+  color: var(--text-muted);
+}
+
 /* Touch mode panel (Keymapping view) */
 .touch-mode-panel {
   padding: 6px;

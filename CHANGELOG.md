@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 ## [Unreleased]
 
 ### Added
+- **AdGuard DNS in Block Ads** (Install Tools), for ads the built-in list misses: a second switch, **Also block with AdGuard DNS**, sets Android's Private DNS to `dns.adguard-dns.com` over adb, without root and without a Waydroid restart. **While it is on, every DNS query Android makes goes to AdGuard** instead of your network's DNS (see [PRIVACY.md](PRIVACY.md)). It is off by default and separate from the hosts-file switch, which still leaves DNS where it was. Turning it off puts back the Private DNS values Android had, and deletes them again if they were never set. The choice is kept in `~/.config/io.github.archdroid/private-dns.json` and applied once Android has booted, so a fresh Android after Factory Reset gets it too. A Private DNS server ArchDroid did not set is never replaced or deleted; the card names it instead.
 - **Super Key Skips Google Assistant** (Settings → Android Display Options, on by default). Waydroid passes the desktop's Super key to Android as Meta, and Android opened Google Assistant (Gemini) whenever it was pressed alone, which paused the game and could leave it washed out until it was restarted. Android now has no default assistant, as with Default apps → Digital assistant → None; turning the option off brings back the assistant it had. The choice is kept in `~/.config/io.github.archdroid/super-key.json` and applied again after each boot, so it survives Factory Reset.
 
 ### Fixed

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import {
+  cleanup,
   render,
   screen,
   fireEvent,
@@ -352,5 +353,69 @@ describe("InstallToolsView ad blocking", () => {
     const { card } = view("installed", { engineRunning: true });
     expect(within(card).getByText("On")).toBeTruthy();
     expect(within(card).queryByRole("button", { name: /Restart/ })).toBeNull();
+  });
+});
+
+describe("InstallToolsView AdGuard DNS", () => {
+  const view = (dns, engineRunning = true) => {
+    const adguardDns = { message: null, setEnabled: vi.fn(), ...dns };
+    render(
+      <InstallToolsView
+        adblockStatus="installed"
+        installing={false}
+        adguardDns={adguardDns}
+        engineRunning={engineRunning}
+      />
+    );
+    const row = screen.getByTestId("adguard-dns");
+    return {
+      adguardDns,
+      row,
+      toggle: within(row).getByRole("switch", {
+        name: "Also block with AdGuard DNS",
+      }),
+    };
+  };
+
+  it("waits for Android to boot and says where DNS queries go", () => {
+    const { row, toggle } = view({ state: "unknown" }, false);
+    expect(toggle.disabled).toBe(true);
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    expect(
+      within(row).getByText("Available once Android has booted.")
+    ).toBeTruthy();
+    expect(row.textContent).toMatch(
+      /every DNS query Android makes .* goes to AdGuard at dns\.adguard-dns\.com/
+    );
+  });
+
+  it("shows the state and switches it from the Block Ads card", () => {
+    const off = view({ state: "off" });
+    expect(off.row.dataset.dnsState).toBe("off");
+    expect(off.toggle.getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(off.toggle);
+    expect(off.adguardDns.setEnabled).toHaveBeenCalledWith(true);
+    cleanup();
+
+    const on = view({ state: "on" });
+    expect(on.row.dataset.dnsState).toBe("on");
+    expect(on.toggle.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(on.toggle);
+    expect(on.adguardDns.setEnabled).toHaveBeenCalledWith(false);
+  });
+
+  it("reports a Private DNS ArchDroid did not set and leaves it alone", () => {
+    const message =
+      "Android already uses Private DNS dns.nextdns.io, which ArchDroid did not set, so ArchDroid leaves it alone.";
+    const { row, toggle, adguardDns } = view({ state: "foreign", message });
+    expect(within(row).getByRole("status").textContent).toBe(message);
+    expect(toggle.disabled).toBe(true);
+    fireEvent.click(toggle);
+    expect(adguardDns.setEnabled).not.toHaveBeenCalled();
+  });
+
+  it("is disabled while the change runs", () => {
+    const { toggle } = view({ state: "off", changing: true });
+    expect(toggle.disabled).toBe(true);
   });
 });
