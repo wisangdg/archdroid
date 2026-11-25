@@ -7,6 +7,8 @@
 | Keep Android Awake on/off, and the screen timeout it replaced | `~/.config/io.github.archdroid/keep-awake.json` |
 | Touch mode udev rule | `/usr/lib/udev/rules.d/70-archdroid-touch.rules` (packages, removed with the package) or `/etc/udev/rules.d/70-archdroid-touch.rules` (Enable access button) |
 | Install markers (`gapps_installed`, `houdini_installed`, `multitouch_installed`) and installer cache | `~/.cache/archdroid/` (`$XDG_CACHE_HOME`) |
+| Phantom daemon started by Save & Apply: its log, and a marker while it may run | `~/.cache/archdroid/phantom-daemon.log`, `~/.cache/archdroid/phantom-daemon.started` |
+| Root's copy of Phantom that Save & Apply starts as the daemon (owned by root, replaced on every start) | `/usr/local/lib/archdroid/phantom` |
 | Application log (Settings → Application Log shows the exact path) | Tauri app log dir, e.g. `~/.local/share/io.github.wisangdg.archdroid/logs/` |
 | Waydroid image, data and config | `/var/lib/waydroid`, `~/.local/share/waydroid` |
 | Desktop entries for Android apps | `~/.local/share/applications/waydroid.*.desktop` |
@@ -28,6 +30,7 @@ Markers are only a shortcut for when the container is offline:
 2. Remove the package: `pacman -R archdroid-bin` (Arch), `apt remove arch-droid` (Debian/Ubuntu), `dnf remove arch-droid` (Fedora). The `.deb`/`.rpm` package name is `arch-droid`, derived from the product name.
 3. Delete user data: `rm -rf ~/.config/io.github.archdroid ~/.cache/archdroid ~/.local/share/io.github.wisangdg.archdroid`.
 4. If you used **Enable access**: `sudo rm /etc/udev/rules.d/70-archdroid-touch.rules && sudo udevadm control --reload-rules`.
+   If Save & Apply ever started Phantom's daemon: `sudo rm -r /usr/local/lib/archdroid`.
 5. Optional, removes all Android data: `sudo rm -rf /var/lib/waydroid ~/.local/share/waydroid`.
 
 Back up files from Android shared storage before step 1 or 5.

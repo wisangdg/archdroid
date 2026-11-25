@@ -1703,6 +1703,7 @@ pub fn run() {
             // Off the main thread: restoring grabs input devices and must not
             // delay the first window.
             thread::spawn(touchmode::restore);
+            thread::spawn(phantom::release_stale_daemon);
             Ok(())
         })
         .plugin(tauri_plugin_dialog::init())

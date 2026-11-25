@@ -10,24 +10,59 @@
 //! takes a value from this process's environment as is: the IDs and paths come
 //! from the kernel and passwd, the display names only when they are plain
 //! names.
+//!
+//! Nor does root run a file the user can write. Phantom installs into
+//! `~/.local/bin`, so root first copies it into a directory only root can
+//! write (`DAEMON_COPY`), checks the copy's SHA-256 against the one the user
+//! approved in the Keymapping editor, and runs that copy. A program swapped in
+//! after the approval is never started.
 
 use std::fs::File;
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::elevate::{elevated_command, sh_quote, SAFE_PATH};
+use crate::elevate::{elevated_command, sh_quote, trusted_program, SAFE_PATH};
 use crate::error::{AppError, Result};
 
-/// Whether the running daemon is one this ArchDroid started. While it runs,
+/// Present while a daemon that ArchDroid started may still run. While it runs,
 /// Phantom grabs every physical keyboard (for its F1/F2/F8 hotkeys) and relays
 /// typing through a virtual one, which can repeat keys on the desktop; so it
-/// should not outlive the game session.
-static STARTED_HERE: AtomicBool = AtomicBool::new(false);
+/// should not outlive the game session. A file, not a flag in memory, so a
+/// daemon left behind when ArchDroid crashed or was killed is still known at
+/// the next start (`release_stale`).
+fn started_marker() -> PathBuf {
+    crate::markers::marker_file("phantom-daemon.started")
+}
+
+fn started_here() -> bool {
+    started_marker().exists()
+}
+
+fn mark_started(started: bool) {
+    let marker = started_marker();
+    let result = if started {
+        crate::markers::write_marker(&marker)
+    } else {
+        match std::fs::remove_file(&marker) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            other => other,
+        }
+    };
+    if let Err(error) = result {
+        log::warn!("could not update {}: {error}", marker.display());
+    }
+}
+
+/// Where root keeps the copy of Phantom it starts as the daemon. Only root can
+/// write there, so the program cannot change between the check and the start.
+pub(crate) const DAEMON_COPY: &str = "/usr/local/lib/archdroid/phantom";
+
+/// The root script's exit code when the copy is not the approved program.
+const COPY_MISMATCH: i32 = 65;
 
 /// Time for the password prompt plus the daemon's start-up.
 const START_TIMEOUT: Duration = Duration::from_secs(120);
@@ -104,8 +139,65 @@ fn passwd_name(passwd: &str, uid: u32) -> Option<String> {
     })
 }
 
-/// The root shell line: `exec` the daemon with only the session variables.
-pub(crate) fn daemon_body(phantom: &Path, session: &Session) -> String {
+/// A SHA-256 as `sha256sum` prints it: 64 lowercase hex digits.
+pub(crate) fn is_sha256(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+/// SHA-256 of `path`, read as the user; what the consent dialog shows.
+pub(crate) fn sha256_of(path: &Path) -> Result<String> {
+    let program = trusted_program("sha256sum")
+        .ok_or_else(|| AppError::not_found("sha256sum", "Install coreutils."))?;
+    let output = crate::waydroid::run_program(
+        &program,
+        &[path.to_string_lossy().into_owned()],
+        crate::waydroid::TIMEOUT_QUICK,
+        None,
+    )?;
+    output
+        .split_whitespace()
+        .next()
+        .filter(|hash| is_sha256(hash))
+        .map(str::to_string)
+        .ok_or_else(|| {
+            AppError::command_failed(format!("sha256sum gave no hash for {}", path.display()))
+        })
+}
+
+/// The root script: copy `phantom` to `copy`, check the copy against
+/// `sha256`, then `exec` the copy as the daemon with only the session
+/// variables. Run as root, `install` and `mktemp` leave the directory and the
+/// copy owned by root.
+pub(crate) fn daemon_body(phantom: &Path, sha256: &str, copy: &Path, session: &Session) -> String {
+    let quote = |path: &Path| sh_quote(&path.to_string_lossy());
+    let dir = copy.parent().unwrap_or(Path::new("/"));
+    format!(
+        r#"set -eu
+install -d -m 755 {dir}
+tmp="$(mktemp {dir}/.phantom.XXXXXX)"
+trap 'rm -f "$tmp"' EXIT
+cat -- {phantom} > "$tmp"
+if [ "$(sha256sum "$tmp" | cut -d ' ' -f 1)" != {sha256} ]; then
+    echo "Phantom changed after it was approved, so it was not started." >&2
+    exit {COPY_MISMATCH}
+fi
+chmod 755 "$tmp"
+mv -f "$tmp" {copy}
+trap - EXIT
+exec env -i {vars} {copy} --daemon"#,
+        dir = quote(dir),
+        phantom = quote(phantom),
+        sha256 = sh_quote(sha256),
+        copy = quote(copy),
+        vars = session_env(session).join(" "),
+    )
+}
+
+/// `NAME=value` for each session variable the daemon needs.
+fn session_env(session: &Session) -> Vec<String> {
     let runtime_dir = session.runtime_dir();
     let mut vars = vec![
         format!("PATH={}", sh_quote(SAFE_PATH)),
@@ -135,11 +227,7 @@ pub(crate) fn daemon_body(phantom: &Path, session: &Session) -> String {
             vars.push(format!("{key}={}", sh_quote(value)));
         }
     }
-    format!(
-        "exec env -i {} {} --daemon",
-        vars.join(" "),
-        sh_quote(&phantom.to_string_lossy())
-    )
+    vars
 }
 
 /// True once the daemon accepts connections on its socket.
@@ -147,9 +235,16 @@ fn answers(socket: &Path) -> bool {
     UnixStream::connect(socket).is_ok()
 }
 
-/// Start the daemon as root and wait until it listens. The daemon keeps running
-/// after ArchDroid closes, like one started from a terminal; F2 stops it.
-pub(crate) fn start(phantom: &Path) -> Result<()> {
+/// Start the daemon as root and wait until it listens. `sha256` is the hash of
+/// `phantom` that the user approved; root runs its own copy only if it has that
+/// hash. ArchDroid stops the daemon when the engine stops or ArchDroid closes;
+/// F2 in the game does too.
+pub(crate) fn start(phantom: &Path, sha256: &str) -> Result<()> {
+    if !is_sha256(sha256) {
+        return Err(AppError::invalid_input(
+            "The approved Phantom SHA-256 is not a SHA-256.",
+        ));
+    }
     let session = Session::current();
     let socket = session.socket();
     if answers(&socket) {
@@ -162,13 +257,16 @@ pub(crate) fn start(phantom: &Path) -> Result<()> {
     }
     let log = File::create(&log_path)?;
 
-    let mut command =
-        elevated_command("pkexec", &daemon_body(phantom, &session)).ok_or_else(|| {
-            AppError::not_found(
-                "pkexec",
-                "Install polkit to start the Phantom daemon from ArchDroid.",
-            )
-        })?;
+    let mut command = elevated_command(
+        "pkexec",
+        &daemon_body(phantom, sha256, Path::new(DAEMON_COPY), &session),
+    )
+    .ok_or_else(|| {
+        AppError::not_found(
+            "pkexec",
+            "Install polkit to start the Phantom daemon from ArchDroid.",
+        )
+    })?;
     command
         .stdin(Stdio::null())
         .stdout(log.try_clone()?)
@@ -190,7 +288,7 @@ pub(crate) fn start(phantom: &Path) -> Result<()> {
     let deadline = Instant::now() + START_TIMEOUT;
     loop {
         if answers(&socket) {
-            STARTED_HERE.store(true, Ordering::SeqCst);
+            mark_started(true);
             // Reap pkexec once the daemon ends, so it never lingers as a zombie.
             thread::spawn(move || {
                 let _ = child.wait();
@@ -203,9 +301,11 @@ pub(crate) fn start(phantom: &Path) -> Result<()> {
                     "The password prompt was closed, so the Phantom daemon was not started."
                         .to_string()
                 }
-                Some(PKEXEC_NOT_AUTHORIZED) => {
-                    "Starting the Phantom daemon was not authorized.".to_string()
-                }
+                Some(PKEXEC_NOT_AUTHORIZED) => format!(
+                    "Starting the Phantom daemon was not authorized, or no polkit agent is running to ask for the password. {}",
+                    log_tail(&log_path)
+                ),
+                Some(COPY_MISMATCH) => "Phantom changed after you approved it, so it was not started. Press Save & Apply again to review it.".to_string(),
                 _ => format!(
                     "The Phantom daemon stopped right after starting ({status}). {}",
                     log_tail(&log_path)
@@ -231,9 +331,50 @@ pub(crate) fn running() -> bool {
 /// Stop the daemon if this ArchDroid started it (ArchDroid is closing). One the
 /// user started elsewhere is left alone.
 pub(crate) fn stop_if_started_here(phantom: &Path) {
-    if STARTED_HERE.load(Ordering::SeqCst) {
+    if started_here() {
         if let Err(error) = stop(phantom) {
             log::warn!("could not stop the Phantom daemon: {error}");
+        }
+    }
+}
+
+/// What to do at start-up about a daemon an earlier ArchDroid started.
+#[derive(Debug, PartialEq)]
+enum Stale {
+    /// Nothing recorded, or Android still runs: that daemon serves the game,
+    /// and this ArchDroid stops it on exit.
+    Keep,
+    /// Recorded, but it is gone: forget it.
+    Forget,
+    /// Recorded, still running, and Android is not: it only holds the keyboard.
+    Stop,
+}
+
+fn stale_action(started_here: bool, running: bool, engine_running: bool) -> Stale {
+    match (started_here, running, engine_running) {
+        (false, _, _) => Stale::Keep,
+        (true, false, _) => Stale::Forget,
+        (true, true, false) => Stale::Stop,
+        (true, true, true) => Stale::Keep,
+    }
+}
+
+/// At start-up: stop a daemon that an earlier ArchDroid started but could not
+/// stop (it crashed or was killed), once Android no longer runs.
+pub(crate) fn release_stale(phantom: Option<&Path>, engine_running: bool) {
+    match stale_action(started_here(), running(), engine_running) {
+        Stale::Keep => {}
+        Stale::Forget => mark_started(false),
+        Stale::Stop => {
+            log::info!("stopping a Phantom daemon left by an earlier ArchDroid");
+            match phantom {
+                Some(phantom) => {
+                    if let Err(error) = stop(phantom) {
+                        log::warn!("could not stop the Phantom daemon: {error}");
+                    }
+                }
+                None => log::warn!("a Phantom daemon runs, but phantom is not installed"),
+            }
         }
     }
 }
@@ -243,7 +384,7 @@ pub(crate) fn stop_if_started_here(phantom: &Path) {
 pub(crate) fn stop(phantom: &Path) -> Result<()> {
     let socket = Session::current().socket();
     if !answers(&socket) {
-        STARTED_HERE.store(false, Ordering::SeqCst);
+        mark_started(false);
         return Ok(());
     }
     crate::waydroid::run_program(
@@ -261,7 +402,7 @@ pub(crate) fn stop(phantom: &Path) -> Result<()> {
         }
         thread::sleep(Duration::from_millis(200));
     }
-    STARTED_HERE.store(false, Ordering::SeqCst);
+    mark_started(false);
     log::info!("Phantom daemon stopped");
     Ok(())
 }
@@ -381,10 +522,18 @@ mod tests {
         }
     }
 
+    const SHA: &str = "81af39d838f4021753ab9aba2c2256ee95461a0ddb37b00432ca381656ea604a";
+
     #[test]
     fn the_daemon_gets_the_session_and_nothing_else() {
-        let body = daemon_body(Path::new("/home/wdg/.local/bin/phantom"), &session());
-        assert!(body.starts_with("exec env -i PATH="));
+        let body = daemon_body(
+            Path::new("/home/wdg/.local/bin/phantom"),
+            SHA,
+            Path::new(DAEMON_COPY),
+            &session(),
+        );
+        let exec = body.lines().last().unwrap();
+        assert!(exec.starts_with("exec env -i PATH="));
         for expected in [
             "SUDO_UID=1000",
             "SUDO_GID=1000",
@@ -395,9 +544,66 @@ mod tests {
             "HYPRLAND_INSTANCE_SIGNATURE='abc_123'",
             "XDG_SESSION_TYPE='wayland'",
         ] {
-            assert!(body.contains(expected), "{expected} missing from {body}");
+            assert!(exec.contains(expected), "{expected} missing from {exec}");
         }
-        assert!(body.ends_with("'/home/wdg/.local/bin/phantom' --daemon"));
+        // Root runs its own copy, never the file in the user's home.
+        assert!(exec.ends_with("'/usr/local/lib/archdroid/phantom' --daemon"));
+        assert!(body.contains("cat -- '/home/wdg/.local/bin/phantom' > \"$tmp\""));
+        assert!(body.contains(&format!("!= '{SHA}'")));
+    }
+
+    /// Runs the root script as the current user against a scratch directory:
+    /// the copy runs only when it has the approved hash.
+    #[test]
+    fn only_a_copy_with_the_approved_hash_is_started() {
+        let dir = std::env::temp_dir().join(format!("archdroid-daemon-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let ran = dir.join("ran");
+        let phantom = dir.join("phantom");
+        std::fs::write(
+            &phantom,
+            format!("#!/bin/sh\necho \"$@\" > '{}'\n", ran.display()),
+        )
+        .unwrap();
+        let copy = dir.join("root/phantom");
+        let run = |sha256: &str| {
+            std::process::Command::new("bash")
+                .args(["--noprofile", "--norc", "-c"])
+                .arg(daemon_body(&phantom, sha256, &copy, &session()))
+                .status()
+                .unwrap()
+        };
+
+        let wrong = run(SHA);
+        assert_eq!(wrong.code(), Some(COPY_MISMATCH));
+        assert!(!ran.exists(), "a program with another hash ran");
+        assert!(!copy.exists());
+        let leftovers = std::fs::read_dir(copy.parent().unwrap()).unwrap().count();
+        assert_eq!(leftovers, 0, "the rejected copy was left behind");
+
+        let approved = sha256_of(&phantom).unwrap();
+        assert!(run(&approved).success());
+        assert_eq!(std::fs::read_to_string(&ran).unwrap(), "--daemon\n");
+        assert_eq!(sha256_of(&copy).unwrap(), approved);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_sha256_is_64_lowercase_hex_digits() {
+        assert!(is_sha256(SHA));
+        assert!(!is_sha256(&SHA.to_uppercase()));
+        assert!(!is_sha256(&SHA[1..]));
+        assert!(!is_sha256(&format!("{}' ; id ; '", &SHA[..56])));
+    }
+
+    #[test]
+    fn a_left_over_daemon_is_stopped_only_once_android_is_gone() {
+        assert_eq!(stale_action(false, true, false), Stale::Keep);
+        assert_eq!(stale_action(true, false, false), Stale::Forget);
+        assert_eq!(stale_action(true, false, true), Stale::Forget);
+        assert_eq!(stale_action(true, true, false), Stale::Stop);
+        assert_eq!(stale_action(true, true, true), Stale::Keep);
     }
 
     #[test]
@@ -452,7 +658,8 @@ mod tests {
     #[ignore]
     fn live_phantom_daemon() {
         let phantom = std::env::var("ARCHDROID_PHANTOM").expect("ARCHDROID_PHANTOM");
-        start(Path::new(&phantom)).expect("daemon starts");
+        let phantom = Path::new(&phantom);
+        start(phantom, &sha256_of(phantom).unwrap()).expect("daemon starts");
         assert!(answers(&Session::current().socket()));
     }
 

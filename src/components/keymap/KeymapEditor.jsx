@@ -17,6 +17,7 @@ import {
   MousePointerClick,
   Move,
   Loader2,
+  ShieldAlert,
 } from "lucide-react";
 import { useFocusTrap } from "../../lib/useFocusTrap";
 import {
@@ -60,6 +61,10 @@ export default function KeymapEditor({ app, onClose, addToast }) {
   addToastRef.current = addToast;
   const modalRef = useFocusTrap(true, () => closeRef.current());
   const [confirmDiscard, setConfirmDiscard] = useState(false);
+  // Save & Apply has to start Phantom's daemon as root: what would run, from
+  // `keymap_apply`'s APPROVAL_REQUIRED answer, until the user decides.
+  const [daemonConsent, setDaemonConsent] = useState(null);
+  const consentButtonRef = useRef(null);
   const [shot, setShot] = useState(null); // { data_url, width, height }
   const [shotError, setShotError] = useState(null);
   // A screenshot is a data URL of several MB. Built once per capture: inside
@@ -291,19 +296,11 @@ export default function KeymapEditor({ app, onClose, addToast }) {
         return;
       }
       const applied = await invoke("keymap_apply", { package: app.package });
-      addToast?.(
-        applied?.status === "success"
-          ? {
-              type: "success",
-              title: "Keymap Active",
-              message: `${app.name}'s keymap is loaded. Press F8 in the game to capture keyboard and mouse, and F2 when you are done: Phantom holds the keyboard while it runs.`,
-            }
-          : {
-              type: "warning",
-              title: "Saved, Not Applied",
-              message: applied?.message || "Phantom did not load the keymap.",
-            }
-      );
+      if (applied?.code === "APPROVAL_REQUIRED" && applied.data) {
+        setDaemonConsent(JSON.parse(applied.data));
+        return;
+      }
+      reportApplied(applied);
     } catch (err) {
       addToast?.({
         type: "error",
@@ -315,8 +312,61 @@ export default function KeymapEditor({ app, onClose, addToast }) {
     }
   };
 
+  const reportApplied = (applied) =>
+    addToast?.(
+      applied?.status === "success"
+        ? {
+            type: "success",
+            title: "Keymap Active",
+            message: `${app.name}'s keymap is loaded. Press F8 in the game to capture keyboard and mouse, and F2 when you are done: Phantom holds the keyboard while it runs.`,
+          }
+        : {
+            type: "warning",
+            title: "Saved, Not Applied",
+            message: applied?.message || "Phantom did not load the keymap.",
+          }
+    );
+
+  const startDaemon = async () => {
+    const consent = daemonConsent;
+    setDaemonConsent(null);
+    setSaving(true);
+    try {
+      reportApplied(
+        await invoke("keymap_apply", {
+          package: app.package,
+          daemonSha256: consent.sha256,
+        })
+      );
+    } catch (err) {
+      addToast?.({
+        type: "error",
+        title: "Keymap Not Applied",
+        message: err?.message || String(err),
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const declineDaemon = () => {
+    setDaemonConsent(null);
+    addToast?.({
+      type: "warning",
+      title: "Saved, Not Applied",
+      message:
+        "The keymap is saved. Phantom's daemon was not started, so the keymap is not loaded.",
+    });
+  };
+
+  useEffect(() => {
+    if (daemonConsent) consentButtonRef.current?.focus();
+  }, [daemonConsent]);
+
   const close = () => {
-    if (dirty) setConfirmDiscard(true);
+    // Escape answers the open question first.
+    if (daemonConsent) declineDaemon();
+    else if (dirty) setConfirmDiscard(true);
     else onClose();
   };
   closeRef.current = close;
@@ -413,6 +463,73 @@ export default function KeymapEditor({ app, onClose, addToast }) {
             >
               Discard
             </button>
+          </div>
+        )}
+
+        {daemonConsent && (
+          <div
+            className="keymap-consent"
+            role="alertdialog"
+            aria-labelledby="keymap-consent-title"
+            aria-describedby="keymap-consent-desc"
+          >
+            <h3 id="keymap-consent-title" className="keymap-consent-title">
+              <ShieldAlert size={16} aria-hidden="true" />
+              Start Phantom&apos;s Daemon (Root Required)
+            </h3>
+            <p id="keymap-consent-desc">
+              The keymap is saved. Phantom&apos;s daemon, which turns your keys
+              into touches, is not running and has to run as root. ArchDroid
+              stops it when the engine stops or ArchDroid closes; F2 in the game
+              does too.
+            </p>
+            <dl className="confirm-modal-details">
+              <div className="confirm-detail-row">
+                <dt>Program</dt>
+                <dd>
+                  {daemonConsent.path}:{" "}
+                  {daemonConsent.verified
+                    ? `Phantom ${daemonConsent.version}, the release ArchDroid installs (SHA-256 checked).`
+                    : `not the Phantom ${daemonConsent.version} release ArchDroid installs. SHA-256 ${daemonConsent.sha256}. Approve only if you built or installed this Phantom yourself.`}
+                </dd>
+              </div>
+              <div className="confirm-detail-row">
+                <dt>Runs</dt>
+                <dd>
+                  {daemonConsent.copy} --daemon, as root: a copy only root can
+                  change, checked against this SHA-256 right before it starts.
+                </dd>
+              </div>
+              <div className="confirm-detail-row">
+                <dt>Access</dt>
+                <dd>
+                  Administrator rights through polkit, for this start only.
+                </dd>
+              </div>
+              <div className="confirm-detail-row">
+                <dt>Undo</dt>
+                <dd>Stop Phantom on the Keymapping page, or F2 in the game.</dd>
+              </div>
+            </dl>
+            <div className="keymap-consent-actions">
+              <button
+                type="button"
+                className="btn btn-outline btn-sm"
+                onClick={declineDaemon}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                ref={consentButtonRef}
+                className={`btn btn-sm ${daemonConsent.verified ? "btn-primary" : "btn-danger"}`}
+                onClick={startDaemon}
+              >
+                {daemonConsent.verified
+                  ? "Proceed & Authorize Root"
+                  : "Run This Phantom as Root"}
+              </button>
+            </div>
           </div>
         )}
 

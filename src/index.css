@@ -3613,6 +3613,35 @@ pre,
   flex: 1;
 }
 
+.keymap-consent {
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  background: rgba(245, 158, 11, 0.08);
+  font-size: 13px;
+}
+
+.keymap-consent-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 6px;
+  font-size: 14px;
+  color: var(--warning-primary);
+}
+
+.keymap-consent p {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.keymap-consent-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
 .keymap-editor-body {
   flex: 1;
   min-height: 0;

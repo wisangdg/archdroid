@@ -6,6 +6,8 @@
 use crate::error::AppError;
 use crate::{find_terminal_emulator, resolve_program, trusted_program, LAUNCH_GRACE};
 use crate::{keymap, off_main_thread, phantom_daemon, watch_launch, waydroid, CommandResult};
+use crate::{PHANTOM_BIN_SHA256, PHANTOM_VERSION};
+use std::path::Path;
 
 /// Phantom's installer puts its binaries in `$HOME/.local/bin`, which is often
 /// not on the PATH a desktop launcher gives the app, so look there as well.
@@ -39,15 +41,21 @@ pub(crate) async fn phantom_status() -> CommandResult {
     off_main_thread(phantom_state).await
 }
 
-/// Load a game's saved keymap into the running Phantom daemon.
+/// Load a game's saved keymap into the running Phantom daemon. When the daemon
+/// has to be started (as root), the first call answers `APPROVAL_REQUIRED`
+/// with what would run; the editor asks, and calls again with the SHA-256 the
+/// user approved as `daemon_sha256`.
 #[tauri::command]
-pub(crate) async fn keymap_apply(package: String) -> CommandResult {
-    off_main_thread(move || apply_keymap(&package)).await
+pub(crate) async fn keymap_apply(package: String, daemon_sha256: Option<String>) -> CommandResult {
+    off_main_thread(move || apply_keymap(&package, daemon_sha256.as_deref())).await
 }
 
 /// Load a game's saved keymap into Phantom, starting or restarting the daemon
-/// with the keymap's screen size when it needs to.
-fn apply_keymap(package: &str) -> CommandResult {
+/// with the keymap's screen size when it needs to and `approved` is set.
+fn apply_keymap(package: &str, approved: Option<&str>) -> CommandResult {
+    if approved.is_some_and(|sha256| !phantom_daemon::is_sha256(sha256)) {
+        return AppError::invalid_input("The approved Phantom SHA-256 is not a SHA-256.").into();
+    }
     let path = match keymap::profile_path(package) {
         Ok(path) if path.is_file() => path,
         Ok(_) => return AppError::command_failed("Save the keymap first.").into(),
@@ -78,7 +86,7 @@ fn apply_keymap(package: &str) -> CommandResult {
             let wrong_size = detail.contains("does not match daemon touchscreen");
             if !missing && !wrong_size {
                 Err(error)
-            } else {
+            } else if let Some(sha256) = approved {
                 let restarted = (|| {
                     if let Some((width, height)) = screen {
                         phantom_daemon::set_screen(width, height)?;
@@ -86,7 +94,7 @@ fn apply_keymap(package: &str) -> CommandResult {
                     if wrong_size {
                         phantom_daemon::stop(&phantom)?;
                     }
-                    phantom_daemon::start(&phantom)
+                    phantom_daemon::start(&phantom, sha256)
                 })();
                 if let Err(error) = restarted {
                     return AppError::command_failed(format!(
@@ -95,6 +103,8 @@ fn apply_keymap(package: &str) -> CommandResult {
                     .into();
                 }
                 load()
+            } else {
+                return daemon_consent(&phantom);
             }
         }
         ok => ok,
@@ -103,6 +113,36 @@ fn apply_keymap(package: &str) -> CommandResult {
         Ok(_) => CommandResult::with_message("Keymap loaded into Phantom."),
         Err(error) => AppError::command_failed(phantom_load_failure(&error.to_string())).into(),
     }
+}
+
+/// Starting the daemon runs Phantom as root, so the user approves it first.
+/// `data` tells the editor what would run: the program, its SHA-256, and
+/// whether that is the Phantom release ArchDroid installs and verified.
+fn daemon_consent(phantom: &Path) -> CommandResult {
+    let sha256 = match phantom_daemon::sha256_of(phantom) {
+        Ok(sha256) => sha256,
+        Err(error) => return error.into(),
+    };
+    let consent = serde_json::json!({
+        "path": phantom.to_string_lossy(),
+        "sha256": sha256,
+        "verified": sha256 == PHANTOM_BIN_SHA256,
+        "version": PHANTOM_VERSION,
+        "copy": phantom_daemon::DAEMON_COPY,
+    });
+    let mut result = CommandResult::from(AppError::approval_required(
+        "Starting the Phantom daemon needs administrator rights.",
+    ));
+    result.data = Some(consent.to_string());
+    result
+}
+
+/// At start-up, stop a daemon an earlier ArchDroid left holding the keyboard.
+pub(crate) fn release_stale_daemon() {
+    let engine_running = waydroid::Waydroid::detect()
+        .and_then(|waydroid| waydroid.status())
+        .is_ok_and(|status| waydroid::session_running(&status));
+    phantom_daemon::release_stale(find_phantom("phantom").as_deref(), engine_running);
 }
 
 /// What Save & Apply says when `phantom load` fails. `load` only talks to
@@ -258,7 +298,9 @@ mod tests {
     #[ignore]
     fn live_apply_keymap() {
         let package = std::env::var("ARCHDROID_KEYMAP_PKG").expect("ARCHDROID_KEYMAP_PKG");
-        let result = apply_keymap(&package);
+        let phantom = find_phantom("phantom").expect("phantom");
+        let sha256 = phantom_daemon::sha256_of(&phantom).unwrap();
+        let result = apply_keymap(&package, Some(&sha256));
         assert_eq!(result.status, "success", "{:?}", result.message);
     }
 
