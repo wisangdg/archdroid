@@ -6,7 +6,7 @@
 > di-commit bersih ke git,
 > dan lolos CI di remote GitHub Actions (`main` dan `pull_request`).
 > Dokumen ini adalah **gate rilis**, bukan roadmap fitur. Fitur di
-> [`docs/BACKEND-TODO.md`](docs/BACKEND-TODO.md) adalah backlog P1/P2 non-blocker.
+> [`BACKEND-TODO.md`](BACKEND-TODO.md) adalah backlog P1/P2 non-blocker.
 
 ## 1. Ringkasan status
 
@@ -987,7 +987,7 @@ P1 tidak boleh menunda P0, tetapi sebaiknya selesai sebelum rilis publik.
 
 Tidak menjadi blocker rilis; kerjakan setelah P0/P1 stabil.
 
-- [ ] Fitur lanjutan dari [`docs/BACKEND-TODO.md`](docs/BACKEND-TODO.md):
+- [ ] Fitur lanjutan dari [`BACKEND-TODO.md`](BACKEND-TODO.md):
   file transfer/backup, primitive input/keymapping, model mapping, makro,
   `--root`, `globalsetting`, `show-full-ui`, `intent`, `logcat`, dan
   `container freeze/unfreeze`.

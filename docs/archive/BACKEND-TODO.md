@@ -1,3 +1,9 @@
+> **Arsip, 25 Nov 2026.** Backlog awal backend (terakhir diubah 9 Nov). Yang
+> sudah ada dicentang di bawah; item yang masih terbuka dipindahkan ke bagian
+> Backlog di [`IMPROVEMENT-PLAN.md`](../../IMPROVEMENT-PLAN.md), satu-satunya
+> daftar pekerjaan yang hidup (D6). "CachyDroid" di bawah adalah nama lama
+> ArchDroid.
+
 # ArchDroid — Backend TODO
 
 **Berkas ini untuk kerja di `src-tauri/src/`.** Prioritas: `P0` (fondasi/blocker) → `P1` (nilai tinggi) → `P2` (pelengkap). Effort: `S` ≤ sehari · `M` beberapa hari · `L` ~1 minggu · `XL` butuh komponen Android baru.
@@ -249,11 +255,13 @@ Catatan penting: CachyDroid tidak memiliki surface render Waydroid, jadi injeksi
   `input_tap(x,y)`, `input_swipe(x1,y1,x2,y2,ms)`, `input_text(s)`, `input_key(keycode)` → `waydroid shell input`.
   *DoD:* test bahwa argv tidak bisa di-inject lewat `s`/angka.
 
-- [ ] **P1 M — Model mapping + simpan/muat**
+- [x] **P1 M — Model mapping + simpan/muat**
+  → **ditutup** oleh editor keymap 0.1.9, yang menyimpan profil Phantom per game; model mapping sendiri ditolak (IMPROVEMENT-PLAN §9).
   `MappingLayout { keys: Vec<MappingKey> }`, `MappingKey { id, kind: Point|Disc|Drag|Macros, x, y, radius, key, raw }` — meniru kelas joystick dan template keymap standar. Simpan JSON, dukung import/export.
   *DoD:* skema bertest; file contoh valid ditulis ke `docs/`.
 
-- [ ] **P1 L — Penangkapan input host + konversi koordinat**
+- [x] **P1 L — Penangkapan input host + konversi koordinat**
+  → **ditutup** oleh Phantom (daemon meng-grab keyboard dan mouse) dan touch mode; lihat IMPROVEMENT-PLAN §9.
   Overlay/hotkey global → hitung koordinat device dari posisi kursor, lalu injeksi (`input` atau `ydotool`/uinput).
   *DoD:* fungsi konversi koordinat punya test tabel (termasuk letterbox/aspect mismatch).
 
@@ -277,8 +285,10 @@ Catatan penting: CachyDroid tidak memiliki surface render Waydroid, jadi injeksi
   → **selesai**: `.github/workflows/ci.yml` (ubuntu-24.04: `npm ci` + `npm run build`, lalu `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`). Workflow belum pernah jalan (repo belum punya remote); CI baru hijau setelah file frontend yang belum ter-commit ikut masuk.
 - [x] **P1 S — Least privilege** di `capabilities/default.json` (tinjau scope `dialog`).
   → **selesai**: `dialog:default` → `dialog:allow-open`, karena frontend hanya memakai `open()` (`src/App.jsx`). `core:default` dipertahankan sebagai baseline Tauri; memangkasnya per-API hanya menambah noise tanpa model ancaman yang jelas.
-- [ ] **P2 S — Packaging** deb/AppImage: identifier `io.github.archdroid`, desktop entry, ikon.
-- [ ] **P2 S — First-run wizard** disambungkan ke `status_json()`.
+- [x] **P2 S — Packaging** deb/AppImage: identifier `io.github.archdroid`, desktop entry, ikon.
+  → **selesai**: `.pkg.tar.zst`, `.deb`, `.rpm`, dan AppImage dari CI sejak 0.1.4–0.1.6 (README, Supported Distributions).
+- [x] **P2 S — First-run wizard** disambungkan ke `status_json()`.
+  → **selesai**: layar Setup dengan Preflight Checks dan Initialize (README, First Run).
 
 ---
 
