@@ -12,6 +12,8 @@
 //! turning the option off brings it back. The preference lives on the host, so
 //! a fresh Android (after Factory Reset) gets it again at the next boot.
 
+use std::sync::{Mutex, MutexGuard};
+
 use serde::{Deserialize, Serialize};
 
 use crate::awake::{config_file, load, save};
@@ -112,8 +114,22 @@ fn preference_path() -> std::path::PathBuf {
     config_file("super-key.json")
 }
 
+/// `sync` and `set` both read, change and write super-key.json, so one waits
+/// for the other here. `set` also holds the single-flight slot; `sync` cannot:
+/// it runs once after boot and nothing retries it, so a `busy` answer while
+/// another task (an install, a backup) held the slot would leave the Super key
+/// on the assistant for the whole session.
+static PREFERENCE_FILE: Mutex<()> = Mutex::new(());
+
+fn lock_preference() -> MutexGuard<'static, ()> {
+    PREFERENCE_FILE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 /// Called once Android has booted: applies the stored choice.
 pub fn sync() -> Result<bool> {
+    let _file = lock_preference();
     let path = preference_path();
     let (blocked, preference) =
         apply(&mut Adb { active: false }, load(&path), &mut |preference| {
@@ -125,6 +141,7 @@ pub fn sync() -> Result<bool> {
 
 /// The Settings switch: changes Android, then remembers the choice.
 pub fn set(blocked: bool) -> Result<bool> {
+    let _file = lock_preference();
     let path = preference_path();
     let preference = Preference {
         blocked,

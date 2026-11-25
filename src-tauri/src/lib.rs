@@ -1424,6 +1424,8 @@ async fn keep_awake_set(enabled: bool) -> CommandResult {
 
 /// Applies the stored "Super key does not open Google Assistant" choice once
 /// Android has booted and answers with it (`data` is `"true"` or `"false"`).
+/// Not `run_exclusive`: a busy slot would skip it for the session; it waits
+/// for `super_key_set` inside `assistant` instead.
 #[tauri::command]
 async fn super_key_sync() -> CommandResult {
     off_main_thread(|| match assistant::sync() {
