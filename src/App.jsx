@@ -4,7 +4,10 @@ import { PackagePlus } from "lucide-react";
 
 import TopBar from "./components/TopBar";
 import PageHeading from "./components/PageHeading";
-import MyAppsView, { INITIAL_VIEW_STATE } from "./components/apps/MyAppsView";
+import MyAppsView, {
+  INITIAL_VIEW_STATE,
+  isSystemApp,
+} from "./components/apps/MyAppsView";
 import InstallToolsView from "./components/tools/InstallToolsView";
 import KeymapView from "./components/keymap/KeymapView";
 import SettingsView from "./components/settings/SettingsView";
@@ -441,7 +444,11 @@ export default function App() {
     setConfirmModal({
       isOpen: true,
       title: `Uninstall ${name}?`,
-      description: `Are you sure you want to uninstall ${name} (${pkg})? All application data, cache, and save files will be permanently removed from Waydroid.`,
+      // A preinstalled app stays in Android's read-only system image: the
+      // backend removes it for user 0 only (src-tauri/src/adb.rs).
+      description: isSystemApp(pkg)
+        ? `Are you sure you want to uninstall ${name} (${pkg})? Its data, cache, and save files will be deleted. An app that came with Android stays in its system image and is only removed for the Android user; Factory Reset or "adb shell cmd package install-existing ${pkg}" brings it back.`
+        : `Are you sure you want to uninstall ${name} (${pkg})? All application data, cache, and save files will be permanently removed from Waydroid.`,
       confirmText: "Uninstall App",
       confirmVariant: "danger",
       iconType: "trash",
