@@ -39,23 +39,28 @@ impl Default for Preference {
     }
 }
 
-fn preference_path() -> PathBuf {
+/// `name` in ArchDroid's config directory (`~/.config/io.github.archdroid`).
+pub(crate) fn config_file(name: &str) -> PathBuf {
     dirs::config_dir()
         .or_else(|| dirs::home_dir().map(|home| home.join(".config")))
         .unwrap_or_else(std::env::temp_dir)
         .join("io.github.archdroid")
-        .join("keep-awake.json")
+        .join(name)
 }
 
-/// A missing or unreadable file means the default: kept awake.
-fn load(path: &Path) -> Preference {
+fn preference_path() -> PathBuf {
+    config_file("keep-awake.json")
+}
+
+/// A missing or unreadable file means the default (here: kept awake).
+pub(crate) fn load<T: serde::de::DeserializeOwned + Default>(path: &Path) -> T {
     std::fs::read_to_string(path)
         .ok()
         .and_then(|text| serde_json::from_str(&text).ok())
         .unwrap_or_default()
 }
 
-fn save(path: &Path, preference: &Preference) -> io::Result<()> {
+pub(crate) fn save<T: Serialize>(path: &Path, preference: &T) -> io::Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
@@ -197,15 +202,15 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("archdroid-awake-{}", std::process::id()));
         let path = dir.join("keep-awake.json");
         let _ = std::fs::remove_dir_all(&dir);
-        assert_eq!(load(&path), Preference::default());
+        assert_eq!(load::<Preference>(&path), Preference::default());
         let stored = Preference {
             enabled: false,
             previous_ms: Some(120_000),
         };
         save(&path, &stored).unwrap();
-        assert_eq!(load(&path), stored);
+        assert_eq!(load::<Preference>(&path), stored);
         std::fs::write(&path, "not json").unwrap();
-        assert!(load(&path).enabled);
+        assert!(load::<Preference>(&path).enabled);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

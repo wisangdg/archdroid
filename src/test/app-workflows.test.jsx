@@ -617,6 +617,48 @@ describe("App state & workflow integration", () => {
     );
     expect(screen.getByText("adb is not installed")).toBeTruthy();
   });
+
+  it("says a system app is only removed for the Android user", async () => {
+    invoke.mockImplementation((cmd) => {
+      if (cmd === "waydroid_status") {
+        return Promise.resolve({
+          status: "success",
+          data: "Session: RUNNING\nContainer: RUNNING\n",
+        });
+      }
+      if (cmd === "get_waydroid_apps") {
+        return Promise.resolve([
+          { name: "F-Droid", package: "org.fdroid.fdroid", icon: null },
+          { name: "Clock", package: "com.android.deskclock", icon: null },
+        ]);
+      }
+      if (cmd === "waydroid_prop_get")
+        return Promise.resolve({ status: "success", data: "false" });
+      return Promise.resolve({ status: "not_installed" });
+    });
+
+    render(<App />);
+    const uninstall = (name) => {
+      fireEvent.click(
+        screen.getByRole("button", { name: new RegExp(`^${name},`) })
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Uninstall" }));
+      return screen.getByRole("dialog");
+    };
+    await screen.findByRole("button", { name: /^Clock,/ });
+
+    const system = uninstall("Clock");
+    expect(system.textContent).toMatch(/only removed for the Android user/);
+    expect(system.textContent).toMatch(
+      /cmd package install-existing com\.android\.deskclock/
+    );
+    expect(system.textContent).not.toMatch(/permanently removed/);
+    fireEvent.click(within(system).getByRole("button", { name: "Cancel" }));
+
+    const user = uninstall("F-Droid");
+    expect(user.textContent).toMatch(/permanently removed/);
+    expect(user.textContent).not.toMatch(/Android user/);
+  });
   const RUNNING = {
     status: "success",
     data: "Session: RUNNING\nContainer: RUNNING\n",
@@ -847,6 +889,24 @@ describe("App state & workflow integration", () => {
     await waitFor(() => {
       for (const probe of probes) expect(callsOf(probe)).toBe(1);
     });
+  }, 10000);
+
+  it("orders the list from the cached usage first, then asks Android once booted", async () => {
+    let booted = false;
+    bootingSession(() => booted);
+    render(<App />);
+    await screen.findByText("Android Booting…");
+    const usageCalls = () =>
+      invoke.mock.calls
+        .filter(([cmd]) => cmd === "app_usage")
+        .map(([, a]) => a);
+    expect(usageCalls()).toEqual([{ live: false }]);
+
+    booted = true;
+    await screen.findByText("Engine Running", {}, { timeout: 4000 });
+    await waitFor(() =>
+      expect(usageCalls()).toEqual([{ live: false }, { live: true }])
+    );
   }, 10000);
 
   it("probes the add-ons once from markers when the engine is stopped", async () => {
