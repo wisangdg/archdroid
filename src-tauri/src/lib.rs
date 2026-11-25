@@ -12,6 +12,7 @@ use tauri::AppHandle;
 mod adb;
 mod adblock;
 mod apk;
+mod assistant;
 mod awake;
 mod bundle;
 mod capabilities;
@@ -1421,6 +1422,28 @@ async fn keep_awake_set(enabled: bool) -> CommandResult {
     .await
 }
 
+/// Applies the stored "Super key does not open Google Assistant" choice once
+/// Android has booted and answers with it (`data` is `"true"` or `"false"`).
+/// Not `run_exclusive`: a busy slot would skip it for the session; it waits
+/// for `super_key_set` inside `assistant` instead.
+#[tauri::command]
+async fn super_key_sync() -> CommandResult {
+    off_main_thread(|| match assistant::sync() {
+        Ok(blocked) => CommandResult::with_data(blocked.to_string()),
+        Err(error) => error.into(),
+    })
+    .await
+}
+
+#[tauri::command]
+async fn super_key_set(blocked: bool) -> CommandResult {
+    run_exclusive("assistant key", move |_| match assistant::set(blocked) {
+        Ok(blocked) => CommandResult::with_data(blocked.to_string()),
+        Err(error) => error.into(),
+    })
+    .await
+}
+
 /// `"booted"` or `"booting"` while the session runs; polled by the UI after
 /// Start until Android reports `sys.boot_completed`.
 #[tauri::command]
@@ -1899,6 +1922,8 @@ pub fn run() {
             waydroid_density_set,
             keep_awake_sync,
             keep_awake_set,
+            super_key_sync,
+            super_key_set,
             #[cfg(feature = "dev-commands")]
             waydroid_getprop_all,
             #[cfg(feature = "dev-commands")]

@@ -33,6 +33,8 @@ export default function SettingsView({
   onToggleInvertColors,
   keepAwake = true,
   onToggleKeepAwake,
+  superKeyBlocked = true,
+  onToggleSuperKey,
   onPropSet,
   onOpenSharedFolder,
   onViewLogs,
@@ -161,6 +163,31 @@ export default function SettingsView({
             >
               <div className="toggle-switch-handle">
                 {keepAwake && <Check size={12} />}
+              </div>
+            </button>
+          </div>
+
+          {/* Super key and Google Assistant */}
+          <div className="config-toggle-item">
+            <div className="toggle-info">
+              <h4>Super Key Skips Google Assistant</h4>
+              <p>
+                Android opens Google Assistant (Gemini) when the Super key is
+                pressed alone, which pauses the game. On, Android has no
+                assistant; off brings back the one it had.
+              </p>
+            </div>
+            <button
+              type="button"
+              className={`toggle-switch ${superKeyBlocked ? "active" : ""}`}
+              onClick={onToggleSuperKey}
+              disabled={busy || !engineRunning}
+              role="switch"
+              aria-checked={superKeyBlocked}
+              aria-label="Super Key Skips Google Assistant"
+            >
+              <div className="toggle-switch-handle">
+                {superKeyBlocked && <Check size={12} />}
               </div>
             </button>
           </div>
