@@ -5,6 +5,7 @@
 | Device profile (versioned JSON, mode 0600, written atomically) | `~/.config/io.github.archdroid/profile.json` (a corrupt file is kept as `profile.json.corrupt`) |
 | Touch mode on/off | `~/.config/io.github.archdroid/touch-mode.json` |
 | Keep Android Awake on/off, and the screen timeout it replaced | `~/.config/io.github.archdroid/keep-awake.json` |
+| AdGuard DNS on/off, and the Private DNS settings it replaced | `~/.config/io.github.archdroid/private-dns.json` |
 | Touch mode udev rule | `/usr/lib/udev/rules.d/70-archdroid-touch.rules` (packages, removed with the package) or `/etc/udev/rules.d/70-archdroid-touch.rules` (Enable access button) |
 | Install markers (`gapps_installed`, `houdini_installed`, `multitouch_installed`) and installer cache | `~/.cache/archdroid/` (`$XDG_CACHE_HOME`) |
 | Application log (Settings → Application Log shows the exact path) | Tauri app log dir, e.g. `~/.local/share/io.github.wisangdg.archdroid/logs/` |
@@ -26,7 +27,7 @@ Markers are only a shortcut for when the container is offline:
 ## Clean uninstall
 1. In ArchDroid, Settings → Factory Reset (or `sudo waydroid session stop && sudo waydroid-container stop`).
 2. Remove the package: `pacman -R archdroid-bin` (Arch), `apt remove arch-droid` (Debian/Ubuntu), `dnf remove arch-droid` (Fedora). The `.deb`/`.rpm` package name is `arch-droid`, derived from the product name.
-3. Delete user data: `rm -rf ~/.config/io.github.archdroid ~/.cache/archdroid ~/.local/share/io.github.wisangdg.archdroid`.
+3. Delete user data: `rm -rf ~/.config/io.github.archdroid ~/.cache/archdroid ~/.local/share/io.github.wisangdg.archdroid`. If AdGuard DNS is on and you keep Android's data, turn it off first (Install Tools → Block Ads): Android keeps its Private DNS setting in its own data.
 4. If you used **Enable access**: `sudo rm /etc/udev/rules.d/70-archdroid-touch.rules && sudo udevadm control --reload-rules`.
 5. Optional, removes all Android data: `sudo rm -rf /var/lib/waydroid ~/.local/share/waydroid`.
 

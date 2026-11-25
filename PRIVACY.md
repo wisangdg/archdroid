@@ -8,13 +8,14 @@ ArchDroid keeps everything on your machine. This page lists what it stores local
 
 - **No tracking.** ArchDroid contains no tracking, analytics, or telemetry library and no unique user identifier.
 - **No data sent.** The app never sends host data, hardware details, your list of Android apps, or usage statistics to any server.
-- **Network connections.** ArchDroid makes only two kinds of outgoing connections:
+- **Network connections.** ArchDroid makes only two kinds of outgoing connections itself, and has Android make a third only if you turn it on:
   1. **Connectivity probe (automatic, sends no data).** To check whether the host is online, ArchDroid opens a TCP connection to `1.1.1.1:53` (Cloudflare) and, only if that fails, to `8.8.8.8:53` (Google), with a 1-second timeout. The connection is closed immediately without sending a single byte: no DNS query, identifier, or host data. Those providers and your firewall can still see that your IP address opened a connection. The probe runs when the Setup screen or Settings → Host Diagnostics opens, when you press Re-check, when you create a Diagnostic Bundle, and before init, the GApps/Houdini installers, or the Phantom install.
   2. **Downloads you ask for**, straight from the upstream sources:
      - The official Android images (SourceForge / Waydroid OTA server), downloaded by `waydroid init`.
      - Distro packages through your package manager (`pacman`, `apt`, `dnf`, `zypper`).
      - For GApps/Houdini: the commit-pinned `waydroid_script` from GitHub, its hash-pinned Python packages (PyPI), and the GApps (MindTheGapps, GitHub) or libhoudini (GitHub) archive, which ArchDroid downloads itself and accepts only with the pinned SHA-256.
      - The Phantom v1.1.0 release tarball from GitHub, checked against its pinned SHA-256.
+  3. **AdGuard DNS (off by default, only if you turn it on).** Install Tools → Block Ads → **Also block with AdGuard DNS** sets Android's Private DNS to `dns.adguard-dns.com` (AdGuard) through adb. From then on Android sends **every DNS query it makes** (the name of each server an app connects to) to AdGuard over DNS over TLS (port 853) instead of to your network's DNS, so AdGuard sees those names and your IP address, and its own privacy policy applies to them. ArchDroid itself sends nothing to AdGuard. The Block Ads hosts file is a separate switch and sends nothing. Turning AdGuard DNS off puts back the Private DNS setting Android had before.
 
 The app window itself cannot reach the network: its Content Security Policy only allows the app's own IPC.
 
@@ -29,6 +30,7 @@ The app window itself cannot reach the network: its Content Security Policy only
 | **Device profile** | `~/.config/io.github.archdroid/profile.json` | Saved display/device profile. Current release builds do not write this file; resolution and DPI are stored by Waydroid itself (`/var/lib/waydroid/waydroid.cfg`). |
 | **Touch mode setting** | `~/.config/io.github.archdroid/touch-mode.json` | Only whether touch mode is on, so it comes back on at the next launch. Touch mode never records clicks or cursor positions. |
 | **Keep Android Awake setting** | `~/.config/io.github.archdroid/keep-awake.json` | Whether Android is kept awake, and the screen timeout it had before, so turning the option off restores it. |
+| **AdGuard DNS setting** | `~/.config/io.github.archdroid/private-dns.json` | Written once you use the switch: whether AdGuard DNS is on, and Android's Private DNS settings from before, so turning it off restores them. No DNS queries are recorded. |
 | **Application log** | `~/.local/share/io.github.wisangdg.archdroid/logs/` (the exact path is shown in Settings → Application Log) | Commands the app ran, their result and duration, and the progress/error lines of installers. Never uploaded. |
 | **Diagnostic Bundle** | `~/Downloads/archdroid-diagnostics-*.txt` (or `~`), mode `0600` | Created **only** when you press Settings → Diagnostic Bundle → Create Bundle. Contains OS/kernel/Waydroid versions, host diagnostics, add-on status, and about the last 32 KiB of the application log and the Waydroid log. The application log records each command's arguments, so the bundle can contain **Android package names and APK file names** you installed, launched, or removed. Home paths and token/password values are masked; package and file names are not. Created without root and never uploaded; you decide whether to share it. |
 | **Saved APK** | `~/Downloads/<package>-<time>.apks` (or `~`), mode `0600` | Created **only** when you press **Save APK** for an app. Contains that app's APK files (base and splits) as installed in Android; no app data, settings, or logins. Never uploaded. |

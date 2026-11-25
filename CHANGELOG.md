@@ -7,6 +7,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Added
+- **AdGuard DNS in Block Ads** (Install Tools), for ads the built-in list misses: a second switch, **Also block with AdGuard DNS**, sets Android's Private DNS to `dns.adguard-dns.com` over adb, without root and without a Waydroid restart. **While it is on, every DNS query Android makes goes to AdGuard** instead of your network's DNS (see [PRIVACY.md](PRIVACY.md)). It is off by default and separate from the hosts-file switch, which still leaves DNS where it was. Turning it off puts back the Private DNS values Android had, and deletes them again if they were never set. The choice is kept in `~/.config/io.github.archdroid/private-dns.json` and applied once Android has booted, so a fresh Android after Factory Reset gets it too. A Private DNS server ArchDroid did not set is never replaced or deleted; the card names it instead.
+
 ### Fixed
 - **Dialogs took focus back on every refresh.** The keymap editor, confirmations and a finished terminal moved focus to their main button whenever the window re-rendered (every app-list refresh, every step of a drag), so the keymap's Size and Speed sliders could not be moved with the keyboard.
 - **Add-on cards showed answers from before Android had booted** (Block Ads stayed "On, unverified"). They are now checked once Android is ready, instead of at session start and again at launch, which also stops each check from retrying adb for 5 s during boot.
