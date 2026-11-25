@@ -25,6 +25,7 @@ use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use crate::elevate::sh_quote;
 use crate::error::{AppError, Result};
 use crate::resolve_program;
 use crate::waydroid::{self, Waydroid, TIMEOUT_LONG, TIMEOUT_QUICK};
@@ -464,6 +465,97 @@ pub fn set_screen_off_timeout(ms: u64) -> Result<()> {
         applied => Err(AppError::command_failed(format!(
             "Android did not apply screen timeout {ms} ms (now {applied:?})."
         ))),
+    }
+}
+
+/// A `Settings.Global` write: `Some` puts the value, `None` deletes the
+/// setting, so one that was never written is unset again.
+pub type GlobalWrite<'a> = (&'a str, Option<&'a str>);
+
+/// Keys are named by the backend, never by the UI, and go into the shell line
+/// unquoted; values are quoted.
+fn check_global_keys<'a>(keys: impl IntoIterator<Item = &'a str>) -> Result<()> {
+    for key in keys {
+        if key.is_empty() || !key.bytes().all(|b| b.is_ascii_lowercase() || b == b'_') {
+            return Err(AppError::invalid_input(format!(
+                "Not a settings key: {key:?}"
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// One shell line that prints `key=value` for each `Settings.Global` key.
+pub fn global_settings_line(keys: &[&str]) -> String {
+    format!(
+        "for k in {}; do echo \"$k=$(settings get global $k)\"; done",
+        keys.join(" ")
+    )
+}
+
+/// Parse [`global_settings_line`]'s output, in the order of `keys`. `None` is
+/// a setting never written (`settings get` prints `null`); an empty value
+/// reads the same, as Android treats both as unset.
+pub fn parse_global_settings(output: &str, keys: &[&str]) -> Result<Vec<Option<String>>> {
+    keys.iter()
+        .map(|key| {
+            let value = output
+                .lines()
+                .find_map(|line| line.strip_prefix(*key)?.strip_prefix('='))
+                .ok_or_else(|| {
+                    AppError::command_failed(format!(
+                        "Android did not report the setting {key}: {}",
+                        output.trim()
+                    ))
+                })?
+                .trim();
+            Ok((!value.is_empty() && value != "null").then(|| value.to_string()))
+        })
+        .collect()
+}
+
+/// The shell line for `writes`, in order, stopping at the first that fails.
+pub fn global_settings_write_line(writes: &[GlobalWrite]) -> String {
+    writes
+        .iter()
+        .map(|(key, value)| match value {
+            Some(value) => format!("settings put global {key} {}", sh_quote(value)),
+            None => format!("settings delete global {key}"),
+        })
+        .collect::<Vec<_>>()
+        .join(" && ")
+}
+
+/// `Settings.Global` values in one adb shell. `active` resumes a frozen
+/// container for the read, as an explicit user action may.
+pub fn global_settings(keys: &[&str], active: bool) -> Result<Vec<Option<String>>> {
+    check_global_keys(keys.iter().copied())?;
+    let line = global_settings_line(keys);
+    let output = if active {
+        shell_active(&[&line])?
+    } else {
+        shell(&[&line])?
+    };
+    parse_global_settings(&output, keys)
+}
+
+/// Apply `writes` in one adb shell and read them back.
+pub fn set_global_settings(writes: &[GlobalWrite]) -> Result<()> {
+    check_global_keys(writes.iter().map(|(key, _)| *key))?;
+    shell_active(&[&global_settings_write_line(writes)])?;
+    let keys: Vec<&str> = writes.iter().map(|(key, _)| *key).collect();
+    // Active for the same reason as in `set_screen_off_timeout`.
+    let applied = global_settings(&keys, true)?;
+    if applied
+        .iter()
+        .map(Option::as_deref)
+        .eq(writes.iter().map(|(_, value)| *value))
+    {
+        Ok(())
+    } else {
+        Err(AppError::command_failed(format!(
+            "Android did not apply {writes:?} (now {applied:?})."
+        )))
     }
 }
 
@@ -1102,6 +1194,49 @@ mod tests {
                 density: None,
             }
         );
+    }
+
+    #[test]
+    fn global_settings_read_null_as_unset_and_need_every_key() {
+        let keys = ["private_dns_mode", "private_dns_specifier"];
+        assert_eq!(
+            global_settings_line(&keys),
+            "for k in private_dns_mode private_dns_specifier; do echo \"$k=$(settings get global $k)\"; done"
+        );
+        let values = parse_global_settings(
+            "private_dns_mode=hostname\nprivate_dns_specifier=null\n",
+            &keys,
+        )
+        .unwrap();
+        assert_eq!(values, vec![Some("hostname".to_string()), None]);
+        let empty = parse_global_settings("private_dns_mode=\nprivate_dns_specifier= \n", &keys);
+        assert_eq!(empty.unwrap(), vec![None, None]);
+        let missing = parse_global_settings("private_dns_mode=off\n", &keys).unwrap_err();
+        assert_eq!(missing.code(), crate::error::code::COMMAND_FAILED);
+    }
+
+    #[test]
+    fn global_settings_writes_quote_values_and_delete_unset_ones() {
+        assert_eq!(
+            global_settings_write_line(&[
+                ("private_dns_specifier", Some("dns.adguard-dns.com")),
+                ("private_dns_mode", Some("hostname")),
+            ]),
+            "settings put global private_dns_specifier 'dns.adguard-dns.com' && settings put global private_dns_mode 'hostname'"
+        );
+        assert_eq!(
+            global_settings_write_line(&[
+                ("private_dns_mode", None),
+                ("private_dns_specifier", Some("it's; reboot")),
+            ]),
+            "settings delete global private_dns_mode && settings put global private_dns_specifier 'it'\\''s; reboot'"
+        );
+        // A key reaches the shell unquoted, so only fixed names pass.
+        for key in ["", "private_dns_mode; reboot", "Private"] {
+            let error = check_global_keys([key]).unwrap_err();
+            assert_eq!(error.code(), crate::error::code::INVALID_INPUT);
+        }
+        assert!(check_global_keys(["private_dns_mode"]).is_ok());
     }
 
     #[test]

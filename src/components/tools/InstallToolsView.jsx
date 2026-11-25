@@ -1,5 +1,6 @@
 import React from "react";
 import {
+  Check,
   Download,
   CheckCircle2,
   AlertTriangle,
@@ -21,12 +22,16 @@ export default function InstallToolsView({
   onInstallMultitouch,
   adblockStatus,
   onToggleAdblock,
+  adguardDns = { state: "unknown" },
   engineRunning,
   onRestartEngine,
 }) {
   // The overlay file decides on/off; "partial" and "pending" mean it is on
   // but Android has not loaded or confirmed it yet.
   const adblockOn = ["installed", "partial", "pending"].includes(adblockStatus);
+  // Android's Private DNS (useAdguardDns): set over adb, so only once Android
+  // has booted, and never over a server ArchDroid did not set.
+  const dnsOn = adguardDns.state === "on";
   const adblockBadge = {
     installed: ["badge-success", "On"],
     partial: ["badge-warning", "On after restart"],
@@ -251,6 +256,52 @@ export default function InstallToolsView({
                 reward stop loading too.
               </p>
             </div>
+          </div>
+
+          <div
+            className="config-toggle-item"
+            data-testid="adguard-dns"
+            data-dns-state={adguardDns.state}
+          >
+            <div className="toggle-info">
+              <h4 id="adguard-dns-title">Also block with AdGuard DNS</h4>
+              <p>
+                For ads the built-in list misses. Sets Android&apos;s Private
+                DNS to AdGuard DNS, which blocks ad servers by name. While it is
+                on, every DNS query Android makes (the name of each server an
+                app connects to) goes to AdGuard at{" "}
+                <code>dns.adguard-dns.com</code> instead of your network&apos;s
+                DNS. If your network blocks DNS over TLS (port 853), Android
+                cannot look up any name until you turn it off. Off by default;
+                no root, no restart.
+              </p>
+              {adguardDns.state === "foreign" && (
+                <p className="dns-note" role="status">
+                  {adguardDns.message}
+                </p>
+              )}
+              {!engineRunning && (
+                <p className="dns-note">Available once Android has booted.</p>
+              )}
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={dnsOn}
+              aria-labelledby="adguard-dns-title"
+              className={`toggle-switch ${dnsOn ? "active" : ""}`}
+              onClick={() => adguardDns.setEnabled(!dnsOn)}
+              disabled={
+                !engineRunning ||
+                installing ||
+                adguardDns.changing ||
+                adguardDns.state === "foreign"
+              }
+            >
+              <div className="toggle-switch-handle">
+                {dnsOn && <Check size={12} />}
+              </div>
+            </button>
           </div>
 
           <div className="tool-card-footer">

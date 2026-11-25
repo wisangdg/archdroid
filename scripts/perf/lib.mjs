@@ -145,6 +145,7 @@ window.__MOCK_INVOKE__ = async function (cmd, args) {
   if (cmd === "app_info") return { version: "13", updated: "2026-09-27 20:28:18", apk_bytes: 6636491 };
   if (cmd === "check_multitouch_status") return { status: "partial" };
   if (cmd === "keep_awake_sync" || cmd === "keep_awake_set") return { status: "success", data: String(args?.enabled ?? true) };
+  if (cmd === "private_dns_sync" || cmd === "private_dns_set") return { status: "success", data: args?.enabled ? "on" : "off" };
   if (cmd === "check_adblock_status") return { status: s.adblock ?? "not_installed" };
   if (cmd === "settings_values") { if (!s.online) throw { status: "error", code: "session_not_running", message: "session stopped" }; return { props: ["persist.waydroid.multi_windows", "persist.waydroid.invert_colors", "persist.waydroid.width", "persist.waydroid.height"].map((k) => PROPS[k] ?? ""), density: Number(window.__dpi || "280") }; }
   if (cmd === "waydroid_prop_get") return s.online ? { status: "success", data: PROPS[args.key] ?? "" } : { status: "error", message: "session stopped" };

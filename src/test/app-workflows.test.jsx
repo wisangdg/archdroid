@@ -833,6 +833,7 @@ describe("App state & workflow integration", () => {
       "check_houdini_status",
       "check_multitouch_status",
       "check_adblock_status",
+      "private_dns_sync",
     ];
     let booted = false;
     bootingSession(() => booted);

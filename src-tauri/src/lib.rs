@@ -26,6 +26,7 @@ mod logs;
 mod markers;
 mod platform;
 mod preflight;
+mod privatedns;
 mod scripts;
 mod stream;
 mod touchmode;
@@ -1421,6 +1422,33 @@ async fn keep_awake_set(enabled: bool) -> CommandResult {
     .await
 }
 
+/// `data` is `"on"`, `"off"` or `"foreign"`; `message` says which server a
+/// foreign Private DNS is.
+fn private_dns_result(result: error::Result<privatedns::State>) -> CommandResult {
+    match result {
+        Ok(state) => CommandResult {
+            message: state.message(),
+            ..CommandResult::with_data(state.name().to_string())
+        },
+        Err(error) => error.into(),
+    }
+}
+
+/// Applies the stored AdGuard DNS choice once Android has booted and answers
+/// with Android's Private DNS.
+#[tauri::command]
+async fn private_dns_sync() -> CommandResult {
+    off_main_thread(|| private_dns_result(privatedns::sync())).await
+}
+
+#[tauri::command]
+async fn private_dns_set(enabled: bool) -> CommandResult {
+    run_exclusive("AdGuard DNS", move |_| {
+        private_dns_result(privatedns::set(enabled))
+    })
+    .await
+}
+
 /// `"booted"` or `"booting"` while the session runs; polled by the UI after
 /// Start until Android reports `sys.boot_completed`.
 #[tauri::command]
@@ -1866,6 +1894,8 @@ pub fn run() {
             waydroid_density_set,
             keep_awake_sync,
             keep_awake_set,
+            private_dns_sync,
+            private_dns_set,
             #[cfg(feature = "dev-commands")]
             waydroid_getprop_all,
             #[cfg(feature = "dev-commands")]

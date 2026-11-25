@@ -13,6 +13,7 @@ and disagreeing labels came from.
 | APK install | idle → installing (file) → cancelling → idle | `useApkInstall` (`installingApk`, `cancellingInstall`) | `.install-progress` |
 | Pending launch | none → waiting for the engine → launched \| dropped | `pendingLaunch` in `src/App.jsx` | toasts ("Starting Engine First", "Android Is Booting") |
 | Touch mode | `unknown` `unsupported` `needs_access` `off` `on` `stopped` | `touchModeState()` in `src/hooks/useTouchMode.js` | badge in the Touch Mode panel |
+| AdGuard DNS (Block Ads card) | `unknown` `off` `on` `foreign` | `state` of `useAdguardDns` in `src/hooks/useAdguardDns.js`, from `private_dns_sync` / `private_dns_set` (`privatedns::State`) | `[data-testid="adguard-dns"][data-dns-state]` |
 | Setup | `missing` `uninitialized` `initializing` `ready` | `setupStage()` in `src/lib/setupStage.js` | setup title |
 
 ## Rules the machines enforce
@@ -31,6 +32,10 @@ and disagreeing labels came from.
   taken (`taskSlotBusy` in `App.jsx`), the installer, Factory Reset, View
   Logs and display-profile buttons are disabled; anything else that reaches
   the backend then gets `busy` and says so. A task refused with `busy` closes the terminal and says why.
+- **AdGuard DNS waits for Android.** It is `unknown` until Android has booted
+  and `private_dns_sync` answered; the switch is disabled until Android is
+  ready. `foreign` is a Private DNS server ArchDroid did not set: the backend
+  never replaces or deletes it, and the card names it with the switch disabled.
 - **Cancel is never lost.** The terminal and the APK install both cancel by
   task ID; an APK Cancel pressed before the ID arrives is sent when it does,
   and stops the rest of a multi-file drop.
