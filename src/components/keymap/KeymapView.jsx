@@ -36,6 +36,7 @@ export default function KeymapView({
   touchMode,
   onToggleTouchMode,
   onEnableTouchAccess,
+  addToast,
 }) {
   // The backend thread can stop on its own (mouse unplugged, compositor
   // gone); read the state whenever the page is opened, not only at start.
@@ -85,10 +86,17 @@ export default function KeymapView({
   }, [refreshDaemon]);
   const stopDaemon = async () => {
     setStopping(true);
+    const notStopped = (message) =>
+      addToast?.({
+        type: "error",
+        title: "Phantom Not Stopped",
+        message: `${message || "Phantom's daemon did not stop."} F2 in the game stops it too.`,
+      });
     try {
-      await invoke("phantom_daemon_stop");
+      const res = await invoke("phantom_daemon_stop");
+      if (res?.status !== "success") notStopped(res?.message);
     } catch (e) {
-      console.error("Phantom stop error:", e);
+      notStopped(e?.message || String(e));
     } finally {
       setStopping(false);
       refreshDaemon();

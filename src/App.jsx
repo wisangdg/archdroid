@@ -673,6 +673,7 @@ export default function App() {
                   touchMode={touchMode}
                   onToggleTouchMode={touchMode.setEnabled}
                   onEnableTouchAccess={handleEnableTouchAccess}
+                  addToast={addToast}
                 />
               )}
 
