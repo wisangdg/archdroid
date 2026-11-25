@@ -31,9 +31,14 @@ const WAYDROID_SCRIPT_REV: &str = "48dbfaf34a6ddbe78688c530f9ba1c26522aafb2";
 /// and `phantom-server.jar`, so installing needs no Rust toolchain, JDK or
 /// Android SDK. The SHA-256 is the one in the release's `SHA256SUMS`; v1.1.0 is
 /// the code ArchDroid pinned before (`1a6b7ed` only changed a packaging test).
-const PHANTOM_VERSION: &str = "1.1.0";
+pub(crate) const PHANTOM_VERSION: &str = "1.1.0";
 const PHANTOM_URL: &str = "https://github.com/oliviermugishak/phantom/releases/download/v1.1.0/phantom-v1.1.0-linux-x86_64.tar.gz";
 const PHANTOM_SHA256: &str = "dad785fa052468adac7578a32bb27ea772e6930577e24ab8ffb20dbe02f6a4e2";
+/// SHA-256 of `bin/phantom` inside that tarball: the program Save & Apply may
+/// start as root without a warning (`phantom_daemon`). Any other `phantom` is
+/// shown with its own hash and runs only if the user approves that hash.
+pub(crate) const PHANTOM_BIN_SHA256: &str =
+    "81af39d838f4021753ab9aba2c2256ee95461a0ddb37b00432ca381656ea604a";
 
 /// Python dependencies for the pinned `waydroid_script` revision. The lockfile
 /// is embedded at compile time, so the upstream checkout cannot replace it, and

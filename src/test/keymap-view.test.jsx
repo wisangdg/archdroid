@@ -35,6 +35,54 @@ describe("KeymapView Phantom status", () => {
     expect(launch().disabled).toBe(true);
   });
 
+  it("says when the Phantom daemon holds the keyboard and stops it", async () => {
+    let state = "running";
+    invoke.mockImplementation(async (cmd) => {
+      if (cmd === "phantom_status") return { status: "installed" };
+      if (cmd === "phantom_daemon_state")
+        return { status: "success", data: state };
+      if (cmd === "phantom_daemon_stop") {
+        state = "stopped";
+        return { status: "success" };
+      }
+      return {};
+    });
+    renderView();
+    const stop = await screen.findByRole("button", { name: /Stop Phantom/ });
+    stop.click();
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: /Stop Phantom/ })).toBeNull()
+    );
+    expect(invoke).toHaveBeenCalledWith("phantom_daemon_stop");
+  });
+
+  it("says so when Phantom does not stop", async () => {
+    invoke.mockImplementation(async (cmd) => {
+      if (cmd === "phantom_status") return { status: "installed" };
+      if (cmd === "phantom_daemon_state")
+        return { status: "success", data: "running" };
+      if (cmd === "phantom_daemon_stop")
+        return {
+          status: "error",
+          code: "COMMAND_FAILED",
+          message: "The Phantom daemon did not stop within 5 s.",
+        };
+      return {};
+    });
+    const addToast = vi.fn();
+    renderView({ addToast });
+    (await screen.findByRole("button", { name: /Stop Phantom/ })).click();
+    await waitFor(() =>
+      expect(addToast).toHaveBeenCalledWith({
+        type: "error",
+        title: "Phantom Not Stopped",
+        message:
+          "The Phantom daemon did not stop within 5 s. F2 in the game stops it too.",
+      })
+    );
+    expect(screen.getByRole("button", { name: /Stop Phantom/ })).toBeTruthy();
+  });
+
   it("offers Install instead of Launch when Phantom is missing", async () => {
     invoke.mockResolvedValue({ status: "not_installed" });
     renderView();

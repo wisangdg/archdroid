@@ -95,6 +95,88 @@ describe("keymap editor", () => {
     );
   });
 
+  describe("when Phantom's daemon has to be started", () => {
+    const SHA = "a".repeat(64);
+    const consent = (verified) => ({
+      status: "error",
+      code: "APPROVAL_REQUIRED",
+      message: "Starting the Phantom daemon needs administrator rights.",
+      data: JSON.stringify({
+        path: "/home/u/.local/bin/phantom",
+        sha256: SHA,
+        verified,
+        version: "1.1.0",
+        copy: "/usr/local/lib/archdroid/phantom",
+      }),
+    });
+
+    function setupConsent(verified) {
+      const applyCalls = [];
+      invoke.mockImplementation(async (cmd, args) => {
+        if (cmd === "keymap_load") return null;
+        if (cmd === "keymap_screenshot") return SHOT;
+        if (cmd === "keymap_save") return { status: "success", data: "/p" };
+        if (cmd === "keymap_apply") {
+          applyCalls.push(args);
+          return args.daemonSha256 ? { status: "success" } : consent(verified);
+        }
+        return undefined;
+      });
+      const addToast = vi.fn();
+      const onClose = vi.fn();
+      render(<KeymapEditor app={APP} addToast={addToast} onClose={onClose} />);
+      return { addToast, onClose, applyCalls };
+    }
+
+    async function saveAndApply() {
+      fireEvent.click(await canvas(), { clientX: 250, clientY: 100 });
+      fireEvent.keyDown(window, { code: "KeyJ", key: "j" });
+      fireEvent.click(screen.getByRole("button", { name: /Save & Apply/ }));
+      return screen.findByRole("alertdialog");
+    }
+
+    it("asks first, then starts the approved program", async () => {
+      const { addToast, applyCalls } = setupConsent(true);
+      const dialog = await saveAndApply();
+      expect(dialog.textContent).toContain("/home/u/.local/bin/phantom");
+      expect(dialog.textContent).toContain("the release ArchDroid installs");
+      expect(applyCalls).toEqual([{ package: "com.example.shooter" }]);
+
+      const proceed = within(dialog).getByRole("button", {
+        name: "Proceed & Authorize Root",
+      });
+      expect(document.activeElement).toBe(proceed);
+      fireEvent.click(proceed);
+      await waitFor(() =>
+        expect(addToast).toHaveBeenCalledWith(
+          expect.objectContaining({ title: "Keymap Active" })
+        )
+      );
+      expect(applyCalls[1]).toEqual({
+        package: "com.example.shooter",
+        daemonSha256: SHA,
+      });
+      expect(screen.queryByRole("alertdialog")).toBeNull();
+    });
+
+    it("names another Phantom by its hash, and Cancel starts nothing", async () => {
+      const { addToast, applyCalls, onClose } = setupConsent(false);
+      const dialog = await saveAndApply();
+      expect(dialog.textContent).toContain(`SHA-256 ${SHA}`);
+      expect(dialog.textContent).toContain("not the Phantom 1.1.0 release");
+      within(dialog).getByRole("button", { name: "Run This Phantom as Root" });
+
+      // Escape answers the question instead of closing the editor.
+      fireEvent.keyDown(window, { key: "Escape", code: "Escape" });
+      expect(screen.queryByRole("alertdialog")).toBeNull();
+      expect(onClose).not.toHaveBeenCalled();
+      expect(addToast).toHaveBeenCalledWith(
+        expect.objectContaining({ title: "Saved, Not Applied" })
+      );
+      expect(applyCalls).toHaveLength(1);
+    });
+  });
+
   it("does not save a button without a key", async () => {
     const { addToast } = setup();
     fireEvent.click(await canvas(), { clientX: 500, clientY: 250 });

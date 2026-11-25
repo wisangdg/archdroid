@@ -6,6 +6,7 @@ import {
   Download,
   CheckCircle2,
   AlertTriangle,
+  Square,
 } from "lucide-react";
 import TouchModePanel from "./TouchModePanel";
 
@@ -35,6 +36,7 @@ export default function KeymapView({
   touchMode,
   onToggleTouchMode,
   onEnableTouchAccess,
+  addToast,
 }) {
   // The backend thread can stop on its own (mouse unplugged, compositor
   // gone); read the state whenever the page is opened, not only at start.
@@ -64,6 +66,42 @@ export default function KeymapView({
   useEffect(() => {
     refreshPhantom();
   }, [refreshPhantom]);
+
+  // Save & Apply starts Phantom's daemon, which holds the keyboard while it
+  // runs: say so, and offer to release it when the game is done.
+  const [daemon, setDaemon] = useState(null);
+  const [stopping, setStopping] = useState(false);
+  const refreshDaemon = useCallback(async () => {
+    try {
+      const res = await invoke("phantom_daemon_state");
+      setDaemon(res?.data ?? null);
+    } catch (e) {
+      console.error("Phantom daemon state error:", e);
+    }
+  }, []);
+  useEffect(() => {
+    refreshDaemon();
+    window.addEventListener("focus", refreshDaemon);
+    return () => window.removeEventListener("focus", refreshDaemon);
+  }, [refreshDaemon]);
+  const stopDaemon = async () => {
+    setStopping(true);
+    const notStopped = (message) =>
+      addToast?.({
+        type: "error",
+        title: "Phantom Not Stopped",
+        message: `${message || "Phantom's daemon did not stop."} F2 in the game stops it too.`,
+      });
+    try {
+      const res = await invoke("phantom_daemon_stop");
+      if (res?.status !== "success") notStopped(res?.message);
+    } catch (e) {
+      notStopped(e?.message || String(e));
+    } finally {
+      setStopping(false);
+      refreshDaemon();
+    }
+  };
 
   const available = phantom === "installed" || phantom === "partial";
 
@@ -128,6 +166,25 @@ export default function KeymapView({
               </span>
             </button>
           </div>
+          {daemon === "running" && (
+            <div className="keymap-daemon" role="status">
+              <p>
+                <strong>Phantom is running.</strong> While it runs, everything
+                you type goes through it, which can repeat keys in other apps.
+                Stop it when you are done playing (F2 in the game does the
+                same).
+              </p>
+              <button
+                type="button"
+                className="btn btn-outline"
+                onClick={stopDaemon}
+                disabled={stopping}
+              >
+                <Square size={16} />
+                <span>{stopping ? "Stopping…" : "Stop Phantom"}</span>
+              </button>
+            </div>
+          )}
           {phantom === "not_installed" && (
             <p id="phantom-launch-hint" className="keymap-hint">
               Install Phantom first. It builds as your user (no root) and needs

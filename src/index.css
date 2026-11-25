@@ -1197,6 +1197,24 @@ body {
   color: var(--text-muted);
 }
 
+.keymap-daemon {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--warning-glow);
+  border-radius: 10px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.keymap-daemon p {
+  flex: 1 1 260px;
+  margin: 0;
+}
+
 /* Settings View */
 .settings-view-container {
   display: flex;
@@ -3593,6 +3611,35 @@ pre,
 
 .keymap-discard span {
   flex: 1;
+}
+
+.keymap-consent {
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  background: rgba(245, 158, 11, 0.08);
+  font-size: 13px;
+}
+
+.keymap-consent-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 6px;
+  font-size: 14px;
+  color: var(--warning-primary);
+}
+
+.keymap-consent p {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.keymap-consent-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
 }
 
 .keymap-editor-body {

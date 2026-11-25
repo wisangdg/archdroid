@@ -169,11 +169,13 @@ export function nodeKeys(node) {
 /**
  * What stops the keymap from working, in words for the editor. An unbound
  * button or a key used twice is a mistake; Phantom's hotkeys would never
- * reach the game.
+ * reach the game. Phantom gives mouse buttons to the keymap only in aim mode,
+ * which needs an Aim control; otherwise they move and tap its own cursor.
  */
 export function problems(nodes) {
   const found = [];
   const owners = new Map();
+  const hasAim = nodes.some((node) => node.type === "aim");
   for (const node of nodes) {
     for (const key of nodeKeys(node)) {
       if (!key) {
@@ -182,6 +184,12 @@ export function problems(nodes) {
       }
       if (RESERVED_KEYS.includes(key)) {
         found.push({ id: node.id, text: `${key} is a Phantom hotkey` });
+      }
+      if (!hasAim && MOUSE_BUTTONS.includes(key)) {
+        found.push({
+          id: node.id,
+          text: `${keyLabel(key)} only works with an Aim control: add one, or use a keyboard key`,
+        });
       }
       if (owners.has(key) && owners.get(key) !== node.id) {
         found.push({

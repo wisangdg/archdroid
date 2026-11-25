@@ -25,6 +25,8 @@ mod hostenv;
 mod keymap;
 mod logs;
 mod markers;
+mod phantom;
+mod phantom_daemon;
 mod platform;
 mod preflight;
 mod scripts;
@@ -281,7 +283,12 @@ async fn waydroid_stop() -> CommandResult {
     // spawn, so a refused stop looked like a stopped session.
     run_exclusive("session stop", |_| {
         match waydroid::Waydroid::detect().and_then(|waydroid| waydroid.session_stop()) {
-            Ok(_) => CommandResult::success(),
+            Ok(_) => {
+                // With Android gone Phantom has nothing to drive, but it would
+                // keep holding the keyboard: stop it with the engine.
+                phantom::stop_phantom_daemon();
+                CommandResult::success()
+            }
             Err(error) => error.into(),
         }
     })
@@ -1649,13 +1656,13 @@ async fn install_phantom(app: AppHandle) -> CommandResult {
 }
 
 /// How long a launched GUI gets to fail before it counts as started.
-const LAUNCH_GRACE: Duration = Duration::from_millis(1500);
+pub(crate) const LAUNCH_GRACE: Duration = Duration::from_millis(1500);
 
 /// `spawn()` succeeding only means exec worked; a GUI that cannot open its
 /// display exits within a moment. Report that exit instead of "Launched", and
 /// reap the child in the background once it is running so it never lingers as
 /// a zombie.
-fn watch_launch(
+pub(crate) fn watch_launch(
     mut child: std::process::Child,
     grace: Duration,
 ) -> Result<(), std::process::ExitStatus> {
@@ -1672,38 +1679,6 @@ fn watch_launch(
         let _ = child.wait();
     });
     Ok(())
-}
-
-/// Phantom's installer puts its binaries in `$HOME/.local/bin`, which is often
-/// not on the PATH a desktop launcher gives the app, so look there as well.
-fn find_phantom(name: &str) -> Option<std::path::PathBuf> {
-    resolve_program(name)
-        .or_else(|| trusted_program(name))
-        .or_else(|| {
-            dirs::home_dir()
-                .map(|h| h.join(".local/bin").join(name))
-                .filter(|p| p.is_file())
-        })
-}
-
-/// What the Keymapping page shows before anyone presses Launch: "installed"
-/// (GUI found), "partial" (only the terminal client) or "not_installed".
-fn phantom_state() -> CommandResult {
-    if find_phantom("phantom-gui").is_some() {
-        CommandResult::report("installed", "Phantom is installed.")
-    } else if find_phantom("phantom").is_some() {
-        CommandResult::report(
-            "partial",
-            "Only the Phantom terminal client is installed; Launch opens it in a terminal.",
-        )
-    } else {
-        CommandResult::report("not_installed", "Phantom is not installed.")
-    }
-}
-
-#[tauri::command]
-async fn phantom_status() -> CommandResult {
-    off_main_thread(phantom_state).await
 }
 
 /// Keymap editor backdrop: what Android shows right now (the open game).
@@ -1752,103 +1727,6 @@ async fn keymap_save(package: String, profile: serde_json::Value) -> CommandResu
     .await
 }
 
-/// Load a game's saved keymap into the running Phantom daemon.
-#[tauri::command]
-async fn keymap_apply(package: String) -> CommandResult {
-    off_main_thread(move || {
-        let path = match keymap::profile_path(&package) {
-            Ok(path) if path.is_file() => path,
-            Ok(_) => return AppError::command_failed("Save the keymap first.").into(),
-            Err(error) => return error.into(),
-        };
-        let Some(phantom) = find_phantom("phantom") else {
-            return AppError::not_found(
-                "phantom",
-                "Install Phantom from the Keymapping page first.",
-            )
-            .into();
-        };
-        let args = ["load".to_string(), path.to_string_lossy().into_owned()];
-        match waydroid::run_program(&phantom, &args, waydroid::TIMEOUT_QUICK, None) {
-            Ok(_) => CommandResult::with_message("Keymap loaded into Phantom."),
-            Err(error) => AppError::command_failed(format!(
-                "Phantom did not load the keymap: {error} The keymap is saved; it applies once the Phantom daemon runs (Keymapping → Launch) with the same screen size."
-            ))
-            .into(),
-        }
-    })
-    .await
-}
-
-#[tauri::command]
-async fn run_phantom() -> CommandResult {
-    off_main_thread(run_phantom_sync).await
-}
-
-fn run_phantom_sync() -> CommandResult {
-    // 1. Prefer phantom-gui directly without a terminal wrapper
-    if let Some(gui_path) = find_phantom("phantom-gui") {
-        return match crate::hostenv::host_command(&gui_path).spawn() {
-            Ok(child) => match watch_launch(child, LAUNCH_GRACE) {
-                Ok(()) => CommandResult::with_message("Launched Phantom Keymapper GUI."),
-                Err(status) => AppError::command_failed(format!(
-                    "Phantom GUI exited right after launch ({status}). Run phantom-gui from a terminal to see why."
-                ))
-                .into(),
-            },
-            Err(err) => {
-                AppError::from_spawn("phantom-gui", "Failed to spawn Phantom GUI.", err).into()
-            }
-        };
-    }
-
-    // 2. Fallback to CLI client inside terminal if phantom-gui is missing
-    if let Some(cli_path) = find_phantom("phantom") {
-        let term = match find_terminal_emulator() {
-            Some(term) => term,
-            None => {
-                return AppError::not_found(
-                    "terminal emulator",
-                    "No supported terminal emulator (alacritty, foot, kitty, konsole, gnome-terminal, xterm) found to run Phantom. Please install a terminal emulator.",
-                )
-                .into();
-            }
-        };
-
-        let cli_str = cli_path.to_string_lossy().to_string();
-        let result = match term.as_str() {
-            "gnome-terminal" => crate::hostenv::host_command("gnome-terminal")
-                .args(["--", "bash", "-c", &cli_str])
-                .spawn(),
-            _ => crate::hostenv::host_command(&term)
-                .args(["-e", "bash", "-c", &cli_str])
-                .spawn(),
-        };
-
-        return match result {
-            Ok(child) => match watch_launch(child, LAUNCH_GRACE) {
-                Ok(()) => {
-                    CommandResult::with_message(&format!("Launched Phantom Keymapper via {term}."))
-                }
-                Err(status) => AppError::command_failed(format!(
-                    "{term} exited right after launch ({status}) while starting Phantom."
-                ))
-                .into(),
-            },
-            Err(err) => {
-                AppError::from_spawn(&term, "Failed to spawn terminal emulator.", err).into()
-            }
-        };
-    }
-
-    // 3. Neither phantom-gui nor phantom is found
-    AppError::not_found(
-        "phantom-gui",
-        "Phantom Keymapper is not installed. Please click 'Install / Update Phantom' to compile and install it first.",
-    )
-    .into()
-}
-
 pub(crate) fn sanitize_appimage_env() {
     // If running inside an AppImage, AppRun unconditionally sets PYTHONHOME and
     // PYTHONPATH pointing into the bundle's AppDir. Because the bundle does not
@@ -1881,6 +1759,7 @@ pub fn run() {
             // Off the main thread: restoring grabs input devices and must not
             // delay the first window.
             thread::spawn(touchmode::restore);
+            thread::spawn(phantom::release_stale_daemon);
             Ok(())
         })
         .plugin(tauri_plugin_dialog::init())
@@ -1956,20 +1835,31 @@ pub fn run() {
             touch_mode_set,
             install_touch_mode_access,
             install_phantom,
-            phantom_status,
+            phantom::phantom_status,
             app_info,
             settings_values,
             app_usage,
             keymap_screenshot,
             keymap_load,
             keymap_save,
-            keymap_apply,
-            run_phantom,
+            phantom::keymap_apply,
+            phantom::run_phantom,
+            phantom::phantom_daemon_state,
+            phantom::phantom_daemon_stop,
             check_host_diagnostics,
             preview_package_install
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_, event| {
+            // A daemon started by Save & Apply must not keep holding the
+            // keyboard after ArchDroid is gone.
+            if let tauri::RunEvent::Exit = event {
+                if let Some(phantom) = phantom::find_phantom("phantom") {
+                    phantom_daemon::stop_if_started_here(&phantom);
+                }
+            }
+        });
 }
 
 #[cfg(test)]
