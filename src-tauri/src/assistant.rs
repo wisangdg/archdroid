@@ -20,7 +20,7 @@ use crate::error::Result;
 const ASSISTANT: &str = "assistant";
 const VOICE_INTERACTION: &str = "voice_interaction_service";
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Preference {
     pub blocked: bool,
@@ -80,13 +80,20 @@ fn setting_value(output: &str) -> Option<String> {
 }
 
 /// Bring Android in line with `preference`; returns whether the Super key is
-/// kept from the assistant and the preference to store.
-fn apply(secure: &mut dyn Secure, mut preference: Preference) -> Result<(bool, Preference)> {
+/// kept from the assistant and the preference to store. `remember` stores the
+/// assistant before it is cleared, so a write that fails halfway cannot lose
+/// what turning the option off has to bring back.
+fn apply(
+    secure: &mut dyn Secure,
+    mut preference: Preference,
+    remember: &mut dyn FnMut(&Preference) -> Result<()>,
+) -> Result<(bool, Preference)> {
     let current = secure.get(ASSISTANT)?;
     if preference.blocked {
         if current.is_some() {
             preference.previous_voice_interaction = secure.get(VOICE_INTERACTION)?;
             preference.previous_assistant = current;
+            remember(&preference)?;
             secure.put(ASSISTANT, "")?;
             secure.put(VOICE_INTERACTION, "")?;
         }
@@ -108,19 +115,24 @@ fn preference_path() -> std::path::PathBuf {
 /// Called once Android has booted: applies the stored choice.
 pub fn sync() -> Result<bool> {
     let path = preference_path();
-    let (blocked, preference) = apply(&mut Adb { active: false }, load(&path))?;
+    let (blocked, preference) =
+        apply(&mut Adb { active: false }, load(&path), &mut |preference| {
+            Ok(save(&path, preference)?)
+        })?;
     save(&path, &preference)?;
     Ok(blocked)
 }
 
-/// The Settings switch: changes Android first, then remembers the choice.
+/// The Settings switch: changes Android, then remembers the choice.
 pub fn set(blocked: bool) -> Result<bool> {
     let path = preference_path();
     let preference = Preference {
         blocked,
         ..load(&path)
     };
-    let (blocked, preference) = apply(&mut Adb { active: true }, preference)?;
+    let (blocked, preference) = apply(&mut Adb { active: true }, preference, &mut |preference| {
+        Ok(save(&path, preference)?)
+    })?;
     save(&path, &preference)?;
     Ok(blocked)
 }
@@ -137,6 +149,8 @@ mod tests {
     struct Fake {
         values: HashMap<String, String>,
         writes: usize,
+        /// The write (1 = the first) that fails, as adb can halfway through.
+        failing_write: Option<usize>,
     }
 
     impl Secure for Fake {
@@ -144,10 +158,17 @@ mod tests {
             Ok(self.values.get(key).and_then(|v| setting_value(v)))
         }
         fn put(&mut self, key: &str, value: &str) -> Result<()> {
+            if self.failing_write == Some(self.writes + 1) {
+                return Err(crate::error::AppError::command_failed("adb went away"));
+            }
             self.values.insert(key.to_string(), value.to_string());
             self.writes += 1;
             Ok(())
         }
+    }
+
+    fn forget(_: &Preference) -> Result<()> {
+        Ok(())
     }
 
     fn with_assistant() -> Fake {
@@ -160,7 +181,7 @@ mod tests {
     #[test]
     fn on_by_default_clears_the_assistant_and_remembers_it() {
         let mut android = with_assistant();
-        let (blocked, stored) = apply(&mut android, Preference::default()).unwrap();
+        let (blocked, stored) = apply(&mut android, Preference::default(), &mut forget).unwrap();
         assert!(blocked);
         assert_eq!(android.get(ASSISTANT).unwrap(), None);
         assert_eq!(android.get(VOICE_INTERACTION).unwrap(), None);
@@ -168,7 +189,7 @@ mod tests {
 
         // The next boot finds it cleared: nothing written, nothing forgotten.
         let writes = android.writes;
-        let (_, again) = apply(&mut android, stored).unwrap();
+        let (_, again) = apply(&mut android, stored, &mut forget).unwrap();
         assert_eq!(android.writes, writes);
         assert_eq!(again.previous_assistant.as_deref(), Some(GSA));
 
@@ -177,7 +198,7 @@ mod tests {
             blocked: false,
             ..again
         };
-        let (blocked, _) = apply(&mut android, off).unwrap();
+        let (blocked, _) = apply(&mut android, off, &mut forget).unwrap();
         assert!(!blocked);
         assert_eq!(android.get(ASSISTANT).unwrap().as_deref(), Some(GSA));
         assert_eq!(
@@ -194,8 +215,38 @@ mod tests {
             previous_assistant: Some("other/assistant".into()),
             previous_voice_interaction: None,
         };
-        apply(&mut android, off).unwrap();
+        apply(&mut android, off, &mut forget).unwrap();
         assert_eq!(android.writes, 0);
+    }
+
+    #[test]
+    fn a_clear_that_fails_halfway_still_remembers_the_assistant() {
+        let mut android = with_assistant();
+        android.failing_write = Some(2);
+        let mut stored = None;
+        let result = apply(&mut android, Preference::default(), &mut |preference| {
+            stored = Some(preference.clone());
+            Ok(())
+        });
+        assert!(result.is_err());
+        // The first write went through: Android has no assistant now.
+        assert_eq!(android.get(ASSISTANT).unwrap(), None);
+        let stored = stored.expect("the assistant is stored before it is cleared");
+        assert_eq!(stored.previous_assistant.as_deref(), Some(GSA));
+
+        // So off still brings it back.
+        android.failing_write = None;
+        let off = Preference {
+            blocked: false,
+            ..stored
+        };
+        let (blocked, _) = apply(&mut android, off, &mut forget).unwrap();
+        assert!(!blocked);
+        assert_eq!(android.get(ASSISTANT).unwrap().as_deref(), Some(GSA));
+        assert_eq!(
+            android.get(VOICE_INTERACTION).unwrap().as_deref(),
+            Some(GSA)
+        );
     }
 
     /// Live: `cargo test live_super_key -- --ignored` with Android booted.
